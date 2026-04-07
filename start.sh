@@ -21,13 +21,9 @@ fi
 echo "[1/3] 同步 Python 依赖..."
 uv sync
 
-# 安装可选依赖（FAISS）
-echo "      安装 faiss-cpu（可选，用于向量检索）..."
-uv sync --extra faiss 2>/dev/null || echo "      [SKIP] faiss-cpu 安装失败，将退化为 numpy 检索"
-
-# 确保 nas 目录存在
-echo "[2/3] 初始化 NAS 目录..."
-mkdir -p nas/{raw,processed,pre_annotated,labeling,labeled,checked,embeddings,vector_index,export}
+# 确保向量文件目录存在（数据在 PostgreSQL，只有向量文件在本地）
+echo "[2/3] 初始化本地目录..."
+mkdir -p nas/embeddings nas/vector_index
 
 # 启动服务
 echo "[3/3] 启动 Web 服务 → http://localhost:8000"

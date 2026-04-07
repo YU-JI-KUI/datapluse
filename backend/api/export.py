@@ -1,18 +1,15 @@
 """
 导出 API
-- 支持模板导出（自定义字段映射）
-- 支持默认导出
 - 格式：JSON / Excel / CSV
-- 导出文件写入临时目录，下载后可丢失（数据已在 DB）
+- 支持模板导出（自定义字段映射）和默认导出
+- 文件不落盘，直接 StreamingResponse 返回给前端
 """
 from __future__ import annotations
 
 import csv
 import io
 import json
-import tempfile
 from datetime import datetime
-from pathlib import Path
 from typing import Annotated, Optional
 from zoneinfo import ZoneInfo
 
