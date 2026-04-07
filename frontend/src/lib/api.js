@@ -25,7 +25,7 @@ api.interceptors.response.use(
   }
 )
 
-// ── Auth ──────────────────────────────────────────────────────────────────
+// ── Auth ───────────────────────────────────────────────────────────────────────
 
 export const authApi = {
   login: (username, password) => {
@@ -39,7 +39,7 @@ export const authApi = {
   me: () => api.get('/auth/me'),
 }
 
-// ── Data ──────────────────────────────────────────────────────────────────
+// ── Data ───────────────────────────────────────────────────────────────────────
 
 export const dataApi = {
   upload: (file) => {
@@ -53,7 +53,7 @@ export const dataApi = {
   deleteItem: (id) => api.delete(`/data/${id}`),
 }
 
-// ── Pipeline ──────────────────────────────────────────────────────────────
+// ── Pipeline ───────────────────────────────────────────────────────────────────
 
 export const pipelineApi = {
   run: () => api.post('/pipeline/run'),
@@ -62,7 +62,7 @@ export const pipelineApi = {
   steps: () => api.get('/pipeline/steps'),
 }
 
-// ── Annotation ────────────────────────────────────────────────────────────
+// ── Annotation ─────────────────────────────────────────────────────────────────
 
 export const annotationApi = {
   queue: (params) => api.get('/annotation/queue', { params }),
@@ -72,7 +72,7 @@ export const annotationApi = {
   labeled: (params) => api.get('/annotation/labeled', { params }),
 }
 
-// ── Config ────────────────────────────────────────────────────────────────
+// ── Config ─────────────────────────────────────────────────────────────────────
 
 export const configApi = {
   get: () => api.get('/config'),
@@ -81,12 +81,38 @@ export const configApi = {
   rebuildIndex: () => api.post('/config/rebuild-index'),
 }
 
-// ── Export ────────────────────────────────────────────────────────────────
+// ── Export ─────────────────────────────────────────────────────────────────────
 
 export const exportApi = {
-  create: (params) => api.post('/export/create', params),
-  list: () => api.get('/export/list'),
-  downloadUrl: (filename) => `/api/export/download/${filename}`,
+  // 下载导出文件（返回 blob，自动触发浏览器下载）
+  download: async (params) => {
+    const res = await api.post('/export/create', params, { responseType: 'blob' })
+    // 从响应头取文件名
+    const disposition = res.headers['content-disposition'] || ''
+    const match = disposition.match(/filename="?([^"]+)"?/)
+    const filename = match ? match[1] : `datapluse_export.${params.format || 'json'}`
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    return filename
+  },
+  // 获取可用源字段列表（用于模板编辑器）
+  fields: () => api.get('/export/fields'),
+}
+
+// ── Templates ──────────────────────────────────────────────────────────────────
+
+export const templateApi = {
+  list: () => api.get('/templates'),
+  get: (id) => api.get(`/templates/${id}`),
+  create: (data) => api.post('/templates', data),
+  update: (id, data) => api.put(`/templates/${id}`, data),
+  delete: (id) => api.delete(`/templates/${id}`),
 }
 
 export default api

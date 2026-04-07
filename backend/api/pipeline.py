@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from api.auth import UserInfo, get_current_user
 from pipeline.engine import STEPS, run_all, run_step
-from storage.nas import get_nas
+from storage.db import get_db
 
 router = APIRouter()
 CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
@@ -25,8 +25,8 @@ class RunStepRequest(BaseModel):
 @router.post("/run")
 async def run_pipeline(user: CurrentUser, background_tasks: BackgroundTasks):
     """触发全量 Pipeline（后台异步执行）"""
-    nas = get_nas()
-    current = nas.get_pipeline_status()
+    db = get_db()
+    current = db.get_pipeline_status()
     if current.get("status") == "running":
         raise HTTPException(409, "Pipeline 正在运行，请勿重复触发")
 
@@ -49,8 +49,8 @@ async def run_single_step(body: RunStepRequest, user: CurrentUser):
 @router.get("/status")
 async def get_status(user: CurrentUser):
     """查询 Pipeline 当前状态"""
-    nas = get_nas()
-    return {"success": True, "data": nas.get_pipeline_status()}
+    db = get_db()
+    return {"success": True, "data": db.get_pipeline_status()}
 
 
 @router.get("/steps")

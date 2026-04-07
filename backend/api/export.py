@@ -1,109 +1,112 @@
 """
 导出 API
-- 导出 checked 数据为 JSON / Excel
-- 下载导出文件
-- 查看已导出列表
+- 支持模板导出（自定义字段映射）
+- 支持默认导出
+- 格式：JSON / Excel / CSV
+- 导出文件写入临时目录，下载后可丢失（数据已在 DB）
 """
 from __future__ import annotations
 
+import csv
+import io
 import json
+import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 from zoneinfo import ZoneInfo
 
-_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
-
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from api.auth import UserInfo, get_current_user
-from storage.nas import get_nas
+from storage.db import AVAILABLE_FIELDS, DEFAULT_COLUMNS, get_db
 
 router = APIRouter()
 CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
 class ExportRequest(BaseModel):
-    format: str = "json"          # json | excel
-    status_filter: str = "checked"  # 默认只导出 checked 数据
+    format: str = "json"             # json | excel | csv
+    status_filter: str = "checked"
     include_conflicts: bool = False
+    template_id: Optional[str] = None   # 指定模板 ID，None 则用默认字段
+
+
+def _apply_columns(item: dict, columns: list[dict]) -> dict:
+    """按模板列定义将 item 转换为输出 dict"""
+    return {
+        col["target"]: item.get(col["source"])
+        for col in columns
+        if col.get("include", True)
+    }
 
 
 @router.post("/create")
 async def create_export(body: ExportRequest, user: CurrentUser):
-    """生成导出文件"""
-    nas = get_nas()
+    """生成导出文件并直接流式返回（文件不落盘，下载即走）"""
+    db = get_db()
 
-    # 获取待导出数据
-    items = nas.list_by_status(body.status_filter)
+    # 获取数据
+    items = db.list_by_status(body.status_filter)
     if not body.include_conflicts:
         items = [i for i in items if not i.get("conflict_flag")]
-
     if not items:
         raise HTTPException(404, f"没有可导出的数据（状态={body.status_filter}）")
 
-    # 导出字段（去除内部字段）
-    export_fields = [
-        "id", "text", "label", "status",
-        "model_pred", "model_score",
-        "annotator", "annotated_at",
-        "source_file", "created_at",
-    ]
-    clean_items = [
-        {k: item.get(k) for k in export_fields}
-        for item in items
-    ]
-
-    # 文件名
-    ts = datetime.now(_SHANGHAI_TZ).strftime("%Y%m%d_%H%M%S")
-    export_dir = nas.export_dir()
-
-    if body.format == "excel":
-        filename = f"datapluse_export_{ts}.xlsx"
-        filepath = export_dir / filename
-        df = pd.DataFrame(clean_items)
-        df.to_excel(str(filepath), index=False, engine="openpyxl")
+    # 确定列映射
+    if body.template_id:
+        tpl = db.get_template(body.template_id)
+        if not tpl:
+            raise HTTPException(404, f"模板不存在: {body.template_id}")
+        columns = tpl["columns"]
+        fmt = tpl["format"]
     else:
+        columns = DEFAULT_COLUMNS
+        fmt = body.format
+
+    clean_items = [_apply_columns(item, columns) for item in items]
+    ts = datetime.now(_SHANGHAI_TZ).strftime("%Y%m%d_%H%M%S")
+
+    if fmt == "excel":
+        buf = io.BytesIO()
+        pd.DataFrame(clean_items).to_excel(buf, index=False, engine="openpyxl")
+        buf.seek(0)
+        filename = f"datapluse_export_{ts}.xlsx"
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        return StreamingResponse(
+            buf,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    elif fmt == "csv":
+        buf = io.StringIO()
+        if clean_items:
+            writer = csv.DictWriter(buf, fieldnames=clean_items[0].keys())
+            writer.writeheader()
+            writer.writerows(clean_items)
+        filename = f"datapluse_export_{ts}.csv"
+        return StreamingResponse(
+            iter([buf.getvalue().encode("utf-8-sig")]),   # utf-8-sig for Excel compatibility
+            media_type="text/csv; charset=utf-8-sig",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    else:  # json
+        content = json.dumps(clean_items, ensure_ascii=False, indent=2).encode("utf-8")
         filename = f"datapluse_export_{ts}.json"
-        filepath = export_dir / filename
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(clean_items, f, ensure_ascii=False, indent=2)
-
-    size = filepath.stat().st_size
-    return {
-        "success": True,
-        "filename": filename,
-        "count": len(clean_items),
-        "size": size,
-        "format": body.format,
-    }
+        return StreamingResponse(
+            iter([content]),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
 
-@router.get("/list")
-async def list_exports(user: CurrentUser):
-    """列出所有已导出文件"""
-    nas = get_nas()
-    return {"success": True, "data": nas.list_exports()}
-
-
-@router.get("/download/{filename}")
-async def download(filename: str, user: CurrentUser):
-    """下载导出文件"""
-    nas = get_nas()
-    filepath = nas.export_dir() / filename
-    if not filepath.exists():
-        raise HTTPException(404, f"文件不存在: {filename}")
-
-    media_type = (
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        if filename.endswith(".xlsx")
-        else "application/json"
-    )
-    return FileResponse(
-        path=str(filepath),
-        filename=filename,
-        media_type=media_type,
-    )
+@router.get("/fields")
+async def get_available_fields(user: CurrentUser):
+    """返回所有可用的源字段（用于前端模板编辑器）"""
+    return {"success": True, "data": AVAILABLE_FIELDS}

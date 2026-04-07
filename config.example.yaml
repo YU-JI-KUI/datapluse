@@ -11,6 +11,15 @@ similarity:
 pipeline:
   batch_size: 32
 
+# PostgreSQL 数据库连接（主存储，替代 NAS 文件系统）
+database:
+  host: "your-pg-hostname"
+  port: 5432
+  name: "datapluse"
+  user: "your-username"
+  password: "CHANGE_ME_PASSWORD"
+
+# NAS 路径仅用于 Embedding 向量文件（FAISS 必须本地存储）
 storage:
   base_path: "./nas"
 

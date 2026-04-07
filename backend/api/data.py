@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 
 from api.auth import UserInfo, get_current_user
 from modules.processing import is_valid, parse_file
-from storage.nas import get_nas
+from storage.db import get_db
 
 router = APIRouter()
 CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
@@ -25,7 +25,7 @@ async def upload(
     file: UploadFile = File(...),
     text_column: str = Form("text"),
 ):
-    """上传数据文件，解析并写入 NAS raw 目录"""
+    """上传数据文件，解析并写入数据库 raw 状态"""
     content = await file.read()
     if not content:
         raise HTTPException(400, "文件为空")
@@ -35,14 +35,14 @@ async def upload(
     except Exception as e:
         raise HTTPException(400, f"文件解析失败: {e}")
 
-    nas = get_nas()
+    db = get_db()
     created = 0
     skipped = 0
     for text in texts:
         if not is_valid(text):
             skipped += 1
             continue
-        nas.create(text, source_file=file.filename or "")
+        db.create(text, source_file=file.filename or "")
         created += 1
 
     return {
@@ -62,22 +62,22 @@ async def list_data(
     page_size: int = Query(20, ge=1, le=200),
 ):
     """分页查询数据列表"""
-    nas = get_nas()
-    result = nas.list_all(status=status, page=page, page_size=page_size)
+    db = get_db()
+    result = db.list_all(status=status, page=page, page_size=page_size)
     return {"success": True, **result}
 
 
 @router.get("/stats")
 async def stats(user: CurrentUser):
     """各阶段数据量统计"""
-    nas = get_nas()
-    return {"success": True, "data": nas.stats()}
+    db = get_db()
+    return {"success": True, "data": db.stats()}
 
 
 @router.get("/{item_id}")
 async def get_item(item_id: str, user: CurrentUser):
-    nas = get_nas()
-    item = nas.get(item_id)
+    db = get_db()
+    item = db.get(item_id)
     if not item:
         raise HTTPException(404, f"未找到 id={item_id}")
     return {"success": True, "data": item}
@@ -85,8 +85,8 @@ async def get_item(item_id: str, user: CurrentUser):
 
 @router.delete("/{item_id}")
 async def delete_item(item_id: str, user: CurrentUser):
-    nas = get_nas()
-    ok = nas.delete(item_id)
+    db = get_db()
+    ok = db.delete(item_id)
     if not ok:
         raise HTTPException(404, f"未找到 id={item_id}")
     return {"success": True, "message": f"已删除 {item_id}"}

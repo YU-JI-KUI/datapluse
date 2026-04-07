@@ -4,6 +4,76 @@
 
 ---
 
+## v0.4.0 — 2026-04-07
+
+### 存储层迁移：NAS → PostgreSQL
+
+**核心重构**
+- 新增 `backend/storage/models.py`：SQLAlchemy ORM 模型定义
+  - `DataItem`：核心数据表（36 字段），支持 JSONB 存储冲突详情
+  - `ExportTemplate`：导出模板表，columns/filters 均为 JSONB
+  - `PipelineStatus`：单行流水线状态表（id=1）
+- 新增 `backend/storage/db.py`：`DBManager` 替代原 `NASManager`
+  - SQLAlchemy 2.0 sync 引擎 + psycopg2 driver
+  - `_session()` contextmanager：自动 commit/rollback/close
+  - 同等接口：`create` / `get` / `update` / `delete` / `list_all` / `list_by_status` / `stats`
+  - 新增模板 CRUD：`list_templates` / `get_template` / `create_template` / `update_template` / `delete_template`
+  - 导出的常量：`AVAILABLE_FIELDS`（供 API 和前端模板编辑器使用）
+- 新增 `backend/storage/embeddings.py`：向量文件的最小化存储（保留文件系统，FAISS 向量无法入库）
+- **删除** `backend/storage/nas.py`：完整 NAS 实现，已被 PostgreSQL 替代，清理死码
+- `init_db(db_url)` 在 FastAPI startup 事件中调用，自动执行 `Base.metadata.create_all`（表不存在则建表）
+
+**依赖更新**
+- `pyproject.toml` 新增：`sqlalchemy>=2.0.0`、`psycopg2-binary>=2.9.0`
+- 安装命令：`uv add sqlalchemy psycopg2-binary`
+
+**配置更新**
+- `config.example.yaml` 新增 `database` 节点：`host` / `port` / `name` / `user` / `password`
+- `config/settings.py` 新增 `db_url` 属性（拼接 postgresql:// 连接串）
+- `storage.base_path` 保留，仅用于 Embedding 向量文件
+
+**所有 API / 模块更新**（`get_nas()` → `get_db()`）
+- `api/data.py`、`api/annotation.py`、`api/pipeline.py`
+- `pipeline/engine.py`：移除 `begin_bulk()` / `end_bulk()`（DB 事务天然支持批量）
+- `modules/conflict.py`：向量操作改用 `get_emb()`
+- `modules/vector.py`：所有 `get_nas()` 改为 `get_emb()`，`rebuild_index()` 用 `emb.load_all()`
+
+---
+
+### 导出模板系统
+
+**后端**
+- 新增 `backend/api/templates.py`：`/api/templates` 完整 CRUD 路由
+  - Pydantic 模型：`ColumnDef(source, target, include)`、`TemplateFilters`、`TemplateCreate`、`TemplateUpdate`
+- `api/export.py` 重写：
+  - 废弃磁盘临时文件，改用 `StreamingResponse`（直接流式传输给浏览器）
+  - 支持可选 `template_id` 参数，按模板列映射导出字段
+  - `_apply_columns(item, columns)` 应用字段映射
+  - 三种格式：`json`（带缩进）、`excel`（openpyxl）、`csv`（utf-8-sig，Excel 友好）
+  - `/export/fields` 端点返回可用源字段列表
+
+**前端**
+- `frontend/src/pages/Export.jsx` 全面重写：
+  - Tab 布局：「导出数据」和「模板管理」两个子页面
+  - `ExportPanel`：模板下拉选择器、格式选择器（默认不用模板则按选择格式导出）、模板预览（蓝色等宽字体 `{{source}} → target` 徽章）
+  - `TemplatesPanel`：模板列表（格式图标 + 字段列预览）+ 编辑 / 删除操作
+  - `TemplateEditor`：名称 / 描述 / 格式 + 字段映射表（勾选框 + `{{source}}` 展示 + 可编辑 target 名称 + 删除行 + 新增字段下拉）
+  - 占位符语法：`{{text}}`、`{{label}}` 等以蓝色等宽字体展示，与实际字段名区分
+- `frontend/src/lib/api.js` 新增 `templateApi`（list / get / create / update / delete）
+
+---
+
+### 侧边栏折叠 / 展开
+
+- `frontend/src/components/Layout.jsx`：
+  - `useState` 初始值从 `localStorage.getItem('sidebar-collapsed')` 读取，刷新后保持状态
+  - 展开：`w-60`，折叠：`w-16`，`transition-all duration-200` 平滑过渡
+  - 折叠时导航项 `justify-center`，只显示图标，`title` 属性作为 tooltip
+  - 底部切换按钮：折叠显示 `ChevronRight`，展开显示 `ChevronLeft` + "收起" 文字
+  - 折叠时用户头像保留，用户名和登出按钮隐藏，鼠标悬停显示用户名 tooltip
+
+---
+
 ## v0.3.0 — 2026-04-07
 
 ### 性能 / 体验优化

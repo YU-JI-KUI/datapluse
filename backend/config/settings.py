@@ -66,7 +66,16 @@ class Settings:
     def pipeline_batch_size(self) -> int:
         return self._data["pipeline"]["batch_size"]
 
-    # ── storage ────────────────────────────────────────────────────────────
+    # ── database ───────────────────────────────────────────────────────────
+    @property
+    def db_url(self) -> str:
+        db = self._data["database"]
+        return (
+            f"postgresql://{db['user']}:{db['password']}"
+            f"@{db['host']}:{db['port']}/{db['name']}"
+        )
+
+    # ── storage（仅用于 Embedding 向量文件）──────────────────────────────────
     @property
     def storage_base_path(self) -> Path:
         raw = self._data["storage"]["base_path"]

@@ -13,19 +13,13 @@ from typing import Any
 from config.settings import get_settings
 from modules.embedding import cosine_similarity, embed_text
 from modules.vector import get_index
-from storage.nas import get_nas
+from storage.db import get_db
+from storage.embeddings import get_emb
 
 
-# ── 标注冲突检测 ───────────────────────────────────────────────────────────
+# ── 标注冲突检测 ───────────────────────────────────────────────────────────────
 
-def detect_label_conflicts(
-    items: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """
-    检测标注冲突：同一 text 被多人赋予不同 label
-    返回冲突条目列表（含 conflict_detail）
-    """
-    # 按文本分组
+def detect_label_conflicts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     text_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in items:
         if item.get("label") is not None:
@@ -51,26 +45,22 @@ def detect_label_conflicts(
     return conflicts
 
 
-# ── 语义冲突检测 ───────────────────────────────────────────────────────────
+# ── 语义冲突检测 ───────────────────────────────────────────────────────────────
 
 def detect_semantic_conflicts(
     items: list[dict[str, Any]],
     threshold_high: float | None = None,
 ) -> list[dict[str, Any]]:
-    """
-    语义冲突：pair (A, B) 相似度 > threshold 但 label 不同
-    返回冲突条目列表
-    """
     settings = get_settings()
     threshold = threshold_high or settings.similarity_threshold_high
     topk = settings.similarity_topk
 
-    # 只对已标注数据做检测
     labeled = [i for i in items if i.get("label") is not None]
     if len(labeled) < 2:
         return []
 
-    nas = get_nas()
+    db = get_db()
+    emb = get_emb()
     index = get_index()
 
     conflict_ids: set[str] = set()
@@ -80,28 +70,24 @@ def detect_semantic_conflicts(
         item_id = item["id"]
         item_label = item["label"]
 
-        # 获取或计算 embedding
-        vec = nas.load_embedding(item_id)
+        vec = emb.load(item_id)
         if vec is None:
             vec = embed_text(item["text"])
-            nas.save_embedding(item_id, vec)
+            emb.save(item_id, vec)
 
         if index.size == 0:
             continue
 
-        # 检索最相似的邻居
         neighbors = index.search(vec, topk=topk + 1)
         for neighbor_id, sim in neighbors:
             if neighbor_id == item_id or sim < threshold:
                 continue
-            # 查找邻居标签
-            neighbor = nas.get(neighbor_id)
+            neighbor = db.get(neighbor_id)
             if neighbor is None or neighbor.get("label") is None:
                 continue
             if neighbor["label"] == item_label:
-                continue  # 相似且同标签：正常
+                continue
 
-            # 语义冲突！
             pair_key = tuple(sorted([item_id, neighbor_id]))
             if pair_key in conflict_ids:
                 continue
@@ -124,40 +110,26 @@ def detect_semantic_conflicts(
     return conflicts
 
 
-# ── Pipeline 步骤：check ───────────────────────────────────────────────────
+# ── Pipeline 步骤：check ───────────────────────────────────────────────────────
 
 async def run_conflict_detection() -> dict[str, Any]:
-    """
-    对所有 labeled 数据运行全量冲突检测
-    标记冲突条目，清洁条目状态 → checked
-    返回统计信息
-    """
-    nas = get_nas()
-    settings = get_settings()
-
-    # 获取全部已标注数据
-    labeled_items = nas.list_by_status("labeled")
+    db = get_db()
+    labeled_items = db.list_by_status("labeled")
     if not labeled_items:
-        return {"label_conflicts": 0, "semantic_conflicts": 0, "clean": 0}
+        return {"label_conflicts": 0, "semantic_conflicts": 0, "clean": 0, "total": 0}
 
-    # 1. 标注冲突
     label_conflicts = detect_label_conflicts(labeled_items)
     label_conflict_ids = {i["id"] for i in label_conflicts}
-
-    # 2. 语义冲突
     semantic_conflicts = detect_semantic_conflicts(labeled_items)
     semantic_conflict_ids = {i["id"] for i in semantic_conflicts}
 
-    all_conflict_ids = label_conflict_ids | semantic_conflict_ids
-
-    # 更新状态
     clean_count = 0
     for item in labeled_items:
         item = dict(item)
         if item["id"] in label_conflict_ids:
             item["conflict_flag"] = True
             item["conflict_type"] = "label_conflict"
-            item["status"] = "labeled"  # 保留在 labeled，等人工处理
+            item["status"] = "labeled"
         elif item["id"] in semantic_conflict_ids:
             item["conflict_flag"] = True
             item["conflict_type"] = "semantic_conflict"
@@ -168,7 +140,7 @@ async def run_conflict_detection() -> dict[str, Any]:
             item["conflict_detail"] = None
             item["status"] = "checked"
             clean_count += 1
-        nas.update(item)
+        db.update(item)
 
     return {
         "label_conflicts": len(label_conflict_ids),
@@ -179,7 +151,6 @@ async def run_conflict_detection() -> dict[str, Any]:
 
 
 def get_conflict_items() -> list[dict[str, Any]]:
-    """返回所有有冲突标记的条目"""
-    nas = get_nas()
-    all_items = nas.list_by_status("labeled")
+    db = get_db()
+    all_items = db.list_by_status("labeled")
     return [i for i in all_items if i.get("conflict_flag")]
