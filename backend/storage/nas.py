@@ -272,7 +272,10 @@ class NASManager:
         items = []
         for path in self.dir(status).glob("*.json"):
             try:
-                items.append(self._read(path))
+                item = self._read(path)
+                # 只包含合法的数据条目，跳过模板/示例等非条目 JSON
+                if isinstance(item, dict) and "id" in item:
+                    items.append(item)
             except Exception:
                 pass
         return items

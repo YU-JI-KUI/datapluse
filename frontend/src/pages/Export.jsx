@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { exportApi, dataApi } from '@/lib/api'
+import api from '@/lib/api'
 import { formatDate, formatBytes } from '@/lib/utils'
 
 export default function Export() {
@@ -45,14 +46,21 @@ export default function Export() {
     }
   }
 
-  function handleDownload(filename) {
-    const url = exportApi.downloadUrl(filename)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+  async function handleDownload(filename) {
+    try {
+      // 用 axios 下载以携带 Authorization header，否则裸 <a href> 会 401
+      const res = await api.get(`/export/download/${filename}`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error('下载失败')
+    }
   }
 
   return (
