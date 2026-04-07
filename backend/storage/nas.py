@@ -120,7 +120,7 @@ class NASManager:
         tmp = p.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self._index, f, ensure_ascii=False)
-        tmp.rename(p)
+        tmp.replace(p)
 
     def _rebuild_from_files(self) -> None:
         """首次初始化或 manifest 损坏时，全量扫描所有 JSON 文件重建索引"""
