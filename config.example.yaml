@@ -1,0 +1,33 @@
+embedding:
+  model_path: "./models/bge-base-zh"
+  batch_size: 64
+  use_mock: true          # true=随机向量(开发用), false=加载真实模型
+
+similarity:
+  threshold_high: 0.9    # 高风险语义冲突阈值
+  threshold_mid: 0.8     # 中风险阈值
+  topk: 5                # 语义检索返回 top-k
+
+pipeline:
+  batch_size: 32
+
+storage:
+  base_path: "./nas"
+
+auth:
+  admin_username: "admin"
+  admin_password: "CHANGE_ME_PASSWORD"
+  secret_key: "CHANGE_ME_SECRET_KEY"
+
+llm:
+  api_url: "http://internal-llm-platform/api/v1/chat"
+  model_name: "internal-llm"
+  use_mock: true          # true=随机预标注, false=调用真实 LLM 平台
+  timeout: 30
+
+labels:
+  - "寿险意图"
+  - "拒识"
+  - "健康险意图"
+  - "财险意图"
+  - "其他意图"

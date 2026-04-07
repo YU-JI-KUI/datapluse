@@ -1,0 +1,44 @@
+[project]
+name = "datapluse"
+version = "1.0.0"
+description = "AI 数据飞轮 - 数据生产平台"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi==0.110.0",
+    "uvicorn[standard]==0.27.1",
+    "python-multipart==0.0.9",
+    "pyyaml==6.0.1",
+    "pandas==2.2.1",
+    "openpyxl==3.1.2",
+    "numpy==1.26.4",
+    "httpx==0.27.0",
+    "python-jose[cryptography]==3.3.0",
+    "passlib[bcrypt]==1.7.4",
+    "aiofiles==23.2.1",
+]
+
+[project.optional-dependencies]
+# 向量检索（推荐安装）
+faiss = ["faiss-cpu==1.7.4"]
+# 本地 Embedding 模型（use_mock=false 时需要）
+embedding = [
+    "sentence-transformers==2.5.1",
+    "torch>=2.2.0",
+]
+# 全量安装
+all = [
+    "faiss-cpu==1.7.4",
+    "sentence-transformers==2.5.1",
+    "torch>=2.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+# 开发时从项目根运行 `uv run python backend/main.py`
+package = false
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]
