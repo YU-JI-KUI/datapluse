@@ -8,6 +8,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Annotated, Optional
+from zoneinfo import ZoneInfo
+
+_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _now() -> str:
+    return datetime.now(_SHANGHAI_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -69,7 +76,7 @@ async def submit(body: AnnotationSubmit, user: CurrentUser):
 
     item["label"] = body.label
     item["annotator"] = body.annotator or user.username
-    item["annotated_at"] = datetime.utcnow().isoformat()
+    item["annotated_at"] = _now()
     item["status"] = "labeled"
     nas.update(item)
 
@@ -89,7 +96,7 @@ async def batch_submit(body: BatchAnnotationSubmit, user: CurrentUser):
             continue
         item["label"] = ann.label
         item["annotator"] = ann.annotator or user.username
-        item["annotated_at"] = datetime.utcnow().isoformat()
+        item["annotated_at"] = _now()
         item["status"] = "labeled"
         nas.update(item)
         results.append(item["id"])

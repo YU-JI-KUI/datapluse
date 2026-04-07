@@ -10,6 +10,9 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
+from zoneinfo import ZoneInfo
+
+_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -55,7 +58,7 @@ async def create_export(body: ExportRequest, user: CurrentUser):
     ]
 
     # 文件名
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(_SHANGHAI_TZ).strftime("%Y%m%d_%H%M%S")
     export_dir = nas.export_dir()
 
     if body.format == "excel":

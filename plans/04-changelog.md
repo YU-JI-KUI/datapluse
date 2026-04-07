@@ -4,6 +4,42 @@
 
 ---
 
+## v0.3.0 — 2026-04-07
+
+### 性能 / 体验优化
+
+**NAS 内存索引（manifest）**
+- `backend/storage/nas.py` 全量重写：启动时加载 `nas/_manifest.json` 到内存 `_index`
+- `list_all()` / `stats()` 直接读内存，彻底告别 O(N) 磁盘扫描，支持 6 万+ 条数据
+- `update()` / `create()` / `delete()` 同步更新内存后原子写 manifest
+- Pipeline 批量写引入 `begin_bulk()` / `end_bulk()`，批量结束后统一 flush，避免每条写一次 manifest
+- `get()` 优先用索引定位 status 目录，避免遍历所有目录
+
+**Pipeline 进度增强**
+- `backend/pipeline/engine.py` 每个步骤新增 `detail` 字典：`processed`（已处理数）、`total`（总数）、`skipped`（跳过数）、`pct`（百分比字符串）、`speed_per_sec`（每秒条数）、`eta_seconds`（预计剩余秒数）、`elapsed_seconds`（已用时）
+- 前端 Pipeline 状态接口可直接展示进度条 + 速度 + ETA
+
+**上海时区统一**
+- 引入 `ZoneInfo("Asia/Shanghai")`，统一 `_now()` 函数：`datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d %H:%M:%S")`
+- 替换所有 `datetime.utcnow().isoformat()` 调用：`nas.py`、`engine.py`、`api/annotation.py`、`api/export.py`
+- JWT `exp` 字段保持 UTC（符合 RFC 7519 标准，不受影响）
+- 新增 `tzdata>=2023.3` 依赖（Windows 无内置时区数据库时需要）
+
+**前端 DataManagement 白屏修复**
+- `statusFilter` 初始值从 `''` 改为 `'all'`：Radix UI Select 不接受空字符串 value，会导致白屏
+- `STATUS_OPTIONS` 第一项 value 改为 `'all'`，API 调用时将 `'all'` 转换为 `undefined`（不传 status 参数）
+- 数据列表 query 增加 `staleTime: 0`：从其他页面返回时立即重新拉取，不再看到 30 秒内的旧缓存
+- 删除未使用的 `Search`、`FileText` lucide-react 导入
+
+**nas/ 目录结构入库**
+- 更新 `.gitignore`：从 `nas/` 整体忽略改为按子目录精确控制
+  - `raw/*.json` 忽略，但 `raw/example_*.json` 用 `!` 反向保留
+  - 其余运行时产物（embeddings、export、_manifest.json 等）仍忽略
+- 新增 `nas/README.md`：数据格式文档、目录说明、如何准备数据
+- 新增 `nas/raw/example_insurance_queries.json`：15 条保险意图识别示例，可直接上传体验
+
+---
+
 ## v0.2.0 — 2026-04-07
 
 ### 变更

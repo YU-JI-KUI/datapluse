@@ -10,9 +10,21 @@ build/
 .ruff_cache/
 .mypy_cache/
 
-# ── 运行时数据（不入库）
-# NAS 数据目录，由 start.sh 自动创建
-nas/
+# ── NAS 运行时数据（不入库，保留目录结构和示例）
+# 实际数据文件按子目录精确忽略
+nas/raw/*.json
+!nas/raw/example_*.json
+nas/processed/*.json
+nas/pre_annotated/*.json
+nas/labeling/*.json
+nas/labeled/*.json
+nas/checked/*.json
+nas/embeddings/*.npy
+nas/vector_index/
+nas/export/
+nas/_manifest.json
+nas/_manifest.tmp
+nas/pipeline_status.json
 *.log
 
 # ── 敏感配置（不入库）

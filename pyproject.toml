@@ -1,6 +1,6 @@
 [project]
 name = "datapluse"
-version = "1.0.0"
+version = "0.3.0"
 description = "AI 数据飞轮 - 数据生产平台"
 requires-python = ">=3.10"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
     "python-jose[cryptography]==3.3.0",
     "passlib[bcrypt]==1.7.4",
     "aiofiles==23.2.1",
+    "tzdata>=2023.3",
 ]
 
 [project.optional-dependencies]

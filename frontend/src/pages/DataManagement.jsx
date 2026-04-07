@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Upload, Trash2, RefreshCw, Search, FileText } from 'lucide-react'
+import { Upload, Trash2, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,7 +12,7 @@ import { dataApi } from '@/lib/api'
 import { formatDate, getStatusLabel, getStatusColor } from '@/lib/utils'
 
 const STATUS_OPTIONS = [
-  { value: '', label: '全部状态' },
+  { value: 'all', label: '全部状态' },
   { value: 'raw', label: '原始' },
   { value: 'processed', label: '已清洗' },
   { value: 'pre_annotated', label: '已预标注' },
@@ -23,14 +23,15 @@ const STATUS_OPTIONS = [
 export default function DataManagement() {
   const qc = useQueryClient()
   const fileRef = useRef()
-  const [statusFilter, setStatusFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(1)
   const [uploading, setUploading] = useState(false)
   const [dragging, setDragging] = useState(false)
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['data-list', statusFilter, page],
-    queryFn: () => dataApi.list({ status: statusFilter || undefined, page, page_size: 20 }),
+    queryFn: () => dataApi.list({ status: statusFilter === 'all' ? undefined : statusFilter, page, page_size: 20 }),
+    staleTime: 0,
   })
 
   const result = data?.data || {}
