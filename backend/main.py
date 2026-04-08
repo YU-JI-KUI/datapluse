@@ -6,7 +6,9 @@ FastAPI 同时托管 API 和前端静态文件。
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncIterator
 
 import uvicorn
 from fastapi import FastAPI
@@ -16,7 +18,18 @@ from fastapi.staticfiles import StaticFiles
 
 from api import annotation, auth, config, data, datasets, export, pipeline, templates, users
 from config.settings import get_settings
-from storage.db import init_db
+from storage.db import get_db, init_db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # ── startup ──────────────────────────────────────────────────────────────
+    settings = get_settings()
+    init_db(settings.db_url)
+    get_db().seed_defaults()   # 幂等写入预置角色和默认数据集
+    yield
+    # ── shutdown（预留清理逻辑）──────────────────────────────────────────────
+
 
 app = FastAPI(
     title="Datapulse API",
@@ -24,6 +37,7 @@ app = FastAPI(
     version="0.5.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -33,16 +47,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    settings = get_settings()
-    init_db(settings.db_url)
-
-    from storage.db import get_db
-    db = get_db()
-    db.seed_defaults()   # 幂等写入预置角色和默认数据集
 
 
 # ── API 路由 ───────────────────────────────────────────────────────────────────

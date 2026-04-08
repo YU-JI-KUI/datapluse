@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -30,7 +30,16 @@ from storage.models import (
 )
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
-_pwd_ctx  = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def _hash_password(password: str) -> str:
+    """bcrypt 哈希（直接调用 bcrypt 库，兼容 3.x / 4.x，无 passlib 依赖）"""
+    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    """校验明文密码与 bcrypt 哈希是否匹配"""
+    return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
 def _now() -> str:
@@ -369,7 +378,7 @@ class DBManager:
             user = User(
                 username=username,
                 email=email,
-                password_hash=_pwd_ctx.hash(password),
+                password_hash=_hash_password(password),
                 is_active=True,
                 created_at=ts,
                 updated_at=ts,
@@ -394,7 +403,7 @@ class DBManager:
             if "is_active" in data:
                 u.is_active = data["is_active"]
             if "password" in data and data["password"]:
-                u.password_hash = _pwd_ctx.hash(data["password"])
+                u.password_hash = _hash_password(data["password"])
             if "role_names" in data:
                 s.query(UserRole).filter(UserRole.user_id == user_id).delete()
                 for rname in data["role_names"]:
@@ -420,7 +429,7 @@ class DBManager:
         return True
 
     def verify_password(self, plain: str, hashed: str) -> bool:
-        return _pwd_ctx.verify(plain, hashed)
+        return _verify_password(plain, hashed)
 
     def _get_user_roles(self, s: Session, user_id: int) -> list[str]:
         rows = (

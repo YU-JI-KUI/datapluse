@@ -9,17 +9,15 @@
 import sys
 
 try:
-    from passlib.context import CryptContext
+    import bcrypt
 except ImportError:
-    print("错误：passlib 未安装。")
-    print("请运行：pip install passlib bcrypt -i http://maven.paic.com.cn/repository/pypi/simple --trusted-host maven.paic.com.cn")
+    print("错误：bcrypt 未安装。")
+    print("请运行：pip install bcrypt -i http://maven.paic.com.cn/repository/pypi/simple --trusted-host maven.paic.com.cn")
     sys.exit(1)
-
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
-    return _pwd_ctx.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def main() -> None:
@@ -35,10 +33,10 @@ def main() -> None:
     hashed = hash_password(password)
 
     print()
-    print(f"bcrypt 哈希：")
+    print("bcrypt 哈希：")
     print(hashed)
     print()
-    print("手动插入 SQL 示例（替换 your_username 和上方哈希）：")
+    print("手动插入 SQL 示例（替换 your_username）：")
     print(f"""
 INSERT INTO users (username, password_hash, is_active, created_at, updated_at)
 VALUES ('your_username', '{hashed}', TRUE, NOW()::text, NOW()::text);

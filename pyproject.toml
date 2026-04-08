@@ -1,6 +1,6 @@
 [project]
 name = "datapulse"
-version = "0.4.0"
+version = "0.5.0"
 description = "AI 数据飞轮 - 数据生产平台"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,7 +13,7 @@ dependencies = [
     "numpy==1.26.4",
     "httpx==0.27.0",
     "python-jose[cryptography]==3.3.0",
-    "passlib[bcrypt]==1.7.4",
+    "bcrypt>=3.2.0",
     "aiofiles==23.2.1",
     "tzdata>=2023.3",
     "sqlalchemy>=2.0.0",
