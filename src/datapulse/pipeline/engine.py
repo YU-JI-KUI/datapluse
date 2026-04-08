@@ -73,7 +73,7 @@ def _make_detail(processed: int, total: int, skipped: int, start_time: float) ->
 async def step_process(dataset_id: int) -> dict[str, Any]:
     """清洗 raw → processed"""
     db = get_db()
-    raw_items = db.list_by_status(dataset_id, "raw")
+    raw_items = db.list_data_by_status(dataset_id, "raw")
     total = len(raw_items)
     if total == 0:
         return {"step": "process", "processed": 0, "skipped": 0}
@@ -85,7 +85,7 @@ async def step_process(dataset_id: int) -> dict[str, Any]:
         if not updated:
             skipped += 1
             continue
-        db.update(updated)
+        db.update_data(updated)
         _set_status(
             dataset_id,
             "running",
@@ -101,7 +101,7 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
     """预标注 processed → pre_annotated"""
     db = get_db()
     cfg = db.get_dataset_config(dataset_id)
-    items = db.list_by_status(dataset_id, "processed")
+    items = db.list_data_by_status(dataset_id, "processed")
     total = len(items)
     if total == 0:
         return {"step": "pre_annotate", "annotated": 0, "skipped": 0}
@@ -114,7 +114,7 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
         batch = items[i : i + batch_size]
         results = await pre_annotate_batch(batch, cfg)
         for r in results:
-            db.update(r)
+            db.update_data(r)
         annotated += len(results)
         _set_status(
             dataset_id,
@@ -133,7 +133,7 @@ async def step_embed(dataset_id: int) -> dict[str, Any]:
     cfg = db.get_dataset_config(dataset_id)
     items = []
     for s in ["pre_annotated", "labeled", "checked"]:
-        items.extend(db.list_by_status(dataset_id, s))
+        items.extend(db.list_data_by_status(dataset_id, s))
 
     total = len(items)
     if total == 0:

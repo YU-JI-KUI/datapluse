@@ -200,8 +200,8 @@ export default function Users() {
   async function load() {
     try {
       const [ur, rr] = await Promise.all([userApi.list(), userApi.listRoles()])
-      setUsers(ur.data || [])
-      setRoles(rr.data || [])
+      setUsers(ur.data?.data || [])
+      setRoles(rr.data?.data || [])
     } catch {
       toast.error('加载用户列表失败')
     } finally {

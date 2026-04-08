@@ -46,7 +46,7 @@ async def get_queue(
 ):
     """获取待标注队列：pre_annotated 状态的数据"""
     db = get_db()
-    result = db.list_all(dataset_id, status="pre_annotated", page=page, page_size=page_size)
+    result = db.list_all_data(dataset_id, status="pre_annotated", page=page, page_size=page_size)
     return {"success": True, **result}
 
 
@@ -57,12 +57,12 @@ async def get_next(
 ):
     """获取下一条待标注数据（翻牌式），同时将状态改为 labeling"""
     db = get_db()
-    items = db.list_by_status(dataset_id, "pre_annotated")
+    items = db.list_data_by_status(dataset_id, "pre_annotated")
     if not items:
         return {"success": True, "data": None, "message": "标注队列已清空"}
     item = min(items, key=lambda x: x.get("created_at", ""))
     item["status"] = "labeling"
-    db.update(item)
+    db.update_data(item)
     return {"success": True, "data": item}
 
 
@@ -70,14 +70,14 @@ async def get_next(
 async def submit(body: AnnotationSubmit, user: CurrentUser):
     """提交单条标注结果"""
     db = get_db()
-    item = db.get(body.item_id)
+    item = db.get_data(body.item_id)
     if not item:
         raise HTTPException(404, f"未找到 id={body.item_id}")
     item["label"] = body.label
     item["annotator"] = body.annotator or user.username
     item["annotated_at"] = _now()
     item["status"] = "labeled"
-    db.update(item)
+    db.update_data(item)
     return {"success": True, "data": item}
 
 
@@ -88,7 +88,7 @@ async def batch_submit(body: BatchAnnotationSubmit, user: CurrentUser):
     results = []
     errors = []
     for ann in body.annotations:
-        item = db.get(ann.item_id)
+        item = db.get_data(ann.item_id)
         if not item:
             errors.append({"item_id": ann.item_id, "error": "不存在"})
             continue
@@ -96,7 +96,7 @@ async def batch_submit(body: BatchAnnotationSubmit, user: CurrentUser):
         item["annotator"] = ann.annotator or user.username
         item["annotated_at"] = _now()
         item["status"] = "labeled"
-        db.update(item)
+        db.update_data(item)
         results.append(item["id"])
     return {"success": True, "updated": results, "errors": errors}
 
@@ -110,5 +110,5 @@ async def get_labeled(
 ):
     """获取已标注数据列表"""
     db = get_db()
-    result = db.list_all(dataset_id, status="labeled", page=page, page_size=page_size)
+    result = db.list_all_data(dataset_id, status="labeled", page=page, page_size=page_size)
     return {"success": True, **result}

@@ -37,16 +37,19 @@ export default function Annotation() {
     refetchInterval: 5000,
   })
 
-  const labeled = labeledData?.data?.data?.items || []
-  const totalLabeled = labeledData?.data?.data?.total || 0
-  const queueTotal = queueData?.data?.data?.total || 0
+  const labeledResult = labeledData?.data?.data ?? labeledData?.data ?? {}
+  const queueResult = queueData?.data?.data ?? queueData?.data ?? {}
+  const labeled = labeledResult.items || []
+  const totalLabeled = labeledResult.total || 0
+  const queueTotal = queueResult.total || 0
 
   async function fetchNext() {
     setLoadingNext(true)
     try {
       const res = await annotationApi.next()
-      setCurrentItem(res.data.data)
-      if (!res.data.data) toast.info('标注队列已清空！')
+      const item = res.data?.data ?? res.data
+      setCurrentItem(item)
+      if (!item) toast.info('标注队列已清空！')
     } catch (err) {
       toast.error('获取失败')
     } finally {

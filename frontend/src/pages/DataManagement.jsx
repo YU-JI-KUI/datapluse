@@ -34,7 +34,8 @@ export default function DataManagement() {
     staleTime: 0,
   })
 
-  const result = data?.data?.data || {}
+  const responseBody = data?.data
+  const result = responseBody?.data ?? responseBody ?? {}
   const items = result.items || []
   const total = result.total || 0
   const totalPages = Math.ceil(total / 20)

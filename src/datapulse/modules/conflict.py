@@ -83,7 +83,7 @@ def detect_semantic_conflicts(
         for neighbor_id, sim in neighbors:
             if neighbor_id == item_id or sim < threshold:
                 continue
-            neighbor = db.get(neighbor_id)
+            neighbor = db.get_data(neighbor_id)
             if neighbor is None or neighbor.get("label") is None:
                 continue
             if neighbor["label"] == item_label:
@@ -117,7 +117,7 @@ def detect_semantic_conflicts(
 async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
     db = get_db()
     cfg = db.get_dataset_config(dataset_id)
-    labeled_items = db.list_by_status(dataset_id, "labeled")
+    labeled_items = db.list_data_by_status(dataset_id, "labeled")
     if not labeled_items:
         return {"label_conflicts": 0, "semantic_conflicts": 0, "clean": 0, "total": 0}
 
@@ -144,7 +144,7 @@ async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
             item["conflict_detail"] = None
             item["status"] = "checked"
             clean_count += 1
-        db.update(item)
+        db.update_data(item)
 
     return {
         "label_conflicts": len(label_conflict_ids),
@@ -156,5 +156,5 @@ async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
 
 def get_conflict_items(dataset_id: int) -> list[dict[str, Any]]:
     db = get_db()
-    items = db.list_by_status(dataset_id, "labeled")
+    items = db.list_data_by_status(dataset_id, "labeled")
     return [i for i in items if i.get("conflict_flag")]

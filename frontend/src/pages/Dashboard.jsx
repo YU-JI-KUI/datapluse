@@ -47,10 +47,25 @@ export default function Dashboard() {
   const [runningPipeline, setRunningPipeline] = useState(false)
   const [datasetId, setDatasetId] = useState(() => getCurrentDatasetId())
 
-  // 切换数据集时重新加载
+  // 切换数据集时重新加载 + 初始加载
   useEffect(() => {
     const handler = (e) => setDatasetId(e.detail.datasetId)
     window.addEventListener('datasetChanged', handler)
+    
+    // 如果初始没有datasetId，等待Layout设置
+    if (datasetId === null) {
+      const checkDataset = () => {
+        const current = getCurrentDatasetId()
+        if (current !== null) {
+          setDatasetId(current)
+        } else {
+          // 继续检查
+          setTimeout(checkDataset, 100)
+        }
+      }
+      checkDataset()
+    }
+    
     return () => window.removeEventListener('datasetChanged', handler)
   }, [])
 
@@ -64,7 +79,7 @@ export default function Dashboard() {
   const { data: pipelineRes, refetch: refetchPipeline } = useQuery({
     queryKey: ['pipeline-status', datasetId],
     queryFn: () => pipelineApi.status(datasetId),
-    refetchInterval: 3000,
+    refetchInterval: 10000,
     enabled: datasetId !== null,
   })
 

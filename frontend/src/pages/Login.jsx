@@ -25,7 +25,7 @@ export default function Login() {
       // 这样跳转后所有页面的 API 调用都能拿到正确的 dataset_id
       try {
         const dsRes = await datasetApi.list()
-        const datasets = dsRes.data || []
+        const datasets = dsRes.data?.data || []
         if (datasets.length > 0) setCurrentDatasetId(datasets[0].id)
       } catch (_) { /* 静默失败，Layout 会在渲染时补偿 */ }
       navigate('/dashboard')

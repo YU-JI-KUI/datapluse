@@ -39,12 +39,9 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         body = b""
         if request.method in {"POST", "PUT", "PATCH"}:
             body = await request.body()
-
-            # Re-assign body for downstream processing
-            async def receive():
-                return {"type": "http.request", "body": body}
-
-            request._receive = receive
+            # Note: request.body() automatically caches the body in request._body,
+            # so downstream handlers can still call await request.body() and get the cached value.
+            # We don't need to manually reassign request._receive.
 
         # Format body for logging (truncate to 500 chars)
         body_str = ""

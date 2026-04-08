@@ -28,12 +28,15 @@ export default function PreAnnotation() {
   const { data: pipelineData } = useQuery({
     queryKey: ['pipeline-status'],
     queryFn: () => pipelineApi.status(),
-    refetchInterval: 2000,
+    refetchInterval: 10000,
   })
 
-  const processedCount = processedData?.data?.data?.total || 0
-  const preAnnotated = preAnnotatedData?.data?.data?.items || []
-  const pipeline = pipelineData?.data?.data || {}
+  const processedResult = processedData?.data?.data ?? processedData?.data ?? {}
+  const preAnnotatedResult = preAnnotatedData?.data?.data ?? preAnnotatedData?.data ?? {}
+  const pipeline = pipelineData?.data?.data ?? pipelineData?.data ?? {}
+  const processedCount = processedResult.total || 0
+  const preAnnotatedCount = preAnnotatedResult.total || 0
+  const preAnnotated = preAnnotatedResult.items || []
 
   async function handleRunPreAnnotate() {
     setRunning(true)
@@ -89,7 +92,7 @@ export default function PreAnnotation() {
         <Card>
           <CardContent className="p-5">
             <p className="text-sm text-muted-foreground">预标注完成</p>
-            <p className="text-3xl font-bold mt-1">{preAnnotatedData?.data?.data?.total || 0}</p>
+            <p className="text-3xl font-bold mt-1">{preAnnotatedCount}</p>
             <p className="text-xs text-muted-foreground mt-1">待人工标注</p>
           </CardContent>
         </Card>

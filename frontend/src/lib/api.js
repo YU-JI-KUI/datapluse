@@ -105,11 +105,11 @@ export const dataApi = {
 export const pipelineApi = {
   run: (datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty()
-    return api.post('/pipeline/run', { dataset_id: datasetId })
+    return api.post('/pipeline/run', {}, { params: { dataset_id: datasetId } })
   },
   runStep: (step, datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty()
-    return api.post('/pipeline/run-step', { dataset_id: datasetId, step })
+    return api.post('/pipeline/run-step', { step, dataset_id: datasetId })
   },
   status: (datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty({ status: 'idle', progress: 0, detail: {} })

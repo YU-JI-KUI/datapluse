@@ -48,7 +48,7 @@ async def upload(
         if not is_valid(text):
             skipped += 1
             continue
-        db.create(dataset_id, text, source_file=file.filename or "")
+        db.create_data(dataset_id, text, source_file=file.filename or "")
         created += 1
 
     return {
@@ -70,7 +70,7 @@ async def list_data(
 ):
     """分页查询数据列表"""
     db = get_db()
-    result = db.list_all(dataset_id, status=status, page=page, page_size=page_size)
+    result = db.list_all_data(dataset_id, status=status, page=page, page_size=page_size)
     return {"success": True, **result}
 
 
@@ -87,7 +87,7 @@ async def stats(
 @router.get("/{item_id}")
 async def get_item(item_id: int, user: CurrentUser):
     db = get_db()
-    item = db.get(item_id)
+    item = db.get_data(item_id)
     if not item:
         raise HTTPException(404, f"未找到 id={item_id}")
     return {"success": True, "data": item}
@@ -96,7 +96,7 @@ async def get_item(item_id: int, user: CurrentUser):
 @router.delete("/{item_id}")
 async def delete_item(item_id: int, user: CurrentUser):
     db = get_db()
-    ok = db.delete(item_id)
+    ok = db.delete_data(item_id)
     if not ok:
         raise HTTPException(404, f"未找到 id={item_id}")
     return {"success": True, "message": f"已删除 {item_id}"}

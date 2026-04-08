@@ -179,6 +179,240 @@ class DBManager:
                     )
                 )
 
+    # ── User 管理 ──────────────────────────────────────────────────────────────
+    def list_users(self) -> list[dict]:
+        """List all users."""
+        from datapulse.repository.user_repository import UserRepository
+
+        with self._session() as s:
+            repo = UserRepository(s)
+            return repo.list_users()
+
+    def get_user(self, user_id: int) -> dict | None:
+        """Get a user by ID."""
+        from datapulse.repository.user_repository import UserRepository
+
+        with self._session() as s:
+            repo = UserRepository(s)
+            return repo.get(user_id)
+
+    def get_user_by_username(self, username: str) -> dict | None:
+        """Get a user by username (includes password_hash for auth)."""
+        from datapulse.repository.user_repository import UserRepository
+
+        with self._session() as s:
+            repo = UserRepository(s)
+            return repo.get_by_username(username)
+
+    def create_user(
+        self, username: str, password: str, email: str = "", role_names: list[str] | None = None
+    ) -> dict:
+        """Create a new user."""
+        from datapulse.repository.user_repository import UserRepository
+
+        with self._session() as s:
+            repo = UserRepository(s)
+            return repo.create(username, password, email, role_names)
+
+    def update_user(self, user_id: int, data: dict) -> dict | None:
+        """Update a user."""
+        from datapulse.repository.user_repository import UserRepository
+
+        with self._session() as s:
+            repo = UserRepository(s)
+            return repo.update(user_id, data)
+
+    def delete_user(self, user_id: int) -> bool:
+        """Delete a user."""
+        from datapulse.repository.user_repository import UserRepository
+
+        with self._session() as s:
+            repo = UserRepository(s)
+            return repo.delete(user_id)
+
+    def list_roles(self) -> list[dict]:
+        """List all roles."""
+        from datapulse.repository.user_repository import UserRepository
+
+        with self._session() as s:
+            repo = UserRepository(s)
+            return repo.list_roles()
+
+    # ── Dataset 管理 ────────────────────────────────────────────────────────────
+    def list_datasets(self, include_inactive: bool = False) -> list[dict]:
+        """List all datasets."""
+        from datapulse.repository.dataset_repository import DatasetRepository
+
+        with self._session() as s:
+            repo = DatasetRepository(s)
+            return repo.list_datasets(include_inactive=include_inactive)
+
+    def get_dataset(self, dataset_id: int) -> dict | None:
+        """Get a dataset by ID."""
+        from datapulse.repository.dataset_repository import DatasetRepository
+
+        with self._session() as s:
+            repo = DatasetRepository(s)
+            return repo.get(dataset_id)
+
+    def create_dataset(self, name: str, description: str = "") -> dict:
+        """Create a new dataset."""
+        from datapulse.repository.dataset_repository import DatasetRepository
+
+        with self._session() as s:
+            repo = DatasetRepository(s)
+            return repo.create(name, description)
+
+    def update_dataset(self, dataset_id: int, data: dict) -> dict | None:
+        """Update a dataset."""
+        from datapulse.repository.dataset_repository import DatasetRepository
+
+        with self._session() as s:
+            repo = DatasetRepository(s)
+            return repo.update(dataset_id, data)
+
+    def delete_dataset(self, dataset_id: int) -> bool:
+        """Delete a dataset."""
+        from datapulse.repository.dataset_repository import DatasetRepository
+
+        with self._session() as s:
+            repo = DatasetRepository(s)
+            return repo.delete(dataset_id)
+
+    # ── Data 管理 ───────────────────────────────────────────────────────────────
+    def create_data(self, dataset_id: int, text: str, source_file: str = "") -> dict:
+        """Create a new data item."""
+        from datapulse.repository.data_repository import DataRepository
+
+        with self._session() as s:
+            repo = DataRepository(s)
+            return repo.create(dataset_id, text, source_file)
+
+    def get_data(self, item_id: int) -> dict | None:
+        """Get a data item by ID."""
+        from datapulse.repository.data_repository import DataRepository
+
+        with self._session() as s:
+            repo = DataRepository(s)
+            return repo.get(item_id)
+
+    def update_data(self, item: dict) -> dict:
+        """Update a data item."""
+        from datapulse.repository.data_repository import DataRepository
+
+        with self._session() as s:
+            repo = DataRepository(s)
+            return repo.update(item)
+
+    def delete_data(self, item_id: int) -> bool:
+        """Delete a data item."""
+        from datapulse.repository.data_repository import DataRepository
+
+        with self._session() as s:
+            repo = DataRepository(s)
+            return repo.delete(item_id)
+
+    def list_all_data(
+        self, dataset_id: int, status: str | None = None, page: int = 1, page_size: int = 20
+    ) -> dict:
+        """List data items with pagination."""
+        from datapulse.repository.data_repository import DataRepository
+
+        with self._session() as s:
+            repo = DataRepository(s)
+            return repo.list_all(dataset_id, status, page, page_size)
+
+    def list_data_by_status(self, dataset_id: int, status: str) -> list[dict]:
+        """List data items by status."""
+        from datapulse.repository.data_repository import DataRepository
+
+        with self._session() as s:
+            repo = DataRepository(s)
+            return repo.list_by_status(dataset_id, status)
+
+    def stats(self, dataset_id: int) -> dict:
+        """Get statistics for data items."""
+        from datapulse.repository.data_repository import DataRepository
+
+        with self._session() as s:
+            repo = DataRepository(s)
+            return repo.stats(dataset_id)
+
+    # ── Pipeline 管理 ────────────────────────────────────────────────────────────
+    def get_pipeline_status(self, dataset_id: int) -> dict:
+        """Get pipeline status for a dataset."""
+        from datapulse.repository.pipeline_repository import PipelineRepository
+
+        with self._session() as s:
+            repo = PipelineRepository(s)
+            return repo.get_status(dataset_id)
+
+    def set_pipeline_status(self, dataset_id: int, data: dict) -> None:
+        """Set pipeline status for a dataset."""
+        from datapulse.repository.pipeline_repository import PipelineRepository
+
+        with self._session() as s:
+            repo = PipelineRepository(s)
+            repo.set_status(dataset_id, data)
+
+    # ── Config 管理 ─────────────────────────────────────────────────────────────
+    def get_dataset_config(self, dataset_id: int) -> dict:
+        """Get dataset configuration."""
+        from datapulse.repository.config_repository import ConfigRepository
+
+        with self._session() as s:
+            repo = ConfigRepository(s)
+            return repo.get_dataset_config(dataset_id)
+
+    def set_dataset_config(self, dataset_id: int, config: dict, updated_by: str) -> None:
+        """Set dataset configuration."""
+        from datapulse.repository.config_repository import ConfigRepository
+
+        with self._session() as s:
+            repo = ConfigRepository(s)
+            repo.set_dataset_config(dataset_id, config, updated_by)
+
+    # ── Template 管理 ───────────────────────────────────────────────────────────
+    def list_templates(self, dataset_id: int) -> list[dict]:
+        """List templates for a dataset."""
+        from datapulse.repository.template_repository import TemplateRepository
+
+        with self._session() as s:
+            repo = TemplateRepository(s)
+            return repo.list_templates(dataset_id)
+
+    def get_template(self, template_id: int) -> dict | None:
+        """Get a template by ID."""
+        from datapulse.repository.template_repository import TemplateRepository
+
+        with self._session() as s:
+            repo = TemplateRepository(s)
+            return repo.get(template_id)
+
+    def create_template(self, dataset_id: int, data: dict) -> dict:
+        """Create a new template."""
+        from datapulse.repository.template_repository import TemplateRepository
+
+        with self._session() as s:
+            repo = TemplateRepository(s)
+            return repo.create(dataset_id, data)
+
+    def update_template(self, template_id: int, data: dict) -> dict | None:
+        """Update a template."""
+        from datapulse.repository.template_repository import TemplateRepository
+
+        with self._session() as s:
+            repo = TemplateRepository(s)
+            return repo.update(template_id, data)
+
+    def delete_template(self, template_id: int) -> bool:
+        """Delete a template."""
+        from datapulse.repository.template_repository import TemplateRepository
+
+        with self._session() as s:
+            repo = TemplateRepository(s)
+            return repo.delete(template_id)
+
 
 # ── 单例 ──────────────────────────────────────────────────────────────────────
 

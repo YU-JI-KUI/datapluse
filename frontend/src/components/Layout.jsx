@@ -35,7 +35,7 @@ export default function Layout() {
   useEffect(() => {
     datasetApi.list()
       .then(res => {
-        const list = res.data || []
+        const list = res.data?.data || []
         setDatasets(list)
         if (list.length === 0) return
         // 当前 dataset_id 不在列表中（或尚未设置）时，自动切换到第一个
@@ -44,6 +44,9 @@ export default function Layout() {
           // 复用 switchDataset 确保同时更新 state + localStorage + 广播事件
           // 子页面监听 datasetChanged 后会重新发起正确的 API 请求
           switchDataset(list[0].id)
+        } else {
+          // 即使是有效的，也要触发事件让Dashboard知道
+          window.dispatchEvent(new CustomEvent('datasetChanged', { detail: { datasetId: currentDataset } }))
         }
       })
       .catch(() => {})

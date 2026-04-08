@@ -35,9 +35,12 @@ export default function ConflictDetection() {
     refetchInterval: 8000,
   })
 
-  const labeledCount = labeledData?.data?.data?.total || 0
-  const checkedCount = checkedData?.data?.data?.total || 0
-  const allLabeled = conflictData?.data?.data?.items || []
+  const labeledResult = labeledData?.data?.data ?? labeledData?.data ?? {}
+  const checkedResult = checkedData?.data?.data ?? checkedData?.data ?? {}
+  const conflictResult = conflictData?.data?.data ?? conflictData?.data ?? {}
+  const labeledCount = labeledResult.total || 0
+  const checkedCount = checkedResult.total || 0
+  const allLabeled = conflictResult.items || []
   const conflicts = allLabeled.filter(i => i.conflict_flag)
   const labelConflicts = conflicts.filter(i => i.conflict_type === 'label_conflict')
   const semanticConflicts = conflicts.filter(i => i.conflict_type === 'semantic_conflict')
