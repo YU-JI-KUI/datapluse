@@ -30,7 +30,6 @@ api.interceptors.response.use(
 
 export const getCurrentDatasetId = () => {
   const v = localStorage.getItem('current_dataset_id')
-  // 必须是有效整数，否则返回 null
   const n = v !== null ? parseInt(v, 10) : NaN
   return Number.isFinite(n) ? n : null
 }
@@ -40,6 +39,10 @@ export const setCurrentDatasetId = (id) => {
     localStorage.setItem('current_dataset_id', String(id))
   }
 }
+
+// dataset_id 为 null 时返回空响应，不发起请求，避免后端 422
+// （发生于已登录用户刷新页面、localStorage 中尚未写入 current_dataset_id 的瞬间）
+const _empty = (defaultData = null) => Promise.resolve({ data: { success: true, data: defaultData } })
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
@@ -80,39 +83,56 @@ export const userApi = {
 
 export const dataApi = {
   upload: (file, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
     const form = new FormData()
     form.append('file', file)
     return api.post('/data/upload', form, { params: { dataset_id: datasetId } })
   },
-  list: (params = {}, datasetId = getCurrentDatasetId()) =>
-    api.get('/data/list', { params: { ...params, dataset_id: datasetId } }),
-  stats:      (datasetId = getCurrentDatasetId()) =>
-    api.get('/data/stats', { params: { dataset_id: datasetId } }),
-  getItem:    (id)          => api.get(`/data/${id}`),
-  deleteItem: (id)          => api.delete(`/data/${id}`),
+  list: (params = {}, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty({ total: 0, items: [], page: 1, page_size: 20 })
+    return api.get('/data/list', { params: { ...params, dataset_id: datasetId } })
+  },
+  stats: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty({})
+    return api.get('/data/stats', { params: { dataset_id: datasetId } })
+  },
+  getItem:    (id) => api.get(`/data/${id}`),
+  deleteItem: (id) => api.delete(`/data/${id}`),
 }
 
 // ── Pipeline ───────────────────────────────────────────────────────────────────
 
 export const pipelineApi = {
-  run:     (datasetId = getCurrentDatasetId())       =>
-    api.post('/pipeline/run', { dataset_id: datasetId }),
-  runStep: (step, datasetId = getCurrentDatasetId()) =>
-    api.post('/pipeline/run-step', { dataset_id: datasetId, step }),
-  status:  (datasetId = getCurrentDatasetId())       =>
-    api.get('/pipeline/status', { params: { dataset_id: datasetId } }),
-  steps:   ()                                        => api.get('/pipeline/steps'),
+  run: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/pipeline/run', { dataset_id: datasetId })
+  },
+  runStep: (step, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/pipeline/run-step', { dataset_id: datasetId, step })
+  },
+  status: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty({ status: 'idle', progress: 0, detail: {} })
+    return api.get('/pipeline/status', { params: { dataset_id: datasetId } })
+  },
+  steps: () => api.get('/pipeline/steps'),
 }
 
 // ── Annotation ─────────────────────────────────────────────────────────────────
 
 export const annotationApi = {
-  queue:       (params = {}, datasetId = getCurrentDatasetId()) =>
-    api.get('/annotation/queue', { params: { ...params, dataset_id: datasetId } }),
-  next:        (datasetId = getCurrentDatasetId()) =>
-    api.get('/annotation/next', { params: { dataset_id: datasetId } }),
-  labeled:     (params = {}, datasetId = getCurrentDatasetId()) =>
-    api.get('/annotation/labeled', { params: { ...params, dataset_id: datasetId } }),
+  queue: (params = {}, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty({ total: 0, items: [] })
+    return api.get('/annotation/queue', { params: { ...params, dataset_id: datasetId } })
+  },
+  next: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty(null)
+    return api.get('/annotation/next', { params: { dataset_id: datasetId } })
+  },
+  labeled: (params = {}, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty({ total: 0, items: [] })
+    return api.get('/annotation/labeled', { params: { ...params, dataset_id: datasetId } })
+  },
   submit:      (item_id, label) => api.post('/annotation/submit', { item_id, label }),
   batchSubmit: (annotations)    => api.post('/annotation/batch-submit', { annotations }),
 }
@@ -120,10 +140,14 @@ export const annotationApi = {
 // ── Config ─────────────────────────────────────────────────────────────────────
 
 export const configApi = {
-  get:          (datasetId = getCurrentDatasetId()) =>
-    api.get('/config', { params: { dataset_id: datasetId } }),
-  update:       (config, datasetId = getCurrentDatasetId()) =>
-    api.post('/config/update', { config }, { params: { dataset_id: datasetId } }),
+  get: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty({})
+    return api.get('/config', { params: { dataset_id: datasetId } })
+  },
+  update: (config, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/config/update', { config }, { params: { dataset_id: datasetId } })
+  },
   reloadModel:  () => api.post('/config/reload-model'),
   rebuildIndex: () => api.post('/config/rebuild-index'),
 }
@@ -132,6 +156,7 @@ export const configApi = {
 
 export const exportApi = {
   download: async (params, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return null
     const body = { ...params, dataset_id: datasetId }
     const res = await api.post('/export/create', body, { responseType: 'blob' })
     const disposition = res.headers['content-disposition'] || ''
@@ -147,18 +172,24 @@ export const exportApi = {
     window.URL.revokeObjectURL(url)
     return filename
   },
-  fields: (datasetId = getCurrentDatasetId()) =>
-    api.get('/export/fields', { params: { dataset_id: datasetId } }),
+  fields: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty([])
+    return api.get('/export/fields', { params: { dataset_id: datasetId } })
+  },
 }
 
 // ── Templates ──────────────────────────────────────────────────────────────────
 
 export const templateApi = {
-  list:   (datasetId = getCurrentDatasetId()) =>
-    api.get('/templates', { params: { dataset_id: datasetId } }),
+  list: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty([])
+    return api.get('/templates', { params: { dataset_id: datasetId } })
+  },
   get:    (id)              => api.get(`/templates/${id}`),
-  create: (data, datasetId = getCurrentDatasetId()) =>
-    api.post('/templates', { ...data, dataset_id: datasetId }),
+  create: (data, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/templates', { ...data, dataset_id: datasetId })
+  },
   update: (id, data)        => api.put(`/templates/${id}`, data),
   delete: (id)              => api.delete(`/templates/${id}`),
 }

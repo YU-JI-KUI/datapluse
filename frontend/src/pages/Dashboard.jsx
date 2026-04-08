@@ -11,9 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { dataApi, pipelineApi } from '@/lib/api'
+import { dataApi, pipelineApi, getCurrentDatasetId } from '@/lib/api'
 import { toast } from 'sonner'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const STATUS_CONFIG = [
   { key: 'raw',           label: '原始',    color: '#6b7280' },
@@ -45,17 +45,27 @@ function StatCard({ title, value, icon: Icon, color, sub }) {
 export default function Dashboard() {
   const navigate = useNavigate()
   const [runningPipeline, setRunningPipeline] = useState(false)
+  const [datasetId, setDatasetId] = useState(() => getCurrentDatasetId())
+
+  // 切换数据集时重新加载
+  useEffect(() => {
+    const handler = (e) => setDatasetId(e.detail.datasetId)
+    window.addEventListener('datasetChanged', handler)
+    return () => window.removeEventListener('datasetChanged', handler)
+  }, [])
 
   const { data: statsRes, refetch: refetchStats } = useQuery({
-    queryKey: ['stats'],
-    queryFn: () => dataApi.stats(),
+    queryKey: ['stats', datasetId],
+    queryFn: () => dataApi.stats(datasetId),
     refetchInterval: 10000,
+    enabled: datasetId !== null,
   })
 
   const { data: pipelineRes, refetch: refetchPipeline } = useQuery({
-    queryKey: ['pipeline-status'],
-    queryFn: () => pipelineApi.status(),
+    queryKey: ['pipeline-status', datasetId],
+    queryFn: () => pipelineApi.status(datasetId),
     refetchInterval: 3000,
+    enabled: datasetId !== null,
   })
 
   const stats = statsRes?.data?.data || {}
@@ -70,7 +80,7 @@ export default function Dashboard() {
   async function handleRunPipeline() {
     setRunningPipeline(true)
     try {
-      await pipelineApi.run()
+      await pipelineApi.run(datasetId)
       toast.success('Pipeline 已启动')
       refetchPipeline()
     } catch (err) {

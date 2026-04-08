@@ -37,15 +37,17 @@ export default function Layout() {
       .then(res => {
         const list = res.data || []
         setDatasets(list)
-        // 如果存储的 dataset_id 不在列表中，自动切换到第一个
-        if (list.length > 0 && !list.find(d => d.id === currentDataset)) {
-          const first = list[0].id
-          setCurrentDataset(first)
-          setCurrentDatasetId(first)
+        if (list.length === 0) return
+        // 当前 dataset_id 不在列表中（或尚未设置）时，自动切换到第一个
+        const valid = list.find(d => d.id === currentDataset)
+        if (!valid) {
+          // 复用 switchDataset 确保同时更新 state + localStorage + 广播事件
+          // 子页面监听 datasetChanged 后会重新发起正确的 API 请求
+          switchDataset(list[0].id)
         }
       })
-      .catch(() => {}) // 静默失败
-  }, [])
+      .catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function switchDataset(id) {
     setCurrentDataset(id)
