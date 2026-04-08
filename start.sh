@@ -1,14 +1,12 @@
 #!/bin/bash
-# Datapulse 启动脚本（uv 版本）
+# Datapulse 启动脚本
 
 set -e
+cd "$(dirname "$0")"
 
 echo "======================================"
 echo "  Datapulse 数据飞轮 - 启动中"
 echo "======================================"
-
-# 切换到项目根目录
-cd "$(dirname "$0")"
 
 # 检查 uv
 if ! command -v uv &> /dev/null; then
@@ -17,15 +15,22 @@ if ! command -v uv &> /dev/null; then
     exit 1
 fi
 
-# 同步依赖（自动创建 .venv）
-echo "[1/3] 同步 Python 依赖..."
-uv sync
+# 检查 .env
+if [ ! -f ".env" ]; then
+    echo "[ERROR] 未找到 .env 文件，请先配置："
+    echo "  cp .env.example .env  # 然后填入数据库连接信息"
+    exit 1
+fi
 
-# 确保向量文件目录存在（数据在 PostgreSQL，只有向量文件在本地）
-echo "[2/3] 初始化本地目录..."
-mkdir -p nas/embeddings nas/vector_index
+# 只在 .venv 不存在时才 sync，避免每次启动重复下载依赖
+if [ ! -d ".venv" ]; then
+    echo "[1/2] 首次运行，安装 Python 依赖..."
+    uv sync
+else
+    echo "[1/2] 依赖已就绪"
+fi
 
 # 启动服务
-echo "[3/3] 启动 Web 服务 → http://localhost:8000"
+echo "[2/2] 启动 Web 服务 → http://localhost:8000"
 echo ""
-cd backend && uv run python main.py
+uv run uvicorn datapulse.main:app --host 0.0.0.0 --port 8000

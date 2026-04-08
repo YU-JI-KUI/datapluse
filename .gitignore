@@ -10,34 +10,20 @@ build/
 .ruff_cache/
 .mypy_cache/
 
-# ── NAS 运行时数据（不入库，保留目录结构和示例）
-# 实际数据文件按子目录精确忽略
-nas/raw/*.json
-!nas/raw/example_*.json
-nas/processed/*.json
-nas/pre_annotated/*.json
-nas/labeling/*.json
-nas/labeled/*.json
-nas/checked/*.json
-nas/embeddings/*.npy
-nas/vector_index/
-nas/export/
-nas/_manifest.json
-nas/_manifest.tmp
-nas/pipeline_status.json
+# ── 运行时数据（向量文件，本地生成，不入库） ────────────────────────────────
+nas/
 *.log
 
-# ── 敏感配置（不入库）
-# 含密码，提交 .env.example 替代
+# ── 敏感配置（不入库，提交 .env.example 替代） ──────────────────────────────
 .env
 config.yaml
 
-# ── 前端构建产物
+# ── 前端构建产物 ────────────────────────────────────────────────────────────
 frontend/dist/
 frontend/node_modules/
 frontend/.vite/
 
-# ── 编辑器
+# ── 编辑器 ──────────────────────────────────────────────────────────────────
 .DS_Store
 .idea/
 .vscode/

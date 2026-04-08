@@ -1,5 +1,5 @@
 #!/bin/bash
-# 构建前端并复制到 backend/static
+# 构建前端静态文件（生产部署前执行一次）
 
 set -e
 cd "$(dirname "$0")"
@@ -16,5 +16,5 @@ npm install
 echo "[2/3] 构建 React 应用..."
 npm run build
 
-echo "[3/3] 完成! dist/ 已生成"
+echo "[3/3] 完成! frontend/dist/ 已生成"
 echo "现在运行 ./start.sh 启动服务"

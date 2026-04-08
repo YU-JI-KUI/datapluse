@@ -40,6 +40,18 @@ all = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# ── uv 配置 ────────────────────────────────────────────────────────────────────
+# 将 torch 固定到 CPU-only 源，避免拉取 nvidia-cudnn-cu13 等 CUDA 大包（~2GB）。
+# 本项目默认使用 mock 模式，开发环境无需 GPU。
+# 如需 CUDA 支持（生产部署），注释掉下面两个 section，改用：
+#   uv add torch --index https://download.pytorch.org/whl/cu121
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
 
 [tool.ruff]
 line-length = 120
