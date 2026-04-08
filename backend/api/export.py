@@ -14,7 +14,7 @@ from typing import Annotated, Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -27,10 +27,11 @@ _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
 class ExportRequest(BaseModel):
-    format: str = "json"             # json | excel | csv
+    dataset_id: str
+    format: str = "json"                   # json | excel | csv
     status_filter: str = "checked"
     include_conflicts: bool = False
-    template_id: Optional[str] = None   # 指定模板 ID，None 则用默认字段
+    template_id: Optional[str] = None     # 指定模板 ID，None 则用默认字段
 
 
 def _apply_columns(item: dict, columns: list[dict]) -> dict:
@@ -45,16 +46,16 @@ def _apply_columns(item: dict, columns: list[dict]) -> dict:
 @router.post("/create")
 async def create_export(body: ExportRequest, user: CurrentUser):
     """生成导出文件并直接流式返回（文件不落盘，下载即走）"""
+    if not user.has_permission("export:create"):
+        raise HTTPException(403, "无权限导出数据")
     db = get_db()
 
-    # 获取数据
-    items = db.list_by_status(body.status_filter)
+    items = db.list_by_status(body.dataset_id, body.status_filter)
     if not body.include_conflicts:
         items = [i for i in items if not i.get("conflict_flag")]
     if not items:
         raise HTTPException(404, f"没有可导出的数据（状态={body.status_filter}）")
 
-    # 确定列映射
     if body.template_id:
         tpl = db.get_template(body.template_id)
         if not tpl:
@@ -75,8 +76,7 @@ async def create_export(body: ExportRequest, user: CurrentUser):
         filename = f"datapluse_export_{ts}.xlsx"
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         return StreamingResponse(
-            buf,
-            media_type=media_type,
+            buf, media_type=media_type,
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
@@ -88,7 +88,7 @@ async def create_export(body: ExportRequest, user: CurrentUser):
             writer.writerows(clean_items)
         filename = f"datapluse_export_{ts}.csv"
         return StreamingResponse(
-            iter([buf.getvalue().encode("utf-8-sig")]),   # utf-8-sig for Excel compatibility
+            iter([buf.getvalue().encode("utf-8-sig")]),
             media_type="text/csv; charset=utf-8-sig",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )

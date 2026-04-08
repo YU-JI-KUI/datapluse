@@ -1,5 +1,5 @@
 """
-Datapluse - 数据飞轮 Web 服务入口
+Datapluse Web 服务入口
 FastAPI 同时托管 API 和前端静态文件
 存储层：PostgreSQL（主数据） + 本地文件（Embedding 向量）
 """
@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from api import annotation, auth, config, data, export, pipeline, templates
+from api import annotation, auth, config, data, datasets, export, pipeline, templates, users
 from config.settings import get_settings
 from storage.db import init_db
 
@@ -22,7 +22,7 @@ from storage.db import init_db
 app = FastAPI(
     title="Datapluse API",
     description="AI 数据飞轮 - 数据生产平台",
-    version="0.4.0",
+    version="0.5.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
 )
@@ -36,28 +36,46 @@ app.add_middleware(
 )
 
 
-# ── 启动事件：初始化数据库 ──────────────────────────────────────────────────────
+# ── 启动事件 ───────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 def startup():
     settings = get_settings()
     init_db(settings.db_url)
 
+    from storage.db import get_db
+    db = get_db()
+
+    # 写入预置角色和默认数据集（幂等）
+    db.seed_defaults()
+
+    # 兼容迁移：YAML 中如果有旧版 admin 配置，自动创建初始管理员
+    if settings.legacy_admin_username and settings.legacy_admin_password:
+        created = db.seed_admin_from_yaml(
+            settings.legacy_admin_username,
+            settings.legacy_admin_password,
+        )
+        if created:
+            print(f"[INFO] 从 config.yaml 迁移创建管理员: {settings.legacy_admin_username}")
+            print("[INFO] 建议：已创建后可删除 config.yaml 中的 auth.admin_* 配置")
+
 
 # ── API 路由 ───────────────────────────────────────────────────────────────────
 
-app.include_router(auth.router,       prefix="/api/auth",       tags=["认证"])
-app.include_router(data.router,       prefix="/api/data",       tags=["数据管理"])
-app.include_router(pipeline.router,   prefix="/api/pipeline",   tags=["Pipeline"])
-app.include_router(annotation.router, prefix="/api/annotation", tags=["标注"])
-app.include_router(config.router,     prefix="/api/config",     tags=["配置中心"])
-app.include_router(export.router,     prefix="/api/export",     tags=["导出"])
-app.include_router(templates.router,  prefix="/api/templates",  tags=["导出模板"])
+app.include_router(auth.router,      prefix="/api/auth",      tags=["认证"])
+app.include_router(users.router,     prefix="/api/users",     tags=["用户管理"])
+app.include_router(datasets.router,  prefix="/api/datasets",  tags=["数据集"])
+app.include_router(data.router,      prefix="/api/data",      tags=["数据管理"])
+app.include_router(pipeline.router,  prefix="/api/pipeline",  tags=["Pipeline"])
+app.include_router(annotation.router,prefix="/api/annotation",tags=["标注"])
+app.include_router(config.router,    prefix="/api/config",    tags=["配置中心"])
+app.include_router(export.router,    prefix="/api/export",    tags=["导出"])
+app.include_router(templates.router, prefix="/api/templates", tags=["导出模板"])
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "datapluse", "version": "0.4.0"}
+    return {"status": "ok", "service": "datapluse", "version": "0.5.0"}
 
 
 # ── 前端静态文件托管 ────────────────────────────────────────────────────────────

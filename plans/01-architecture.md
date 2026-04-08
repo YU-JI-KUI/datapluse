@@ -4,38 +4,81 @@
 
 ---
 
-## ADR-001：存储层选型 — NAS 文件系统，禁用数据库
+## ADR-001：存储层 — PostgreSQL 主数据库
 
-**决策**：所有数据以 JSON 文件形式存储在 NAS 文件系统，不使用任何数据库（SQLite、PostgreSQL 等）。
+**决策**：v0.4.0 起，主数据存 PostgreSQL（SQLAlchemy ORM + psycopg2）；Embedding 向量文件保留本地文件系统（FAISS 必须本地磁盘）。
 
 **背景**：
-- 公司 NAS 是现有基础设施，已有访问权限
-- 数据库需要额外部署和运维成本
-- 数据集规模预期 < 100 万条，文件系统性能足够
+- v0.1~0.3 曾用 NAS 文件系统（JSON 文件），大数据量下扫描慢，无事务，并发写有冲突风险
+- 实际部署有 PostgreSQL 可用，切换成本低
+- 需要支持多用户 + RBAC，文件系统无法做行级隔离
 
 **实现方式**：
-- 每条数据 = `{id}.json`，存放在对应状态的子目录中
-- 数据状态（raw/processed/.../checked）通过**目录位置**隐式表达
-- `NASManager.update()` 会先删旧文件，再在新状态目录写入（"目录即状态机"）
+- `storage/models.py`：SQLAlchemy ORM 表模型
+- `storage/db.py`：`DBManager` 单例，封装所有 CRUD 操作
+- `init_db(db_url)` 在 FastAPI startup 事件中调用；正式建表推荐使用 `database/init.sql`
 
 **权衡**：
-- ✅ 零额外依赖，透明可读，方便调试
-- ✅ 天然支持增量备份（rsync 即可）
-- ❌ 大数据量下查询性能较低（每次列表需扫描目录）
-- ❌ 无事务，并发写入有冲突风险（当前单进程，可接受）
-
-**未来扩展**：如需支持多进程或大规模数据，可替换 `storage/nas.py` 为 SQLite 实现，接口不变。
+- ✅ 支持并发、事务、复杂查询
+- ✅ 可独立备份、迁移
+- ✅ 支持多 Dataset 行级隔离
+- ❌ 需要 PostgreSQL 服务（本地或远程）
 
 ---
 
-## ADR-002：数据状态机设计
+## ADR-002：多 Dataset 隔离
+
+**决策**：v0.5.0 引入 `datasets` 表作为顶级隔离单元。每个 dataset 拥有独立的数据条目、pipeline 状态、配置和导出模板。
+
+**实现方式**：
+- `data_items.dataset_id`、`pipeline_status.dataset_id`、`system_config.dataset_id`、`export_templates.dataset_id` 均关联 `datasets.id`
+- 所有 API 端点通过 `dataset_id: str = Query(...)` 强制传入 dataset 上下文
+- 前端 Layout 侧边栏提供 Dataset 选择器，存 `localStorage`
+
+---
+
+## ADR-003：配置中心 — DB-backed 热更新
+
+**决策**：v0.5.0 将所有业务配置（llm / embedding / similarity / pipeline / labels）迁移到 `system_config` 表（每个 dataset 独立一行 JSONB config_data）。
+
+**热更新机制**：
+- `db.get_dataset_config(dataset_id)` 每次调用直接查 DB，无内存缓存
+- 配置中心 UI 保存后立即生效，无需重启服务
+- `DEFAULT_DATASET_CONFIG` 作为 base，`_deep_merge(base, db_row)` 提供默认值兜底
+
+**config.yaml 简化**：仅保留 bootstrap 参数（db_url, storage_base_path, secret_key），以及兼容迁移的 `legacy_admin_*`。
+
+---
+
+## ADR-004：RBAC 用户权限
+
+**决策**：v0.5.0 引入完整 RBAC，用户信息存 DB，废弃 config.yaml 中的 admin 账号配置。
+
+**模型**：`users` → `user_roles` → `roles（name + permissions JSONB）`
+
+**预置角色**：
+| 角色 | 权限 |
+|------|------|
+| admin | `["*"]`（所有权限） |
+| annotator | `["annotation:read", "annotation:write", "data:read"]` |
+| viewer | `["annotation:read", "data:read"]` |
+
+**JWT payload**：包含 `user_id`、`sub`（username）、`roles` 数组。
+
+**初始化**：`tools/seed_admin.py` 交互式创建第一个管理员；`tools/hash_password.py` 生成 bcrypt 哈希。
+
+**兼容迁移**：如果 config.yaml 中存在 `legacy_admin_*`，服务启动时自动创建管理员（幂等）。
+
+---
+
+## ADR-005：数据状态机
 
 **状态流转**：
 
 ```
 raw → processed → pre_annotated → labeling → labeled → checked
                                                            ↓
-                                                        export/
+                                                        export
 ```
 
 - `raw`：刚上传，未清洗
@@ -49,24 +92,25 @@ raw → processed → pre_annotated → labeling → labeled → checked
 
 ---
 
-## ADR-003：Pipeline 引擎设计
+## ADR-006：Pipeline 引擎设计
 
 **4 个步骤**：`process → pre_annotate → embed → check`
 
 **设计原则**：
 1. 每步操作**幂等**：重复运行不会破坏数据（已处理的数据跳过）
 2. 步骤间**松耦合**：可单独运行任意步骤
-3. 状态**持久化**：写入 `nas/pipeline_status.json`，重启后可查
+3. 每步接受 `dataset_id`，操作范围严格限制在该 dataset 内
+4. 配置通过 `cfg = db.get_dataset_config(dataset_id)` 动态读取，支持热更新
 
 **并发模式**：
 - `POST /pipeline/run` → FastAPI `BackgroundTasks`，非阻塞
 - `POST /pipeline/run-step` → 同步执行，适合调试
 
-**进度追踪**：前端每 3 秒 poll `GET /pipeline/status`，显示进度条。
+**进度追踪**：前端每 3 秒 poll `GET /pipeline/status?dataset_id=xxx`，显示进度条 + ETA。
 
 ---
 
-## ADR-004：冲突检测算法
+## ADR-007：冲突检测算法
 
 **类型 1：标注冲突（Label Conflict）**
 
@@ -75,58 +119,29 @@ raw → processed → pre_annotated → labeling → labeled → checked
 group_by(text) → find groups where len(unique labels) > 1
 ```
 
-适用场景：多标注员同时标注同一批数据时。
-
 **类型 2：语义冲突（Semantic Conflict）**
 
 ```python
 # cosine_similarity(vec_A, vec_B) > threshold AND label_A != label_B
 ```
 
-- 触发条件：相似度 > `config.similarity.threshold_high`（默认 0.9）
+- 触发条件：相似度 > `cfg["similarity"]["threshold_high"]`（默认 0.9）
 - 使用 FAISS 加速检索（退化为 numpy 暴力时 O(N²)）
-- 含义：语义几乎相同的两条文本被标了不同的意图，说明标注不一致
-
-**处理流程**：
-- 冲突条目：`conflict_flag=True`，保留在 `labeled/`
-- 人工在冲突检测页面逐条审核，点"通过"后移入 `checked/`
-- 干净条目：直接升级为 `checked/`
 
 ---
 
-## ADR-005：Embedding 模块设计（Mock 优先）
-
-**两种模式**（`config.embedding.use_mock`）：
+## ADR-008：Embedding 模块设计（Mock 优先）
 
 | 模式 | 实现 | 适用场景 |
 |------|------|---------|
 | `use_mock: true` | 基于 text hash 的确定性随机单位向量 | 开发/演示（无需 GPU） |
 | `use_mock: false` | SentenceTransformer 本地加载 | 生产（需配置 model_path） |
 
-**关键设计**：mock 模式下，相同文本总是生成相同向量（hash 种子），保证冲突检测结果的稳定性。
-
-**切换方式**：改 `config.yaml`，在配置中心点"重载模型"，无需重启服务。
+**cfg 传参**：`embed_text(text, cfg)` / `embed_batch(texts, cfg)` 通过 cfg dict 读配置，不依赖全局 settings 单例，支持 per-dataset 配置热更新。
 
 ---
 
-## ADR-006：LLM 预标注接口预留
-
-`backend/modules/model.py` 中的 `_call_real_llm()` 是唯一需要替换的函数：
-
-```python
-async def _call_real_llm(text: str, labels: list[str]) -> tuple[str, float]:
-    # 修改此处接入内部 LLM 平台
-    payload = { "model": settings.llm_model_name, "messages": [...] }
-    resp = await httpx.AsyncClient().post(settings.llm_api_url, json=payload)
-    # 解析返回值 ↓
-    raw_label = resp.json()["choices"][0]["message"]["content"].strip()
-```
-
-接入新平台：只需修改 `payload` 结构和 `raw_label` 解析逻辑，接口签名不变。
-
----
-
-## ADR-007：前端 8 个页面设计
+## ADR-009：前端页面设计
 
 | 路由 | 页面 | 核心功能 |
 |------|------|---------|
@@ -135,23 +150,14 @@ async def _call_real_llm(text: str, labels: list[str]) -> tuple[str, float]:
 | `/pre-annotation` | 预标注 | 触发 pre_annotate 步骤 + 结果列表 |
 | `/annotation` | 标注 | 翻牌式（Next → 展示文本 → 点击标签即提交）|
 | `/conflicts` | 冲突检测 | 运行 check + 分类展示冲突 + 逐条审核 |
-| `/config` | 配置中心 | 全量参数表单编辑 + 保存 + 重载模型 |
-| `/export` | 导出 | 选格式（JSON/Excel）→ 生成 → 下载历史 |
+| `/config` | 配置中心 | Dataset 级 JSONB 配置编辑 + 保存 |
+| `/export` | 导出 | 模板选择 + 格式选择 + 下载 |
+| `/users` | 用户管理 | 用户 CRUD + 角色分配（管理员专用）|
 | `/login` | 登录 | JWT 表单登录 |
 
-**状态管理**：@tanstack/react-query（无 Redux/Zustand，简单即可）。
+**Dataset 切换**：Layout 侧边栏顶部 Dataset 选择器，切换时广播 `datasetChanged` 自定义事件，各页面监听并刷新数据。
 
-**Auth 流程**：`localStorage` 存 token → axios interceptor 自动附加 → 401 跳 `/login`。
-
----
-
-## ADR-008：配置中心设计（热更新）
-
-- `GET /api/config` → 返回完整配置（密码字段用 `***` 脱敏）
-- `POST /api/config/update` → 覆盖写入 `config.yaml` + `Settings.reload()`
-- `Settings` 是单例，`update()` 直接修改内存 + 持久化，**无需重启**
-
-例外：如果修改了 `embedding.model_path`，需要额外调用 `POST /api/config/reload-model`，因为模型是懒加载单例。
+**Auth 流程**：`localStorage` 存 `token` + `username` + `roles` → axios interceptor 自动附加 → 401 跳 `/login`；`/users` 路由加 `RequireAdmin` 守卫。
 
 ---
 
@@ -159,7 +165,7 @@ async def _call_real_llm(text: str, labels: list[str]) -> tuple[str, float]:
 
 | 项目 | 风险 | 建议 |
 |------|------|------|
-| 无并发写入保护 | labeled/ 目录多进程写冲突 | 加文件锁或迁移 SQLite |
-| Pipeline 状态写 JSON | 重启时状态可能不准 | 问题不大，可接受 |
 | 标注"取走"机制弱 | `labeling` 状态无超时回收 | 加定时任务清理超时 labeling 条目 |
-| JWT secret 写死 config | 需妥善保管 config.yaml | ✅ 已通过 .gitignore 处理 |
+| Pipeline 异步无中断机制 | 无法取消正在运行的 Pipeline | 引入 asyncio.Task + cancel |
+| has_permission 每次查 DB | 高频接口有多余查询 | 可将 permissions 缓存在 JWT 或加短 TTL cache |
+| 前端 dataset_id 未全部注入 | 部分旧页面可能未传 dataset_id | 逐页检查，统一从 getCurrentDatasetId() 读取 |

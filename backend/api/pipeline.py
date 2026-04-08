@@ -1,13 +1,13 @@
 """
 Pipeline API
-- 全量运行 / 单步运行
-- 查询当前状态
+- 全量运行 / 单步运行（后台异步）
+- 查询当前状态（按 dataset 隔离）
 """
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.auth import UserInfo, get_current_user
@@ -20,25 +20,33 @@ CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
 
 class RunStepRequest(BaseModel):
     step: str
+    dataset_id: str
 
 
 @router.post("/run")
-async def run_pipeline(user: CurrentUser, background_tasks: BackgroundTasks):
+async def run_pipeline(
+    user: CurrentUser,
+    background_tasks: BackgroundTasks,
+    dataset_id: str = Query(..., description="数据集 ID"),
+):
     """触发全量 Pipeline（后台异步执行）"""
+    if not user.has_permission("pipeline:run"):
+        raise HTTPException(403, "无权限触发 Pipeline")
     db = get_db()
-    current = db.get_pipeline_status()
+    current = db.get_pipeline_status(dataset_id)
     if current.get("status") == "running":
         raise HTTPException(409, "Pipeline 正在运行，请勿重复触发")
-
-    background_tasks.add_task(run_all)
+    background_tasks.add_task(run_all, dataset_id)
     return {"success": True, "message": "Pipeline 已启动，在后台运行"}
 
 
 @router.post("/run-step")
 async def run_single_step(body: RunStepRequest, user: CurrentUser):
     """同步运行单个步骤（适合调试）"""
+    if not user.has_permission("pipeline:run"):
+        raise HTTPException(403, "无权限触发 Pipeline")
     try:
-        result = await run_step(body.step)
+        result = await run_step(body.dataset_id, body.step)
         return {"success": True, "data": result}
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -47,10 +55,13 @@ async def run_single_step(body: RunStepRequest, user: CurrentUser):
 
 
 @router.get("/status")
-async def get_status(user: CurrentUser):
-    """查询 Pipeline 当前状态"""
+async def get_status(
+    user: CurrentUser,
+    dataset_id: str = Query(..., description="数据集 ID"),
+):
+    """查询指定 dataset 的 Pipeline 状态"""
     db = get_db()
-    return {"success": True, "data": db.get_pipeline_status()}
+    return {"success": True, "data": db.get_pipeline_status(dataset_id)}
 
 
 @router.get("/steps")

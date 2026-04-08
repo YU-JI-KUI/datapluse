@@ -1,12 +1,12 @@
 """
-导出模板 CRUD API
+导出模板 CRUD API（按 dataset 隔离）
 模板定义了导出时的字段映射、输出格式和过滤条件
 """
 from __future__ import annotations
 
 from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.auth import UserInfo, get_current_user
@@ -28,9 +28,10 @@ class TemplateFilters(BaseModel):
 
 
 class TemplateCreate(BaseModel):
+    dataset_id: str
     name: str
     description: Optional[str] = ""
-    format: str = "json"             # json | excel | csv
+    format: str = "json"    # json | excel | csv
     columns: List[ColumnDef]
     filters: TemplateFilters = TemplateFilters()
 
@@ -44,10 +45,13 @@ class TemplateUpdate(BaseModel):
 
 
 @router.get("")
-async def list_templates(user: CurrentUser):
-    """获取所有导出模板"""
+async def list_templates(
+    user: CurrentUser,
+    dataset_id: str = Query(..., description="数据集 ID"),
+):
+    """获取指定 dataset 的所有导出模板"""
     db = get_db()
-    return {"success": True, "data": db.list_templates()}
+    return {"success": True, "data": db.list_templates(dataset_id)}
 
 
 @router.post("")
@@ -55,13 +59,13 @@ async def create_template(body: TemplateCreate, user: CurrentUser):
     """创建新模板"""
     db = get_db()
     data = {
-        "name": body.name,
+        "name":        body.name,
         "description": body.description,
-        "format": body.format,
-        "columns": [c.model_dump() for c in body.columns],
-        "filters": body.filters.model_dump(),
+        "format":      body.format,
+        "columns":     [c.model_dump() for c in body.columns],
+        "filters":     body.filters.model_dump(),
     }
-    tpl = db.create_template(data)
+    tpl = db.create_template(body.dataset_id, data)
     return {"success": True, "data": tpl}
 
 
@@ -79,18 +83,12 @@ async def get_template(template_id: str, user: CurrentUser):
 async def update_template(template_id: str, body: TemplateUpdate, user: CurrentUser):
     """更新模板"""
     db = get_db()
-    patch = {}
-    if body.name is not None:
-        patch["name"] = body.name
-    if body.description is not None:
-        patch["description"] = body.description
-    if body.format is not None:
-        patch["format"] = body.format
-    if body.columns is not None:
-        patch["columns"] = [c.model_dump() for c in body.columns]
-    if body.filters is not None:
-        patch["filters"] = body.filters.model_dump()
-
+    patch: dict = {}
+    if body.name        is not None: patch["name"]        = body.name
+    if body.description is not None: patch["description"] = body.description
+    if body.format      is not None: patch["format"]      = body.format
+    if body.columns     is not None: patch["columns"]     = [c.model_dump() for c in body.columns]
+    if body.filters     is not None: patch["filters"]     = body.filters.model_dump()
     tpl = db.update_template(template_id, patch)
     if not tpl:
         raise HTTPException(404, f"模板不存在: {template_id}")

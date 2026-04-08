@@ -1,8 +1,8 @@
 """
-简化版认证模块
-- 单超级管理员（从 config.yaml 读取）
-- JWT Token（HS256）
-- 依赖注入：get_current_user
+认证模块（RBAC）
+- 用户从 PostgreSQL 读取，不依赖 config.yaml
+- JWT Token（HS256），payload 含 user_id + roles
+- 权限检查：has_permission() / require_admin
 """
 from __future__ import annotations
 
@@ -12,14 +12,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from config.settings import get_settings
+from storage.db import get_db
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
@@ -30,30 +29,45 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     username: str
+    roles: list[str]
 
 
 class UserInfo(BaseModel):
+    user_id: str
     username: str
-    role: str = "admin"
+    roles: list[str] = []
+
+    def is_admin(self) -> bool:
+        return "admin" in self.roles
+
+    def has_permission(self, perm: str) -> bool:
+        """检查是否拥有某权限。admin 角色拥有全部权限。"""
+        db = get_db()
+        for role in db.list_roles():
+            if role["name"] in self.roles:
+                perms = role.get("permissions", [])
+                if "*" in perms or perm in perms:
+                    return True
+        return False
 
 
 # ── Token 工具 ─────────────────────────────────────────────────────────────
 
-def _create_token(data: dict) -> str:
+def _create_token(user_id: str, username: str, roles: list[str]) -> str:
     settings = get_settings()
-    payload = dict(data)
-    payload["exp"] = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    payload = {
+        "sub":      username,
+        "user_id":  user_id,
+        "roles":    roles,
+        "exp":      datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS),
+    }
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
 
-def _verify_token(token: str) -> str:
+def _decode_token(token: str) -> dict:
     settings = get_settings()
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
-        username = payload.get("sub")
-        if not username:
-            raise ValueError("no sub")
-        return username
+        return jwt.decode(token, settings.secret_key, algorithms=["HS256"])
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -67,31 +81,52 @@ def _verify_token(token: str) -> str:
 async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
 ) -> UserInfo:
-    username = _verify_token(token)
-    return UserInfo(username=username)
+    payload = _decode_token(token)
+    username = payload.get("sub")
+    user_id  = payload.get("user_id")
+    roles    = payload.get("roles", [])
+    if not username or not user_id:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token 格式错误")
+    # 检查用户是否仍然有效（防止停用账号继续使用旧 token）
+    db = get_db()
+    user = db.get_user(user_id)
+    if user is None or not user["is_active"]:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "账号已停用或不存在")
+    return UserInfo(user_id=user_id, username=username, roles=roles)
+
+
+def require_admin(user: Annotated[UserInfo, Depends(get_current_user)]) -> UserInfo:
+    """管理员专属接口的依赖"""
+    if not user.is_admin():
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "需要管理员权限")
+    return user
 
 
 # ── 路由 ───────────────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=Token)
 async def login(form: OAuth2PasswordRequestForm = Depends()):
-    settings = get_settings()
-    if (
-        form.username != settings.admin_username
-        or form.password != settings.admin_password
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户名或密码错误",
-        )
-    token = _create_token({"sub": form.username})
+    db = get_db()
+    user = db.get_user_by_username(form.username)
+    if user is None or not user.get("is_active"):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码错误")
+    if not db.verify_password(form.password, user["password_hash"]):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码错误")
+
+    db.update_last_login(user["id"])
+    token = _create_token(user["id"], user["username"], user["roles"])
     return Token(
         access_token=token,
         token_type="bearer",
-        username=form.username,
+        username=user["username"],
+        roles=user["roles"],
     )
 
 
-@router.get("/me", response_model=UserInfo)
+@router.get("/me")
 async def me(user: Annotated[UserInfo, Depends(get_current_user)]):
-    return user
+    return {"success": True, "data": {
+        "user_id":  user.user_id,
+        "username": user.username,
+        "roles":    user.roles,
+    }}

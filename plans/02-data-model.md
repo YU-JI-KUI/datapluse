@@ -1,46 +1,48 @@
-# 数据模型 & NAS 存储结构
+# 数据模型 & 数据库表结构
 
 ---
 
-## 数据条目（Item）结构
+## 数据条目（DataItem）字段
 
-每条数据存为一个 JSON 文件 `{id}.json`，完整字段：
+每条数据存为 `data_items` 表的一行，完整字段：
 
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
+  "dataset_id": "default",
   "text": "我想了解一下寿险产品",
   "label": "寿险意图",
   "status": "labeled",
   "model_pred": "寿险意图",
   "model_score": 0.9243,
   "annotator": "admin",
-  "annotated_at": "2025-01-15T09:32:11.123456",
+  "annotated_at": "2025-01-15T09:32:11",
   "conflict_flag": false,
   "conflict_type": null,
   "conflict_detail": null,
   "source_file": "upload_20250115.xlsx",
-  "created_at": "2025-01-15T09:00:00.000000",
-  "updated_at": "2025-01-15T09:32:11.123456"
+  "created_at": "2025-01-15T09:00:00",
+  "updated_at": "2025-01-15T09:32:11"
 }
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `id` | UUID | 全局唯一标识 |
-| `text` | string | 用户原始输入文本 |
-| `label` | string \| null | 人工标注结果 |
-| `status` | enum | 当前阶段（见状态机） |
-| `model_pred` | string \| null | LLM 预测标签 |
-| `model_score` | float \| null | 预测置信度 0-1 |
-| `annotator` | string \| null | 标注员用户名 |
-| `annotated_at` | ISO datetime \| null | 标注时间 |
-| `conflict_flag` | bool | 是否有冲突 |
-| `conflict_type` | "label_conflict" \| "semantic_conflict" \| null | 冲突类型 |
-| `conflict_detail` | object \| null | 冲突详情（见下方） |
-| `source_file` | string | 来源文件名 |
-| `created_at` | ISO datetime | 上传时间 |
-| `updated_at` | ISO datetime | 最后更新时间 |
+| `dataset_id` | VARCHAR(36) FK | 所属 dataset |
+| `text` | TEXT | 用户原始输入文本 |
+| `label` | VARCHAR(100) null | 人工标注结果 |
+| `status` | VARCHAR(32) | 当前阶段（见状态机） |
+| `model_pred` | VARCHAR(100) null | LLM 预测标签 |
+| `model_score` | FLOAT null | 预测置信度 0-1 |
+| `annotator` | VARCHAR(100) null | 标注员用户名 |
+| `annotated_at` | TIMESTAMP null | 标注时间 |
+| `conflict_flag` | BOOLEAN | 是否有冲突 |
+| `conflict_type` | VARCHAR(32) null | 冲突类型 |
+| `conflict_detail` | JSONB null | 冲突详情 |
+| `source_file` | VARCHAR(255) | 来源文件名 |
+| `created_at` | TIMESTAMP | 上传时间 |
+| `updated_at` | TIMESTAMP | 最后更新时间 |
 
 ### conflict_detail 结构
 
@@ -70,97 +72,192 @@
 
 ---
 
-## NAS 目录结构
+## 数据库表结构（v0.5.0）
 
-```
-nas/                          ← config.yaml → storage.base_path
-├── raw/                      ← 原始上传数据
-│   └── {id}.json
-├── processed/                ← 清洗后
-│   └── {id}.json
-├── pre_annotated/            ← LLM 预标注后
-│   └── {id}.json
-├── labeling/                 ← 标注员"取走"、标注中
-│   └── {id}.json
-├── labeled/                  ← 人工标注完成（含冲突条目）
-│   └── {id}.json
-├── checked/                  ← 通过冲突检测，高质量数据
-│   └── {id}.json
-│
-├── embeddings/               ← 向量文件（numpy .npy 格式）
-│   └── {id}.npy              ← shape (dim,)，float32，已 L2 归一化
-│
-├── vector_index/             ← FAISS 索引文件
-│   ├── faiss.index           ← FAISS IndexFlatIP 文件
-│   └── ids.json              ← 与索引对应的 id 列表（顺序严格对应）
-│
-├── export/                   ← 导出文件
-│   ├── datapluse_export_20250115_093045.json
-│   └── datapluse_export_20250115_094512.xlsx
-│
-└── pipeline_status.json      ← Pipeline 当前状态
-```
+完整 DDL 见 `database/init.sql`（含字段 COMMENT）。
 
-### pipeline_status.json 结构
+### datasets — 数据集（顶级隔离单元）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | VARCHAR(36) PK | 数据集 ID（slug 格式） |
+| name | VARCHAR(100) | 显示名称 |
+| description | TEXT | 描述 |
+| created_at | TIMESTAMP | 创建时间 |
+| updated_at | TIMESTAMP | 更新时间 |
+
+预置一条 `id='default'` 的默认数据集。
+
+---
+
+### system_config — 系统配置（per-dataset JSONB）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| dataset_id | VARCHAR(36) PK FK→datasets | 数据集 ID |
+| config_data | JSONB | 完整配置（见下方结构） |
+| updated_at | TIMESTAMP | 更新时间 |
+
+**config_data 默认结构**：
 
 ```json
 {
-  "status": "completed",
-  "current_step": "check",
-  "progress": 100,
-  "started_at": "2025-01-15T09:00:00",
-  "finished_at": "2025-01-15T09:05:32",
-  "updated_at": "2025-01-15T09:05:32",
-  "error": null,
-  "results": [
-    {"step": "process",       "processed": 500},
-    {"step": "pre_annotate",  "annotated": 500},
-    {"step": "embed",         "embedded": 500, "index_size": 500},
-    {"step": "check",         "label_conflicts": 3, "semantic_conflicts": 12, "clean": 485, "total": 500}
-  ]
+  "llm": {
+    "use_mock": true,
+    "api_url": "",
+    "model_name": "",
+    "timeout": 30
+  },
+  "embedding": {
+    "use_mock": true,
+    "model_path": "./models/bge-base-zh",
+    "batch_size": 64
+  },
+  "similarity": {
+    "threshold_high": 0.9,
+    "threshold_mid": 0.8,
+    "topk": 5
+  },
+  "pipeline": {
+    "batch_size": 32
+  },
+  "labels": ["寿险意图", "拒识", "健康险意图", "财险意图", "其他意图"]
 }
 ```
 
 ---
 
-## NASManager 核心接口
+### roles — 角色表
 
-`backend/storage/nas.py` 的 `NASManager` 类：
+| 列 | 类型 | 说明 |
+|----|------|------|
+| name | VARCHAR(50) PK | 角色名称 |
+| description | TEXT | 描述 |
+| permissions | JSONB | 权限列表，`["*"]` 表示全部 |
 
-```python
-# CRUD
-nas.create(text, source_file)       → dict  # 写入 raw/
-nas.get(item_id)                    → dict | None
-nas.update(item)                    → dict  # 自动移动到正确目录
-nas.delete(item_id)                 → bool
+预置角色：
+- `admin`：`["*"]`
+- `annotator`：`["annotation:read","annotation:write","data:read"]`
+- `viewer`：`["annotation:read","data:read"]`
 
-# 查询
-nas.list_all(status, page, page_size) → {"total": N, "items": [...]}
-nas.list_by_status(status)            → list[dict]  # 不分页
-nas.stats()                           → {"total": N, "raw": N, ...}
+---
 
-# Embedding I/O
-nas.save_embedding(item_id, vec)    # 写 embeddings/{id}.npy
-nas.load_embedding(item_id)         → ndarray | None
-nas.load_all_embeddings()           → dict[id, ndarray]
+### users — 用户表
 
-# 状态文件
-nas.get_pipeline_status()           → dict
-nas.set_pipeline_status(data)       # 写 pipeline_status.json
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | UUID PK | 用户 ID |
+| username | VARCHAR(50) UNIQUE | 登录用户名 |
+| password_hash | VARCHAR(255) | bcrypt 哈希 |
+| display_name | VARCHAR(100) null | 显示名称 |
+| is_active | BOOLEAN | 账号是否启用 |
+| last_login | TIMESTAMP null | 最后登录时间 |
+| created_at | TIMESTAMP | 创建时间 |
 
-# 导出目录
-nas.export_dir()                    → Path
-nas.list_exports()                  → list[{"filename", "size", "created_at"}]
+---
+
+### user_roles — 用户-角色关联
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| user_id | UUID FK→users | 用户 ID |
+| role_name | VARCHAR(50) FK→roles | 角色名称 |
+
+联合主键 (user_id, role_name)。
+
+---
+
+### pipeline_status — Pipeline 运行状态（per-dataset）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| dataset_id | VARCHAR(36) PK FK | 数据集 ID |
+| status | VARCHAR(32) | running/completed/error/idle |
+| current_step | VARCHAR(32) | process/pre_annotate/embed/check |
+| progress | INTEGER | 0-100 |
+| detail | JSONB | 进度详情（processed/total/speed/eta） |
+| started_at | TIMESTAMP null | 开始时间 |
+| finished_at | TIMESTAMP null | 结束时间 |
+| updated_at | TIMESTAMP | 最后更新时间 |
+| error | TEXT null | 错误信息 |
+| results | JSONB null | 各步骤结果汇总 |
+
+---
+
+### export_templates — 导出模板（per-dataset）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | UUID PK | 模板 ID |
+| dataset_id | VARCHAR(36) FK | 所属 dataset |
+| name | VARCHAR(100) | 模板名称 |
+| description | TEXT null | 描述 |
+| format | VARCHAR(20) | json/excel/csv |
+| columns | JSONB | 字段映射列表 |
+| filters | JSONB | 过滤条件 |
+| created_at | TIMESTAMP | 创建时间 |
+| updated_at | TIMESTAMP | 更新时间 |
+
+---
+
+## 向量文件结构（本地）
+
+```
+nas/                            ← config.yaml → storage.base_path
+├── embeddings/
+│   └── {item_id}.npy           ← shape (dim,)，float32，已 L2 归一化
+└── vector_index/
+    ├── faiss.index             ← FAISS IndexFlatIP 文件
+    └── ids.json                ← 与索引对应的 item_id 列表（顺序严格对应）
 ```
 
 ---
 
-## 导出数据格式
+## DBManager 核心接口
 
-导出字段（脱敏内部字段后）：
+`backend/storage/db.py` 的 `DBManager`：
 
+```python
+# Dataset CRUD
+db.list_datasets()                      → list[dict]
+db.get_dataset(dataset_id)              → dict | None
+db.create_dataset(id, name, ...)        → dict
+db.update_dataset(id, ...)              → dict
+db.delete_dataset(id)                   → bool
+
+# Config（热更新，每次查 DB）
+db.get_dataset_config(dataset_id)       → dict  # deep_merge(DEFAULT, db_row)
+db.set_dataset_config(dataset_id, cfg)  → None
+
+# Data CRUD（全部按 dataset_id 隔离）
+db.create(dataset_id, text, source_file) → dict
+db.get(item_id)                         → dict | None
+db.update(item)                         → dict
+db.delete(item_id)                      → bool
+db.list_all(dataset_id, status, page, page_size) → {"total": N, "items": [...]}
+db.list_by_status(dataset_id, status)   → list[dict]
+db.stats(dataset_id)                    → {"total": N, "raw": N, ...}
+
+# Pipeline 状态
+db.get_pipeline_status(dataset_id)      → dict
+db.set_pipeline_status(dataset_id, data) → None
+
+# 模板
+db.list_templates(dataset_id)           → list[dict]
+db.get_template(template_id)            → dict | None
+db.create_template(dataset_id, ...)     → dict
+db.update_template(template_id, ...)    → dict
+db.delete_template(template_id)         → bool
+
+# 用户 & 角色（RBAC）
+db.list_users()                         → list[dict]
+db.get_user_by_username(username)       → dict | None  # 含 password_hash
+db.create_user(username, password_hash, ...)  → dict
+db.update_user(user_id, ...)            → dict
+db.delete_user(user_id)                 → bool
+db.list_roles()                         → list[dict]
+
+# 初始化（startup 调用）
+db.seed_defaults()                      # 写入预置角色 + 默认 dataset（幂等）
+db.seed_admin_from_yaml(username, pw)   # 兼容迁移：首次创建 admin
 ```
-id | text | label | status | model_pred | model_score | annotator | annotated_at | source_file | created_at
-```
-
-JSON 格式为 `list[object]`，Excel 格式为单 Sheet 表格。

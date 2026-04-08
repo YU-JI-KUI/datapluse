@@ -1,17 +1,4 @@
-embedding:
-  model_path: "./models/bge-base-zh"
-  batch_size: 64
-  use_mock: true          # true=随机向量(开发用), false=加载真实模型
-
-similarity:
-  threshold_high: 0.9    # 高风险语义冲突阈值
-  threshold_mid: 0.8     # 中风险阈值
-  topk: 5                # 语义检索返回 top-k
-
-pipeline:
-  batch_size: 32
-
-# PostgreSQL 数据库连接（主存储，替代 NAS 文件系统）
+# PostgreSQL 数据库连接（主存储）
 database:
   host: "your-pg-hostname"
   port: 5432
@@ -19,24 +6,13 @@ database:
   user: "your-username"
   password: "CHANGE_ME_PASSWORD"
 
-# NAS 路径仅用于 Embedding 向量文件（FAISS 必须本地存储）
+# NAS / 本地路径，仅用于 Embedding 向量文件（FAISS 需要本地磁盘）
 storage:
   base_path: "./nas"
 
+# JWT 签名密钥（请替换为随机长字符串）
 auth:
-  admin_username: "admin"
-  admin_password: "CHANGE_ME_PASSWORD"
   secret_key: "CHANGE_ME_SECRET_KEY"
 
-llm:
-  api_url: "http://internal-llm-platform/api/v1/chat"
-  model_name: "internal-llm"
-  use_mock: true          # true=随机预标注, false=调用真实 LLM 平台
-  timeout: 30
-
-labels:
-  - "寿险意图"
-  - "拒识"
-  - "健康险意图"
-  - "财险意图"
-  - "其他意图"
+# ─── 以下配置已迁移至数据库 system_config 表，通过配置中心 UI 管理 ────────────
+# embedding / similarity / pipeline / llm / labels 等均在 UI 中按 dataset 配置

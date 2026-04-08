@@ -1,8 +1,8 @@
 """
 标注 API
-- 获取待标注列表
-- 提交标注结果
-- 获取下一条（用于翻牌式标注）
+- 获取待标注队列（pre_annotated 状态）
+- 翻牌式取下一条
+- 单条 / 批量提交标注结果
 """
 from __future__ import annotations
 
@@ -39,20 +39,24 @@ class BatchAnnotationSubmit(BaseModel):
 @router.get("/queue")
 async def get_queue(
     user: CurrentUser,
+    dataset_id: str = Query(..., description="数据集 ID"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """获取待标注队列：pre_annotated 状态的数据"""
     db = get_db()
-    result = db.list_all(status="pre_annotated", page=page, page_size=page_size)
+    result = db.list_all(dataset_id, status="pre_annotated", page=page, page_size=page_size)
     return {"success": True, **result}
 
 
 @router.get("/next")
-async def get_next(user: CurrentUser):
-    """获取下一条待标注数据（翻牌式）"""
+async def get_next(
+    user: CurrentUser,
+    dataset_id: str = Query(..., description="数据集 ID"),
+):
+    """获取下一条待标注数据（翻牌式），同时将状态改为 labeling"""
     db = get_db()
-    items = db.list_by_status("pre_annotated")
+    items = db.list_by_status(dataset_id, "pre_annotated")
     if not items:
         return {"success": True, "data": None, "message": "标注队列已清空"}
     item = min(items, key=lambda x: x.get("created_at", ""))
@@ -68,11 +72,10 @@ async def submit(body: AnnotationSubmit, user: CurrentUser):
     item = db.get(body.item_id)
     if not item:
         raise HTTPException(404, f"未找到 id={body.item_id}")
-
-    item["label"] = body.label
-    item["annotator"] = body.annotator or user.username
+    item["label"]       = body.label
+    item["annotator"]   = body.annotator or user.username
     item["annotated_at"] = _now()
-    item["status"] = "labeled"
+    item["status"]      = "labeled"
     db.update(item)
     return {"success": True, "data": item}
 
@@ -82,16 +85,16 @@ async def batch_submit(body: BatchAnnotationSubmit, user: CurrentUser):
     """批量提交标注"""
     db = get_db()
     results = []
-    errors = []
+    errors  = []
     for ann in body.annotations:
         item = db.get(ann.item_id)
         if not item:
             errors.append({"item_id": ann.item_id, "error": "不存在"})
             continue
-        item["label"] = ann.label
-        item["annotator"] = ann.annotator or user.username
+        item["label"]        = ann.label
+        item["annotator"]    = ann.annotator or user.username
         item["annotated_at"] = _now()
-        item["status"] = "labeled"
+        item["status"]       = "labeled"
         db.update(item)
         results.append(item["id"])
     return {"success": True, "updated": results, "errors": errors}
@@ -100,10 +103,11 @@ async def batch_submit(body: BatchAnnotationSubmit, user: CurrentUser):
 @router.get("/labeled")
 async def get_labeled(
     user: CurrentUser,
+    dataset_id: str = Query(..., description="数据集 ID"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """获取已标注数据列表"""
     db = get_db()
-    result = db.list_all(status="labeled", page=page, page_size=page_size)
+    result = db.list_all(dataset_id, status="labeled", page=page, page_size=page_size)
     return {"success": True, **result}

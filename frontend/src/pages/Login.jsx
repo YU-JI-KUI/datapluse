@@ -20,6 +20,7 @@ export default function Login() {
       const res = await authApi.login(username, password)
       localStorage.setItem('token', res.data.access_token)
       localStorage.setItem('username', res.data.username)
+      localStorage.setItem('roles', JSON.stringify(res.data.roles || []))
       navigate('/dashboard')
     } catch (err) {
       toast.error(err.response?.data?.detail || '登录失败，请检查用户名密码')
@@ -68,7 +69,7 @@ export default function Login() {
             </Button>
           </form>
           <p className="text-center text-xs text-gray-500 mt-4">
-            默认账号: admin / datapluse2024
+            请使用管理员创建的账号登录
           </p>
         </div>
       </div>
