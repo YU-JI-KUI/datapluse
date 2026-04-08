@@ -17,26 +17,28 @@
 ### 1. 配置
 
 ```bash
-cp config.example.yaml config.yaml
+cp .env.example .env
 ```
 
-编辑 `config.yaml`，填入 PostgreSQL 连接信息和业务参数：
+编辑 `.env`，填入 PostgreSQL 连接信息：
 
-```yaml
-database:
-  host: "your-pg-hostname"
-  port: 5432
-  name: "datapulse"
-  user: "your-username"
-  password: "your-password"
+```bash
+DB_HOST=your-pg-hostname
+DB_PORT=5432
+DB_NAME=datapulse
+DB_USER=your-username
+DB_PASSWORD=your-password
 
-auth:
-  admin_username: "admin"
-  admin_password: "your-password"
-  secret_key: "your-secret-key"
+# 生成随机密钥：python -c "import secrets; print(secrets.token_hex(32))"
+SECRET_KEY=your-secret-key
+
+# 可选，默认 ./nas
+# STORAGE_BASE_PATH=./nas
 ```
 
-首次启动时会自动建表，无需手动执行 DDL。
+`.env` 已加入 `.gitignore`，不会提交到代码库。首次启动时会自动建表，无需手动执行 DDL。
+
+> **Docker / K8s 部署**：直接通过 `ENV` 指令或 `--env-file` 注入同名环境变量，无需 `.env` 文件。
 
 ### 2. 安装依赖
 
@@ -207,16 +209,9 @@ datapluse/
 
 ## 接入真实 LLM
 
-修改 `config.yaml`：
+LLM 配置存储在数据库 `system_config` 表，通过**配置中心 UI** 管理，无需修改任何文件。
 
-```yaml
-llm:
-  use_mock: false
-  api_url: "http://your-internal-platform/api/v1/chat"
-  model_name: "your-model"
-```
-
-并实现 `src/datapulse/modules/model.py` 中的 `_call_real_llm()` 函数。
+若需代码层面对接私有平台，实现 `src/datapulse/modules/model.py` 中的 `_call_real_llm()` 函数即可。
 
 ---
 
@@ -226,15 +221,7 @@ llm:
 uv add sentence-transformers torch
 ```
 
-修改 `config.yaml`：
-
-```yaml
-embedding:
-  use_mock: false
-  model_path: "/path/to/bge-base-zh"
-```
-
-在配置中心点击「重载模型」生效。
+同样在**配置中心 UI** 中将 `embedding.use_mock` 设为 `false` 并填写模型路径，点击「重载模型」生效。
 
 ---
 

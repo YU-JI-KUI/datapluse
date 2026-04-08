@@ -19,7 +19,7 @@ class EmbeddingStore:
     """本地向量文件存储（单例）"""
 
     def _base(self) -> Path:
-        p = get_settings().storage_base_path
+        p = get_settings().storage_path
         p.mkdir(parents=True, exist_ok=True)
         return p
 

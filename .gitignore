@@ -28,7 +28,8 @@ nas/pipeline_status.json
 *.log
 
 # ── 敏感配置（不入库）
-# 含密码，提交 config.example.yaml 替代
+# 含密码，提交 .env.example 替代
+.env
 config.yaml
 
 # ── 前端构建产物
