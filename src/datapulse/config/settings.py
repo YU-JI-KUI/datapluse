@@ -17,7 +17,7 @@ from typing import Any
 
 import yaml
 
-_ROOT = Path(__file__).parent.parent.parent
+_ROOT = Path(__file__).parent.parent.parent.parent  # src/datapulse/config/ → project root
 
 
 def _load_yaml() -> dict[str, Any]:

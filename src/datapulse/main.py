@@ -74,7 +74,7 @@ async def health():
 
 # ── 前端静态文件托管 ────────────────────────────────────────────────────────────
 
-_FRONTEND_DIST = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
+_FRONTEND_DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 if _FRONTEND_DIST.exists():
     _assets = _FRONTEND_DIST / "assets"
