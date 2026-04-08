@@ -37,9 +37,9 @@ export default function Annotation() {
     refetchInterval: 5000,
   })
 
-  const labeled = labeledData?.data?.items || []
-  const totalLabeled = labeledData?.data?.total || 0
-  const queueTotal = queueData?.data?.total || 0
+  const labeled = labeledData?.data?.data?.items || []
+  const totalLabeled = labeledData?.data?.data?.total || 0
+  const queueTotal = queueData?.data?.data?.total || 0
 
   async function fetchNext() {
     setLoadingNext(true)
@@ -105,7 +105,7 @@ export default function Annotation() {
               <div>
                 <CardTitle className="text-base">待标注文本</CardTitle>
                 <p className="text-xs text-muted-foreground mt-1">
-                  ID: {currentItem.id.slice(0, 16)}...
+                  ID: #{currentItem.id}
                   {currentItem.model_pred && (
                     <span className="ml-2">
                       模型预测: <Badge variant="purple" className="ml-1">{currentItem.model_pred}</Badge>

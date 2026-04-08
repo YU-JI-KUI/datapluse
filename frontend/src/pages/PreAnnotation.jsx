@@ -31,8 +31,8 @@ export default function PreAnnotation() {
     refetchInterval: 2000,
   })
 
-  const processedCount = processedData?.data?.total || 0
-  const preAnnotated = preAnnotatedData?.data?.items || []
+  const processedCount = processedData?.data?.data?.total || 0
+  const preAnnotated = preAnnotatedData?.data?.data?.items || []
   const pipeline = pipelineData?.data?.data || {}
 
   async function handleRunPreAnnotate() {
@@ -89,7 +89,7 @@ export default function PreAnnotation() {
         <Card>
           <CardContent className="p-5">
             <p className="text-sm text-muted-foreground">预标注完成</p>
-            <p className="text-3xl font-bold mt-1">{preAnnotatedData?.data?.total || 0}</p>
+            <p className="text-3xl font-bold mt-1">{preAnnotatedData?.data?.data?.total || 0}</p>
             <p className="text-xs text-muted-foreground mt-1">待人工标注</p>
           </CardContent>
         </Card>

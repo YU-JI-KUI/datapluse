@@ -34,7 +34,7 @@ export default function DataManagement() {
     staleTime: 0,
   })
 
-  const result = data?.data || {}
+  const result = data?.data?.data || {}
   const items = result.items || []
   const total = result.total || 0
   const totalPages = Math.ceil(total / 20)
@@ -151,7 +151,7 @@ export default function DataManagement() {
                 <TableRow key={item.id}>
                   <TableCell className="max-w-xs">
                     <p className="truncate text-sm" title={item.text}>{item.text}</p>
-                    <p className="text-xs text-muted-foreground font-mono">{item.id.slice(0, 8)}...</p>
+                    <p className="text-xs text-muted-foreground font-mono">#{item.id}</p>
                   </TableCell>
                   <TableCell>
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(item.status)}`}>

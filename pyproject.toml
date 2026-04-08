@@ -40,8 +40,17 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-# 开发时从项目根运行 `uv run python backend/main.py`
+# 开发时从项目根运行 `uv run python -m datapulse.main`
 package = false
 
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008", "B904", "B905", "E712"]   # FastAPI Depends(), exception chaining patterns, zip strict
+
 [tool.hatch.build.targets.wheel]
-packages = ["backend"]
+packages = ["src/datapulse"]

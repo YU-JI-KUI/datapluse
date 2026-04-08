@@ -1,0 +1,111 @@
+"""
+导出模板 CRUD API（按 dataset 隔离）
+模板定义了导出时的字段映射、输出格式和过滤条件
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+
+from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.repository import get_db
+
+router = APIRouter()
+CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+
+
+class ColumnDef(BaseModel):
+    source: str  # 源字段名，如 "text"
+    target: str  # 输出字段名，如 "sentence"
+    include: bool = True
+
+
+class TemplateFilters(BaseModel):
+    status: str = "checked"
+    include_conflicts: bool = False
+
+
+class TemplateCreate(BaseModel):
+    dataset_id: int
+    name: str
+    description: str | None = ""
+    format: str = "json"  # json | excel | csv
+    columns: list[ColumnDef]
+    filters: TemplateFilters = TemplateFilters()
+
+
+class TemplateUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    format: str | None = None
+    columns: list[ColumnDef] | None = None
+    filters: TemplateFilters | None = None
+
+
+@router.get("")
+async def list_templates(
+    user: CurrentUser,
+    dataset_id: int = Query(..., description="数据集 ID"),
+):
+    """获取指定 dataset 的所有导出模板"""
+    db = get_db()
+    return {"success": True, "data": db.list_templates(dataset_id)}
+
+
+@router.post("")
+async def create_template(body: TemplateCreate, user: CurrentUser):
+    """创建新模板"""
+    db = get_db()
+    data = {
+        "name": body.name,
+        "description": body.description,
+        "format": body.format,
+        "columns": [c.model_dump() for c in body.columns],
+        "filters": body.filters.model_dump(),
+    }
+    tpl = db.create_template(body.dataset_id, data)
+    return {"success": True, "data": tpl}
+
+
+@router.get("/{template_id}")
+async def get_template(template_id: int, user: CurrentUser):
+    """获取单个模板"""
+    db = get_db()
+    tpl = db.get_template(template_id)
+    if not tpl:
+        raise HTTPException(404, f"模板不存在: {template_id}")
+    return {"success": True, "data": tpl}
+
+
+@router.put("/{template_id}")
+async def update_template(template_id: int, body: TemplateUpdate, user: CurrentUser):
+    """更新模板"""
+    db = get_db()
+    patch: dict = {}
+    if body.name is not None:
+        patch["name"] = body.name
+    if body.description is not None:
+        patch["description"] = body.description
+    if body.format is not None:
+        patch["format"] = body.format
+    if body.columns is not None:
+        patch["columns"] = [c.model_dump() for c in body.columns]
+    if body.filters is not None:
+        patch["filters"] = body.filters.model_dump()
+    tpl = db.update_template(template_id, patch)
+    if not tpl:
+        raise HTTPException(404, f"模板不存在: {template_id}")
+    return {"success": True, "data": tpl}
+
+
+@router.delete("/{template_id}")
+async def delete_template(template_id: int, user: CurrentUser):
+    """删除模板"""
+    db = get_db()
+    ok = db.delete_template(template_id)
+    if not ok:
+        raise HTTPException(404, f"模板不存在: {template_id}")
+    return {"success": True, "message": f"已删除模板 {template_id}"}
