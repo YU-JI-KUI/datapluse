@@ -26,13 +26,20 @@ api.interceptors.response.use(
   }
 )
 
-// ── 当前 Dataset（存 localStorage）──────────────────────────────────────────
+// ── 当前 Dataset（存 localStorage，始终为 integer）────────────────────────────
 
-export const getCurrentDatasetId = () =>
-  localStorage.getItem('current_dataset_id') || 'default'
+export const getCurrentDatasetId = () => {
+  const v = localStorage.getItem('current_dataset_id')
+  // 必须是有效整数，否则返回 null
+  const n = v !== null ? parseInt(v, 10) : NaN
+  return Number.isFinite(n) ? n : null
+}
 
-export const setCurrentDatasetId = (id) =>
-  localStorage.setItem('current_dataset_id', id)
+export const setCurrentDatasetId = (id) => {
+  if (id !== null && id !== undefined) {
+    localStorage.setItem('current_dataset_id', String(id))
+  }
+}
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
@@ -72,13 +79,15 @@ export const userApi = {
 // ── Data ───────────────────────────────────────────────────────────────────────
 
 export const dataApi = {
-  upload: (file, datasetId) => {
+  upload: (file, datasetId = getCurrentDatasetId()) => {
     const form = new FormData()
     form.append('file', file)
     return api.post('/data/upload', form, { params: { dataset_id: datasetId } })
   },
-  list:       (params)      => api.get('/data/list', { params }),
-  stats:      (datasetId)   => api.get('/data/stats', { params: { dataset_id: datasetId } }),
+  list: (params = {}, datasetId = getCurrentDatasetId()) =>
+    api.get('/data/list', { params: { ...params, dataset_id: datasetId } }),
+  stats:      (datasetId = getCurrentDatasetId()) =>
+    api.get('/data/stats', { params: { dataset_id: datasetId } }),
   getItem:    (id)          => api.get(`/data/${id}`),
   deleteItem: (id)          => api.delete(`/data/${id}`),
 }
@@ -86,36 +95,45 @@ export const dataApi = {
 // ── Pipeline ───────────────────────────────────────────────────────────────────
 
 export const pipelineApi = {
-  run:      (datasetId)         => api.post('/pipeline/run', { dataset_id: datasetId }),
-  runStep:  (datasetId, step)   => api.post('/pipeline/run-step', { dataset_id: datasetId, step }),
-  status:   (datasetId)         => api.get('/pipeline/status', { params: { dataset_id: datasetId } }),
-  steps:    ()                  => api.get('/pipeline/steps'),
+  run:     (datasetId = getCurrentDatasetId())       =>
+    api.post('/pipeline/run', { dataset_id: datasetId }),
+  runStep: (step, datasetId = getCurrentDatasetId()) =>
+    api.post('/pipeline/run-step', { dataset_id: datasetId, step }),
+  status:  (datasetId = getCurrentDatasetId())       =>
+    api.get('/pipeline/status', { params: { dataset_id: datasetId } }),
+  steps:   ()                                        => api.get('/pipeline/steps'),
 }
 
 // ── Annotation ─────────────────────────────────────────────────────────────────
 
 export const annotationApi = {
-  queue:       (params)              => api.get('/annotation/queue', { params }),
-  next:        (datasetId)           => api.get('/annotation/next', { params: { dataset_id: datasetId } }),
-  submit:      (item_id, label)      => api.post('/annotation/submit', { item_id, label }),
-  batchSubmit: (annotations)         => api.post('/annotation/batch-submit', { annotations }),
-  labeled:     (params)              => api.get('/annotation/labeled', { params }),
+  queue:       (params = {}, datasetId = getCurrentDatasetId()) =>
+    api.get('/annotation/queue', { params: { ...params, dataset_id: datasetId } }),
+  next:        (datasetId = getCurrentDatasetId()) =>
+    api.get('/annotation/next', { params: { dataset_id: datasetId } }),
+  labeled:     (params = {}, datasetId = getCurrentDatasetId()) =>
+    api.get('/annotation/labeled', { params: { ...params, dataset_id: datasetId } }),
+  submit:      (item_id, label) => api.post('/annotation/submit', { item_id, label }),
+  batchSubmit: (annotations)    => api.post('/annotation/batch-submit', { annotations }),
 }
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
 export const configApi = {
-  get:          (datasetId)   => api.get('/config', { params: { dataset_id: datasetId } }),
-  update:       (datasetId, config) => api.post('/config/update', { config }, { params: { dataset_id: datasetId } }),
-  reloadModel:  ()            => api.post('/config/reload-model'),
-  rebuildIndex: ()            => api.post('/config/rebuild-index'),
+  get:          (datasetId = getCurrentDatasetId()) =>
+    api.get('/config', { params: { dataset_id: datasetId } }),
+  update:       (config, datasetId = getCurrentDatasetId()) =>
+    api.post('/config/update', { config }, { params: { dataset_id: datasetId } }),
+  reloadModel:  () => api.post('/config/reload-model'),
+  rebuildIndex: () => api.post('/config/rebuild-index'),
 }
 
 // ── Export ─────────────────────────────────────────────────────────────────────
 
 export const exportApi = {
-  download: async (params) => {
-    const res = await api.post('/export/create', params, { responseType: 'blob' })
+  download: async (params, datasetId = getCurrentDatasetId()) => {
+    const body = { ...params, dataset_id: datasetId }
+    const res = await api.post('/export/create', body, { responseType: 'blob' })
     const disposition = res.headers['content-disposition'] || ''
     const match = disposition.match(/filename="?([^"]+)"?/)
     const filename = match ? match[1] : `datapulse_export.${params.format || 'json'}`
@@ -129,15 +147,18 @@ export const exportApi = {
     window.URL.revokeObjectURL(url)
     return filename
   },
-  fields: (datasetId) => api.get('/export/fields', { params: { dataset_id: datasetId } }),
+  fields: (datasetId = getCurrentDatasetId()) =>
+    api.get('/export/fields', { params: { dataset_id: datasetId } }),
 }
 
 // ── Templates ──────────────────────────────────────────────────────────────────
 
 export const templateApi = {
-  list:   (datasetId)       => api.get('/templates', { params: { dataset_id: datasetId } }),
+  list:   (datasetId = getCurrentDatasetId()) =>
+    api.get('/templates', { params: { dataset_id: datasetId } }),
   get:    (id)              => api.get(`/templates/${id}`),
-  create: (data)            => api.post('/templates', data),
+  create: (data, datasetId = getCurrentDatasetId()) =>
+    api.post('/templates', { ...data, dataset_id: datasetId }),
   update: (id, data)        => api.put(`/templates/${id}`, data),
   delete: (id)              => api.delete(`/templates/${id}`),
 }

@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Loader2, Lock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { authApi } from '@/lib/api'
+import { authApi, datasetApi, setCurrentDatasetId } from '@/lib/api'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -21,6 +21,13 @@ export default function Login() {
       localStorage.setItem('token', res.data.access_token)
       localStorage.setItem('username', res.data.username)
       localStorage.setItem('roles', JSON.stringify(res.data.roles || []))
+      // 登录后立即获取 dataset 列表，确保 current_dataset_id 是有效整数
+      // 这样跳转后所有页面的 API 调用都能拿到正确的 dataset_id
+      try {
+        const dsRes = await datasetApi.list()
+        const datasets = dsRes.data || []
+        if (datasets.length > 0) setCurrentDatasetId(datasets[0].id)
+      } catch (_) { /* 静默失败，Layout 会在渲染时补偿 */ }
       navigate('/dashboard')
     } catch (err) {
       toast.error(err.response?.data?.detail || '登录失败，请检查用户名密码')
