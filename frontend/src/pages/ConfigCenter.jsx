@@ -191,7 +191,7 @@ export default function ConfigCenter() {
       <Section icon={Database} title="存储路径" description="NAS 文件系统基础路径">
         <Field label="NAS 基础路径" name="base_path" value={config.storage?.base_path}
           onChange={makeHandler('storage')} placeholder="./nas"
-          hint="所有数据文件存储根目录（支持绝对路径，如 /mnt/nas/datapluse）" />
+          hint="所有数据文件存储根目录（支持绝对路径，如 /mnt/nas/datapulse）" />
       </Section>
 
       {/* Pipeline */}

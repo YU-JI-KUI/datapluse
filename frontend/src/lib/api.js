@@ -118,7 +118,7 @@ export const exportApi = {
     const res = await api.post('/export/create', params, { responseType: 'blob' })
     const disposition = res.headers['content-disposition'] || ''
     const match = disposition.match(/filename="?([^"]+)"?/)
-    const filename = match ? match[1] : `datapluse_export.${params.format || 'json'}`
+    const filename = match ? match[1] : `datapulse_export.${params.format || 'json'}`
     const url = window.URL.createObjectURL(new Blob([res.data]))
     const link = document.createElement('a')
     link.href = url

@@ -37,7 +37,7 @@ export default function Login() {
           <div className="inline-flex w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 items-center justify-center text-white font-bold text-2xl mb-4">
             D
           </div>
-          <h1 className="text-2xl font-bold text-white">Datapluse</h1>
+          <h1 className="text-2xl font-bold text-white">Datapulse</h1>
           <p className="text-gray-400 text-sm mt-1">AI 数据飞轮平台</p>
         </div>
 

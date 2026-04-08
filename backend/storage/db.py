@@ -1,19 +1,20 @@
 """
-PostgreSQL 数据库存储层
+PostgreSQL 存储层
 
 职责：
   - DataItem CRUD（按 dataset 隔离）
   - ExportTemplate CRUD（按 dataset 隔离）
   - PipelineStatus 读写（按 dataset 隔离）
   - Dataset CRUD
-  - SystemConfig 读写（按 dataset 隔离，JSON 格式）
+  - SystemConfig 读写（每次查询直接读 DB，天然热更新）
   - User / Role / UserRole CRUD（RBAC）
 
-Embedding 向量文件仍保留本地（storage/embeddings.py），FAISS 不适合存数据库。
+主键均为数据库自增 Integer（data_items 为 BigInteger），
+无应用层 UUID 生成。
 """
 from __future__ import annotations
 
-import uuid
+import copy
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Optional
@@ -28,32 +29,32 @@ from storage.models import (
     PipelineStatus, Role, SystemConfig, User, UserRole,
 )
 
-SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
+_pwd_ctx  = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def _now() -> str:
-    return datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(_SHANGHAI).strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ── 默认配置（新建 dataset 时的初始值）────────────────────────────────────────
 
 DEFAULT_DATASET_CONFIG: dict[str, Any] = {
     "llm": {
-        "use_mock": True,
-        "api_url": "http://internal-llm-platform/api/v1/chat",
-        "model_name": "internal-llm",
-        "timeout": 30,
+        "use_mock":   True,
+        "api_url":    "",
+        "model_name": "",
+        "timeout":    30,
     },
     "embedding": {
-        "use_mock": True,
+        "use_mock":   True,
         "model_path": "./models/bge-base-zh",
         "batch_size": 64,
     },
     "similarity": {
         "threshold_high": 0.9,
-        "threshold_mid": 0.8,
-        "topk": 5,
+        "threshold_mid":  0.8,
+        "topk":           5,
     },
     "pipeline": {
         "batch_size": 32,
@@ -61,7 +62,6 @@ DEFAULT_DATASET_CONFIG: dict[str, Any] = {
     "labels": ["寿险意图", "拒识", "健康险意图", "财险意图", "其他意图"],
 }
 
-# 默认导出字段列表
 DEFAULT_COLUMNS = [
     {"source": "id",           "target": "id",           "include": True},
     {"source": "text",         "target": "text",          "include": True},
@@ -74,7 +74,6 @@ DEFAULT_COLUMNS = [
     {"source": "created_at",   "target": "created_at",    "include": False},
 ]
 
-# 所有可用源字段（前端模板编辑器使用）
 AVAILABLE_FIELDS = [
     {"source": "id",            "label": "数据 ID"},
     {"source": "text",          "label": "原始文本"},
@@ -91,17 +90,14 @@ AVAILABLE_FIELDS = [
     {"source": "status",        "label": "数据状态"},
 ]
 
-# 预置角色定义（首次启动时写入 DB）
-PRESET_ROLES = [
+_PRESET_ROLES = [
     {
-        "id": "00000000-0000-0000-0000-000000000001",
-        "name": "admin",
+        "name":        "admin",
         "description": "超级管理员，拥有所有权限",
         "permissions": ["*"],
     },
     {
-        "id": "00000000-0000-0000-0000-000000000002",
-        "name": "annotator",
+        "name":        "annotator",
         "description": "标注员，可查看数据、提交标注、执行导出",
         "permissions": [
             "data:read", "annotation:read", "annotation:write",
@@ -109,14 +105,14 @@ PRESET_ROLES = [
         ],
     },
     {
-        "id": "00000000-0000-0000-0000-000000000003",
-        "name": "viewer",
+        "name":        "viewer",
         "description": "只读访问，可查看数据和导出结果",
-        "permissions": ["data:read", "annotation:read", "pipeline:read", "export:read", "config:read"],
+        "permissions": [
+            "data:read", "annotation:read", "pipeline:read",
+            "export:read", "config:read",
+        ],
     },
 ]
-
-DEFAULT_DATASET_ID = "00000000-0000-0000-0000-000000000010"
 
 
 # ── ORM → dict 转换 ───────────────────────────────────────────────────────────
@@ -189,6 +185,17 @@ def _role_to_dict(r: Role) -> dict[str, Any]:
     }
 
 
+# ── 工具函数 ───────────────────────────────────────────────────────────────────
+
+def _deep_merge(base: dict, override: dict) -> None:
+    """递归将 override 合并到 base（原地修改，base 为默认值，override 优先）"""
+    for k, v in override.items():
+        if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+
+
 # ── DBManager ─────────────────────────────────────────────────────────────────
 
 class DBManager:
@@ -207,69 +214,49 @@ class DBManager:
 
     @contextmanager
     def _session(self) -> Session:
-        session = self._Session()
+        s = self._Session()
         try:
-            yield session
-            session.commit()
+            yield s
+            s.commit()
         except Exception:
-            session.rollback()
+            s.rollback()
             raise
         finally:
-            session.close()
+            s.close()
 
     # ── 启动初始化 ────────────────────────────────────────────────────────────
 
     def seed_defaults(self) -> None:
-        """首次启动时写入预置角色和默认数据集（幂等）"""
+        """首次启动时写入预置角色和默认数据集（完全幂等，可重复调用）"""
         with self._session() as s:
-            # 预置角色
-            for r in PRESET_ROLES:
-                if not s.get(Role, r["id"]):
+            # 预置角色（按名称判重）
+            for r in _PRESET_ROLES:
+                if not s.query(Role).filter(Role.name == r["name"]).first():
                     s.add(Role(
-                        id=r["id"], name=r["name"],
+                        name=r["name"],
                         description=r["description"],
                         permissions=r["permissions"],
                         created_at=_now(),
                     ))
-            # 默认数据集
-            if not s.get(Dataset, DEFAULT_DATASET_ID):
-                s.add(Dataset(
-                    id=DEFAULT_DATASET_ID,
+            s.flush()  # 确保 roles 有 id 后再操作 dataset
+
+            # 默认数据集（按名称判重）
+            if not s.query(Dataset).filter(Dataset.name == "默认数据集").first():
+                ds = Dataset(
                     name="默认数据集",
                     description="系统初始化创建的默认数据集",
                     is_active=True,
                     created_at=_now(),
                     updated_at=_now(),
-                ))
-            # 默认数据集配置
-            if not s.get(SystemConfig, DEFAULT_DATASET_ID):
+                )
+                s.add(ds)
+                s.flush()
                 s.add(SystemConfig(
-                    dataset_id=DEFAULT_DATASET_ID,
+                    dataset_id=ds.id,
                     config_data=DEFAULT_DATASET_CONFIG,
                     updated_at=_now(),
                     updated_by="system",
                 ))
-
-    def seed_admin_from_yaml(self, username: str, password: str) -> bool:
-        """仅当 DB 中没有任何用户时，从 YAML 配置创建初始管理员（迁移用）"""
-        with self._session() as s:
-            count = s.query(func.count(User.id)).scalar()
-            if count > 0:
-                return False
-            user = User(
-                id=str(uuid.uuid4()),
-                username=username,
-                password_hash=_pwd_ctx.hash(password),
-                is_active=True,
-                created_at=_now(),
-                updated_at=_now(),
-            )
-            s.add(user)
-            s.flush()
-            admin_role = s.query(Role).filter(Role.name == "admin").first()
-            if admin_role:
-                s.add(UserRole(user_id=user.id, role_id=admin_role.id, created_at=_now()))
-        return True
 
     # ── Dataset ───────────────────────────────────────────────────────────────
 
@@ -278,31 +265,35 @@ class DBManager:
             q = s.query(Dataset)
             if not include_inactive:
                 q = q.filter(Dataset.is_active == True)
-            rows = q.order_by(Dataset.created_at).all()
+            rows = q.order_by(Dataset.id).all()
         return [_dataset_to_dict(r) for r in rows]
 
-    def get_dataset(self, dataset_id: str) -> Optional[dict[str, Any]]:
+    def get_dataset(self, dataset_id: int) -> Optional[dict[str, Any]]:
         with self._session() as s:
             row = s.get(Dataset, dataset_id)
             return _dataset_to_dict(row) if row else None
 
     def create_dataset(self, name: str, description: str = "") -> dict[str, Any]:
         ts = _now()
-        ds_id = str(uuid.uuid4())
         with self._session() as s:
-            row = Dataset(id=ds_id, name=name, description=description,
-                          is_active=True, created_at=ts, updated_at=ts)
+            row = Dataset(
+                name=name,
+                description=description,
+                is_active=True,
+                created_at=ts,
+                updated_at=ts,
+            )
             s.add(row)
-            # 同时为新 dataset 创建默认配置
+            s.flush()
             s.add(SystemConfig(
-                dataset_id=ds_id,
+                dataset_id=row.id,
                 config_data=DEFAULT_DATASET_CONFIG,
                 updated_at=ts,
                 updated_by="system",
             ))
         return _dataset_to_dict(row)
 
-    def update_dataset(self, dataset_id: str, data: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def update_dataset(self, dataset_id: int, data: dict[str, Any]) -> Optional[dict[str, Any]]:
         with self._session() as s:
             row = s.get(Dataset, dataset_id)
             if row is None:
@@ -313,7 +304,7 @@ class DBManager:
             row.updated_at = _now()
         return _dataset_to_dict(row)
 
-    def delete_dataset(self, dataset_id: str) -> bool:
+    def delete_dataset(self, dataset_id: int) -> bool:
         with self._session() as s:
             row = s.get(Dataset, dataset_id)
             if row is None:
@@ -323,19 +314,17 @@ class DBManager:
 
     # ── SystemConfig ──────────────────────────────────────────────────────────
 
-    def get_dataset_config(self, dataset_id: str) -> dict[str, Any]:
-        """读取 dataset 配置，不存在则返回默认配置"""
+    def get_dataset_config(self, dataset_id: int) -> dict[str, Any]:
+        """读取 dataset 配置并与默认值深度合并（每次直接查 DB，天然热更新）"""
         with self._session() as s:
             row = s.get(SystemConfig, dataset_id)
             if row is None:
-                return dict(DEFAULT_DATASET_CONFIG)
-            # 合并：默认值 + DB 存储值（DB 优先，支持部分缺失字段）
-            import copy
+                return copy.deepcopy(DEFAULT_DATASET_CONFIG)
             merged = copy.deepcopy(DEFAULT_DATASET_CONFIG)
             _deep_merge(merged, row.config_data or {})
             return merged
 
-    def set_dataset_config(self, dataset_id: str, config_data: dict[str, Any],
+    def set_dataset_config(self, dataset_id: int, config_data: dict[str, Any],
                            updated_by: str = "system") -> dict[str, Any]:
         with self._session() as s:
             row = s.get(SystemConfig, dataset_id)
@@ -343,37 +332,34 @@ class DBManager:
                 row = SystemConfig(dataset_id=dataset_id)
                 s.add(row)
             row.config_data = config_data
-            row.updated_at = _now()
-            row.updated_by = updated_by
+            row.updated_at  = _now()
+            row.updated_by  = updated_by
         return config_data
 
     # ── User ──────────────────────────────────────────────────────────────────
 
     def list_users(self) -> list[dict[str, Any]]:
         with self._session() as s:
-            users = s.query(User).order_by(User.created_at).all()
-            result = []
-            for u in users:
-                roles = self._get_user_roles_in_session(s, u.id)
-                result.append(_user_to_dict(u, roles))
-        return result
+            users = s.query(User).order_by(User.id).all()
+            return [
+                _user_to_dict(u, self._get_user_roles(s, u.id))
+                for u in users
+            ]
 
-    def get_user(self, user_id: str) -> Optional[dict[str, Any]]:
+    def get_user(self, user_id: int) -> Optional[dict[str, Any]]:
         with self._session() as s:
             u = s.get(User, user_id)
             if u is None:
                 return None
-            roles = self._get_user_roles_in_session(s, user_id)
-            return _user_to_dict(u, roles)
+            return _user_to_dict(u, self._get_user_roles(s, user_id))
 
     def get_user_by_username(self, username: str) -> Optional[dict[str, Any]]:
         with self._session() as s:
             u = s.query(User).filter(User.username == username).first()
             if u is None:
                 return None
-            roles = self._get_user_roles_in_session(s, u.id)
-            d = _user_to_dict(u, roles)
-            d["password_hash"] = u.password_hash  # 供认证使用
+            d = _user_to_dict(u, self._get_user_roles(s, u.id))
+            d["password_hash"] = u.password_hash  # 仅供认证使用
             return d
 
     def create_user(self, username: str, password: str,
@@ -381,7 +367,6 @@ class DBManager:
         ts = _now()
         with self._session() as s:
             user = User(
-                id=str(uuid.uuid4()),
                 username=username,
                 email=email,
                 password_hash=_pwd_ctx.hash(password),
@@ -391,7 +376,7 @@ class DBManager:
             )
             s.add(user)
             s.flush()
-            roles = []
+            roles: list[str] = []
             for rname in (role_names or ["annotator"]):
                 role = s.query(Role).filter(Role.name == rname).first()
                 if role:
@@ -399,7 +384,7 @@ class DBManager:
                     roles.append(rname)
         return _user_to_dict(user, roles)
 
-    def update_user(self, user_id: str, data: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def update_user(self, user_id: int, data: dict[str, Any]) -> Optional[dict[str, Any]]:
         with self._session() as s:
             u = s.get(User, user_id)
             if u is None:
@@ -417,16 +402,16 @@ class DBManager:
                     if role:
                         s.add(UserRole(user_id=user_id, role_id=role.id, created_at=_now()))
             u.updated_at = _now()
-            roles = self._get_user_roles_in_session(s, user_id)
+            roles = self._get_user_roles(s, user_id)
         return _user_to_dict(u, roles)
 
-    def update_last_login(self, user_id: str) -> None:
+    def update_last_login(self, user_id: int) -> None:
         with self._session() as s:
             u = s.get(User, user_id)
             if u:
                 u.last_login_at = _now()
 
-    def delete_user(self, user_id: str) -> bool:
+    def delete_user(self, user_id: int) -> bool:
         with self._session() as s:
             u = s.get(User, user_id)
             if u is None:
@@ -437,7 +422,7 @@ class DBManager:
     def verify_password(self, plain: str, hashed: str) -> bool:
         return _pwd_ctx.verify(plain, hashed)
 
-    def _get_user_roles_in_session(self, s: Session, user_id: str) -> list[str]:
+    def _get_user_roles(self, s: Session, user_id: int) -> list[str]:
         rows = (
             s.query(Role.name)
             .join(UserRole, Role.id == UserRole.role_id)
@@ -450,15 +435,14 @@ class DBManager:
 
     def list_roles(self) -> list[dict[str, Any]]:
         with self._session() as s:
-            rows = s.query(Role).order_by(Role.name).all()
+            rows = s.query(Role).order_by(Role.id).all()
         return [_role_to_dict(r) for r in rows]
 
     # ── DataItem ──────────────────────────────────────────────────────────────
 
-    def create(self, dataset_id: str, text: str, source_file: str = "") -> dict[str, Any]:
+    def create(self, dataset_id: int, text: str, source_file: str = "") -> dict[str, Any]:
         ts = _now()
         item = DataItem(
-            id=str(uuid.uuid4()),
             dataset_id=dataset_id,
             text=text,
             status="raw",
@@ -468,9 +452,10 @@ class DBManager:
         )
         with self._session() as s:
             s.add(item)
+            s.flush()
         return _item_to_dict(item)
 
-    def get(self, item_id: str) -> Optional[dict[str, Any]]:
+    def get(self, item_id: int) -> Optional[dict[str, Any]]:
         with self._session() as s:
             item = s.get(DataItem, item_id)
             return _item_to_dict(item) if item else None
@@ -488,7 +473,7 @@ class DBManager:
                         setattr(row, k, v)
         return item
 
-    def delete(self, item_id: str) -> bool:
+    def delete(self, item_id: int) -> bool:
         with self._session() as s:
             row = s.get(DataItem, item_id)
             if row is None:
@@ -496,30 +481,37 @@ class DBManager:
             s.delete(row)
         return True
 
-    def list_all(self, dataset_id: str, status: Optional[str] = None,
+    def list_all(self, dataset_id: int, status: Optional[str] = None,
                  page: int = 1, page_size: int = 20) -> dict[str, Any]:
         with self._session() as s:
             q = s.query(DataItem).filter(DataItem.dataset_id == dataset_id)
             if status:
                 q = q.filter(DataItem.status == status)
             total = q.count()
-            rows = (
+            rows  = (
                 q.order_by(DataItem.created_at.desc())
                 .offset((page - 1) * page_size)
                 .limit(page_size)
                 .all()
             )
-        return {"total": total, "page": page, "page_size": page_size,
-                "items": [_item_to_dict(r) for r in rows]}
+        return {
+            "total":     total,
+            "page":      page,
+            "page_size": page_size,
+            "items":     [_item_to_dict(r) for r in rows],
+        }
 
-    def list_by_status(self, dataset_id: str, status: str) -> list[dict[str, Any]]:
+    def list_by_status(self, dataset_id: int, status: str) -> list[dict[str, Any]]:
         with self._session() as s:
-            rows = (s.query(DataItem)
-                    .filter(DataItem.dataset_id == dataset_id, DataItem.status == status)
-                    .all())
+            rows = (
+                s.query(DataItem)
+                .filter(DataItem.dataset_id == dataset_id, DataItem.status == status)
+                .all()
+            )
         return [_item_to_dict(r) for r in rows]
 
-    def stats(self, dataset_id: str) -> dict[str, int]:
+    def stats(self, dataset_id: int) -> dict[str, int]:
+        _statuses = ["raw", "processed", "pre_annotated", "labeling", "labeled", "checked"]
         with self._session() as s:
             rows = (
                 s.query(DataItem.status, func.count(DataItem.id))
@@ -527,18 +519,17 @@ class DBManager:
                 .group_by(DataItem.status)
                 .all()
             )
-        result = {s: 0 for s in
-                  ["raw", "processed", "pre_annotated", "labeling", "labeled", "checked"]}
+        result: dict[str, int] = {st: 0 for st in _statuses}
         result["total"] = 0
-        for status, cnt in rows:
-            if status in result:
-                result[status] = cnt
+        for st, cnt in rows:
+            if st in result:
+                result[st] = cnt
             result["total"] += cnt
         return result
 
     # ── Pipeline Status ────────────────────────────────────────────────────────
 
-    def get_pipeline_status(self, dataset_id: str) -> dict[str, Any]:
+    def get_pipeline_status(self, dataset_id: int) -> dict[str, Any]:
         with self._session() as s:
             row = s.get(PipelineStatus, dataset_id)
             if row is None:
@@ -554,7 +545,7 @@ class DBManager:
                 "updated_at":   row.updated_at,
             }
 
-    def set_pipeline_status(self, dataset_id: str, data: dict[str, Any]) -> None:
+    def set_pipeline_status(self, dataset_id: int, data: dict[str, Any]) -> None:
         with self._session() as s:
             row = s.get(PipelineStatus, dataset_id)
             if row is None:
@@ -571,22 +562,24 @@ class DBManager:
 
     # ── Export Template ────────────────────────────────────────────────────────
 
-    def list_templates(self, dataset_id: str) -> list[dict[str, Any]]:
+    def list_templates(self, dataset_id: int) -> list[dict[str, Any]]:
         with self._session() as s:
-            rows = (s.query(ExportTemplate)
-                    .filter(ExportTemplate.dataset_id == dataset_id)
-                    .order_by(ExportTemplate.created_at.desc()).all())
+            rows = (
+                s.query(ExportTemplate)
+                .filter(ExportTemplate.dataset_id == dataset_id)
+                .order_by(ExportTemplate.created_at.desc())
+                .all()
+            )
         return [_template_to_dict(r) for r in rows]
 
-    def get_template(self, template_id: str) -> Optional[dict[str, Any]]:
+    def get_template(self, template_id: int) -> Optional[dict[str, Any]]:
         with self._session() as s:
             row = s.get(ExportTemplate, template_id)
             return _template_to_dict(row) if row else None
 
-    def create_template(self, dataset_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    def create_template(self, dataset_id: int, data: dict[str, Any]) -> dict[str, Any]:
         ts = _now()
         row = ExportTemplate(
-            id=str(uuid.uuid4()),
             dataset_id=dataset_id,
             name=data["name"],
             description=data.get("description", ""),
@@ -598,9 +591,10 @@ class DBManager:
         )
         with self._session() as s:
             s.add(row)
+            s.flush()
         return _template_to_dict(row)
 
-    def update_template(self, template_id: str, data: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def update_template(self, template_id: int, data: dict[str, Any]) -> Optional[dict[str, Any]]:
         with self._session() as s:
             row = s.get(ExportTemplate, template_id)
             if row is None:
@@ -611,24 +605,13 @@ class DBManager:
             row.updated_at = _now()
         return _template_to_dict(row)
 
-    def delete_template(self, template_id: str) -> bool:
+    def delete_template(self, template_id: int) -> bool:
         with self._session() as s:
             row = s.get(ExportTemplate, template_id)
             if row is None:
                 return False
             s.delete(row)
         return True
-
-
-# ── 工具函数 ───────────────────────────────────────────────────────────────────
-
-def _deep_merge(base: dict, override: dict) -> None:
-    """递归合并 override 到 base（原地修改）"""
-    for k, v in override.items():
-        if k in base and isinstance(base[k], dict) and isinstance(v, dict):
-            _deep_merge(base[k], v)
-        else:
-            base[k] = v
 
 
 # ── 单例 ──────────────────────────────────────────────────────────────────────

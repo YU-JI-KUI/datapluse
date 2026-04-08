@@ -20,14 +20,14 @@ CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
 
 class RunStepRequest(BaseModel):
     step: str
-    dataset_id: str
+    dataset_id: int
 
 
 @router.post("/run")
 async def run_pipeline(
     user: CurrentUser,
     background_tasks: BackgroundTasks,
-    dataset_id: str = Query(..., description="数据集 ID"),
+    dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """触发全量 Pipeline（后台异步执行）"""
     if not user.has_permission("pipeline:run"):
@@ -57,7 +57,7 @@ async def run_single_step(body: RunStepRequest, user: CurrentUser):
 @router.get("/status")
 async def get_status(
     user: CurrentUser,
-    dataset_id: str = Query(..., description="数据集 ID"),
+    dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """查询指定 dataset 的 Pipeline 状态"""
     db = get_db()

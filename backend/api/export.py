@@ -27,11 +27,11 @@ _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
 class ExportRequest(BaseModel):
-    dataset_id: str
-    format: str = "json"                   # json | excel | csv
+    dataset_id: int
+    format: str = "json"                    # json | excel | csv
     status_filter: str = "checked"
     include_conflicts: bool = False
-    template_id: Optional[str] = None     # 指定模板 ID，None 则用默认字段
+    template_id: Optional[int] = None      # 指定模板 ID，None 则用默认字段
 
 
 def _apply_columns(item: dict, columns: list[dict]) -> dict:
@@ -73,7 +73,7 @@ async def create_export(body: ExportRequest, user: CurrentUser):
         buf = io.BytesIO()
         pd.DataFrame(clean_items).to_excel(buf, index=False, engine="openpyxl")
         buf.seek(0)
-        filename = f"datapluse_export_{ts}.xlsx"
+        filename = f"datapulse_export_{ts}.xlsx"
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         return StreamingResponse(
             buf, media_type=media_type,
@@ -86,7 +86,7 @@ async def create_export(body: ExportRequest, user: CurrentUser):
             writer = csv.DictWriter(buf, fieldnames=clean_items[0].keys())
             writer.writeheader()
             writer.writerows(clean_items)
-        filename = f"datapluse_export_{ts}.csv"
+        filename = f"datapulse_export_{ts}.csv"
         return StreamingResponse(
             iter([buf.getvalue().encode("utf-8-sig")]),
             media_type="text/csv; charset=utf-8-sig",
@@ -95,7 +95,7 @@ async def create_export(body: ExportRequest, user: CurrentUser):
 
     else:  # json
         content = json.dumps(clean_items, ensure_ascii=False, indent=2).encode("utf-8")
-        filename = f"datapluse_export_{ts}.json"
+        filename = f"datapulse_export_{ts}.json"
         return StreamingResponse(
             iter([content]),
             media_type="application/json",

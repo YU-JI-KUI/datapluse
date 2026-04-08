@@ -28,7 +28,7 @@ class TemplateFilters(BaseModel):
 
 
 class TemplateCreate(BaseModel):
-    dataset_id: str
+    dataset_id: int
     name: str
     description: Optional[str] = ""
     format: str = "json"    # json | excel | csv
@@ -47,7 +47,7 @@ class TemplateUpdate(BaseModel):
 @router.get("")
 async def list_templates(
     user: CurrentUser,
-    dataset_id: str = Query(..., description="数据集 ID"),
+    dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """获取指定 dataset 的所有导出模板"""
     db = get_db()
@@ -70,7 +70,7 @@ async def create_template(body: TemplateCreate, user: CurrentUser):
 
 
 @router.get("/{template_id}")
-async def get_template(template_id: str, user: CurrentUser):
+async def get_template(template_id: int, user: CurrentUser):
     """获取单个模板"""
     db = get_db()
     tpl = db.get_template(template_id)
@@ -80,7 +80,7 @@ async def get_template(template_id: str, user: CurrentUser):
 
 
 @router.put("/{template_id}")
-async def update_template(template_id: str, body: TemplateUpdate, user: CurrentUser):
+async def update_template(template_id: int, body: TemplateUpdate, user: CurrentUser):
     """更新模板"""
     db = get_db()
     patch: dict = {}
@@ -96,7 +96,7 @@ async def update_template(template_id: str, body: TemplateUpdate, user: CurrentU
 
 
 @router.delete("/{template_id}")
-async def delete_template(template_id: str, user: CurrentUser):
+async def delete_template(template_id: int, user: CurrentUser):
     """删除模板"""
     db = get_db()
     ok = db.delete_template(template_id)

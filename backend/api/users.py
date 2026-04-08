@@ -14,36 +14,40 @@ from api.auth import UserInfo, get_current_user, require_admin
 from storage.db import get_db
 
 router = APIRouter()
-AdminUser = Annotated[UserInfo, Depends(require_admin)]
+AdminUser   = Annotated[UserInfo, Depends(require_admin)]
 CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
 
 
 class UserCreate(BaseModel):
-    username: str
-    password: str
-    email: Optional[str] = ""
+    username:   str
+    password:   str
+    email:      Optional[str] = ""
     role_names: list[str] = ["annotator"]
 
 
 class UserUpdate(BaseModel):
-    email: Optional[str] = None
-    is_active: Optional[bool] = None
-    password: Optional[str] = None        # 为空则不修改密码
+    email:      Optional[str]       = None
+    is_active:  Optional[bool]      = None
+    password:   Optional[str]       = None   # 空则不修改密码
     role_names: Optional[list[str]] = None
 
 
 @router.get("")
 async def list_users(user: AdminUser):
     """获取所有用户列表（管理员）"""
-    db = get_db()
-    return {"success": True, "data": db.list_users()}
+    return {"success": True, "data": get_db().list_users()}
+
+
+@router.get("/roles")
+async def list_roles(user: CurrentUser):
+    """获取所有可用角色（供创建/编辑用户时选择）"""
+    return {"success": True, "data": get_db().list_roles()}
 
 
 @router.post("")
 async def create_user(body: UserCreate, user: AdminUser):
     """创建新用户（管理员）"""
     db = get_db()
-    # 检查用户名是否重复
     if db.get_user_by_username(body.username):
         raise HTTPException(400, f"用户名已存在: {body.username}")
     if len(body.password) < 6:
@@ -57,28 +61,18 @@ async def create_user(body: UserCreate, user: AdminUser):
     return {"success": True, "data": new_user}
 
 
-@router.get("/roles")
-async def list_roles(user: CurrentUser):
-    """获取所有可用角色（供创建/编辑用户时选择）"""
-    db = get_db()
-    return {"success": True, "data": db.list_roles()}
-
-
 @router.get("/{user_id}")
-async def get_user(user_id: str, user: AdminUser):
+async def get_user(user_id: int, user: AdminUser):
     """获取单个用户详情（管理员）"""
-    db = get_db()
-    target = db.get_user(user_id)
+    target = get_db().get_user(user_id)
     if not target:
         raise HTTPException(404, f"用户不存在: {user_id}")
     return {"success": True, "data": target}
 
 
 @router.put("/{user_id}")
-async def update_user(user_id: str, body: UserUpdate, user: AdminUser):
+async def update_user(user_id: int, body: UserUpdate, user: AdminUser):
     """更新用户信息/角色/状态（管理员）"""
-    db = get_db()
-    # 防止管理员停用自己
     if user_id == user.user_id and body.is_active is False:
         raise HTTPException(400, "不能停用自己的账号")
     patch: dict = {}
@@ -92,19 +86,17 @@ async def update_user(user_id: str, body: UserUpdate, user: AdminUser):
         patch["password"] = body.password
     if body.role_names is not None:
         patch["role_names"] = body.role_names
-    updated = db.update_user(user_id, patch)
+    updated = get_db().update_user(user_id, patch)
     if not updated:
         raise HTTPException(404, f"用户不存在: {user_id}")
     return {"success": True, "data": updated}
 
 
 @router.delete("/{user_id}")
-async def delete_user(user_id: str, user: AdminUser):
+async def delete_user(user_id: int, user: AdminUser):
     """删除用户（管理员，不可删除自己）"""
     if user_id == user.user_id:
         raise HTTPException(400, "不能删除自己的账号")
-    db = get_db()
-    ok = db.delete_user(user_id)
-    if not ok:
+    if not get_db().delete_user(user_id):
         raise HTTPException(404, f"用户不存在: {user_id}")
     return {"success": True, "message": f"已删除用户 {user_id}"}

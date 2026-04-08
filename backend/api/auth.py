@@ -33,7 +33,7 @@ class Token(BaseModel):
 
 
 class UserInfo(BaseModel):
-    user_id: str
+    user_id: int
     username: str
     roles: list[str] = []
 
@@ -53,7 +53,7 @@ class UserInfo(BaseModel):
 
 # ── Token 工具 ─────────────────────────────────────────────────────────────
 
-def _create_token(user_id: str, username: str, roles: list[str]) -> str:
+def _create_token(user_id: int, username: str, roles: list[str]) -> str:
     settings = get_settings()
     payload = {
         "sub":      username,
@@ -85,14 +85,14 @@ async def get_current_user(
     username = payload.get("sub")
     user_id  = payload.get("user_id")
     roles    = payload.get("roles", [])
-    if not username or not user_id:
+    if not username or user_id is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token 格式错误")
     # 检查用户是否仍然有效（防止停用账号继续使用旧 token）
     db = get_db()
-    user = db.get_user(user_id)
+    user = db.get_user(int(user_id))
     if user is None or not user["is_active"]:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "账号已停用或不存在")
-    return UserInfo(user_id=user_id, username=username, roles=roles)
+    return UserInfo(user_id=int(user_id), username=username, roles=roles)
 
 
 def require_admin(user: Annotated[UserInfo, Depends(get_current_user)]) -> UserInfo:

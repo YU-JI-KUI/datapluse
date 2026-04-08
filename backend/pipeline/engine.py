@@ -31,7 +31,7 @@ def _now() -> str:
 
 
 def _set_status(
-    dataset_id: str,
+    dataset_id: int,
     status: str,
     step: str = "",
     progress: int = 0,
@@ -68,7 +68,7 @@ def _make_detail(processed: int, total: int, skipped: int, start_time: float) ->
 
 # ── 单步执行 ──────────────────────────────────────────────────────────────────
 
-async def step_process(dataset_id: str) -> dict[str, Any]:
+async def step_process(dataset_id: int) -> dict[str, Any]:
     """清洗 raw → processed"""
     db = get_db()
     raw_items = db.list_by_status(dataset_id, "raw")
@@ -90,7 +90,7 @@ async def step_process(dataset_id: str) -> dict[str, Any]:
     return {"step": "process", "processed": total - skipped, "skipped": skipped}
 
 
-async def step_pre_annotate(dataset_id: str) -> dict[str, Any]:
+async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
     """预标注 processed → pre_annotated"""
     db  = get_db()
     cfg = db.get_dataset_config(dataset_id)
@@ -115,7 +115,7 @@ async def step_pre_annotate(dataset_id: str) -> dict[str, Any]:
     return {"step": "pre_annotate", "annotated": annotated, "skipped": 0}
 
 
-async def step_embed(dataset_id: str) -> dict[str, Any]:
+async def step_embed(dataset_id: int) -> dict[str, Any]:
     """为 pre_annotated / labeled / checked 数据生成 embedding"""
     db  = get_db()
     cfg = db.get_dataset_config(dataset_id)
@@ -147,7 +147,7 @@ async def step_embed(dataset_id: str) -> dict[str, Any]:
     return {"step": "embed", "embedded": embedded, "skipped": skipped, "index_size": count}
 
 
-async def step_check(dataset_id: str) -> dict[str, Any]:
+async def step_check(dataset_id: int) -> dict[str, Any]:
     """冲突检测 labeled → checked"""
     _set_status(dataset_id, "running", "check", 10, detail={"pct": "10%", "total": 0})
     result = await run_conflict_detection(dataset_id)
@@ -164,7 +164,7 @@ async def step_check(dataset_id: str) -> dict[str, Any]:
 
 # ── 全量 Pipeline ──────────────────────────────────────────────────────────────
 
-async def run_all(dataset_id: str) -> None:
+async def run_all(dataset_id: int) -> None:
     _set_status(dataset_id, "running", "process", 0, started_at=_now())
     try:
         r1 = await step_process(dataset_id)
@@ -178,7 +178,7 @@ async def run_all(dataset_id: str) -> None:
         raise
 
 
-async def run_step(dataset_id: str, step: str) -> dict[str, Any]:
+async def run_step(dataset_id: int, step: str) -> dict[str, Any]:
     if step not in STEPS:
         raise ValueError(f"未知步骤: {step}，可选: {STEPS}")
 

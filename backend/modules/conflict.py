@@ -49,7 +49,7 @@ def detect_label_conflicts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ── 语义冲突检测 ───────────────────────────────────────────────────────────────
 
 def detect_semantic_conflicts(
-    dataset_id: str,
+    dataset_id: int,
     items: list[dict[str, Any]],
     cfg: dict[str, Any],
 ) -> list[dict[str, Any]]:
@@ -114,7 +114,7 @@ def detect_semantic_conflicts(
 
 # ── Pipeline 步骤：check ───────────────────────────────────────────────────────
 
-async def run_conflict_detection(dataset_id: str) -> dict[str, Any]:
+async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
     db            = get_db()
     cfg           = db.get_dataset_config(dataset_id)
     labeled_items = db.list_by_status(dataset_id, "labeled")
@@ -154,7 +154,7 @@ async def run_conflict_detection(dataset_id: str) -> dict[str, Any]:
     }
 
 
-def get_conflict_items(dataset_id: str) -> list[dict[str, Any]]:
+def get_conflict_items(dataset_id: int) -> list[dict[str, Any]]:
     db    = get_db()
     items = db.list_by_status(dataset_id, "labeled")
     return [i for i in items if i.get("conflict_flag")]

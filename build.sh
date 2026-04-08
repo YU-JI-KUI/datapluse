@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 
 echo "======================================"
-echo "  Datapluse - 构建前端"
+echo "  Datapulse - 构建前端"
 echo "======================================"
 
 cd frontend

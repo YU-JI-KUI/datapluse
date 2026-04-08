@@ -45,7 +45,7 @@ async def create_dataset(body: DatasetCreate, user: AdminUser):
 
 
 @router.get("/{dataset_id}")
-async def get_dataset(dataset_id: str, user: CurrentUser):
+async def get_dataset(dataset_id: int, user: CurrentUser):
     db = get_db()
     ds = db.get_dataset(dataset_id)
     if not ds:
@@ -54,7 +54,7 @@ async def get_dataset(dataset_id: str, user: CurrentUser):
 
 
 @router.put("/{dataset_id}")
-async def update_dataset(dataset_id: str, body: DatasetUpdate, user: AdminUser):
+async def update_dataset(dataset_id: int, body: DatasetUpdate, user: AdminUser):
     db = get_db()
     patch: dict = {}
     if body.name is not None:
@@ -70,7 +70,7 @@ async def update_dataset(dataset_id: str, body: DatasetUpdate, user: AdminUser):
 
 
 @router.delete("/{dataset_id}")
-async def delete_dataset(dataset_id: str, user: AdminUser):
+async def delete_dataset(dataset_id: int, user: AdminUser):
     """删除数据集（级联删除所有关联数据，谨慎操作）"""
     db = get_db()
     ok = db.delete_dataset(dataset_id)

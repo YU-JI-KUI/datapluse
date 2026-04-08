@@ -27,7 +27,7 @@ def _now() -> str:
 
 
 class AnnotationSubmit(BaseModel):
-    item_id: str
+    item_id: int
     label: str
     annotator: Optional[str] = None
 
@@ -39,7 +39,7 @@ class BatchAnnotationSubmit(BaseModel):
 @router.get("/queue")
 async def get_queue(
     user: CurrentUser,
-    dataset_id: str = Query(..., description="数据集 ID"),
+    dataset_id: int = Query(..., description="数据集 ID"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -52,7 +52,7 @@ async def get_queue(
 @router.get("/next")
 async def get_next(
     user: CurrentUser,
-    dataset_id: str = Query(..., description="数据集 ID"),
+    dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """获取下一条待标注数据（翻牌式），同时将状态改为 labeling"""
     db = get_db()
@@ -103,7 +103,7 @@ async def batch_submit(body: BatchAnnotationSubmit, user: CurrentUser):
 @router.get("/labeled")
 async def get_labeled(
     user: CurrentUser,
-    dataset_id: str = Query(..., description="数据集 ID"),
+    dataset_id: int = Query(..., description="数据集 ID"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):

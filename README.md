@@ -1,4 +1,4 @@
-# Datapluse · 数据飞轮
+# Datapulse · 数据飞轮
 
 > AI 数据生产平台：数据上传 → 清洗 → LLM 预标注 → 人工标注 → 冲突检测 → 高质量数据导出
 
@@ -26,7 +26,7 @@ cp config.example.yaml config.yaml
 database:
   host: "your-pg-hostname"
   port: 5432
-  name: "datapluse"
+  name: "datapulse"
   user: "your-username"
   password: "your-password"
 
@@ -72,7 +72,7 @@ cd backend && uv run python main.py
 ## 项目结构
 
 ```
-datapluse/
+datapulse/
 ├── config.yaml              # 运行时配置（不入库）
 ├── config.example.yaml      # 配置模板（入库）
 ├── pyproject.toml           # Python 依赖（uv 管理）

@@ -87,7 +87,7 @@ export default function Layout() {
             </div>
             {!collapsed && (
               <div>
-                <div className="font-semibold text-sm">Datapluse</div>
+                <div className="font-semibold text-sm">Datapulse</div>
                 <div className="text-xs text-gray-400">数据飞轮</div>
               </div>
             )}

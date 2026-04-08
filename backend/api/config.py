@@ -27,7 +27,7 @@ class ConfigUpdateRequest(BaseModel):
 @router.get("")
 async def get_config(
     user: CurrentUser,
-    dataset_id: str = Query(..., description="数据集 ID"),
+    dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """获取指定 dataset 的完整配置（直接读 DB，热更新）"""
     db = get_db()
@@ -39,7 +39,7 @@ async def get_config(
 async def update_config(
     body: ConfigUpdateRequest,
     user: CurrentUser,
-    dataset_id: str = Query(..., description="数据集 ID"),
+    dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """更新指定 dataset 的配置并立即生效（写入 DB）"""
     if not user.has_permission("config:write"):

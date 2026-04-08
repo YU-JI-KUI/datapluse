@@ -23,7 +23,7 @@ CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
 @router.post("/upload")
 async def upload(
     user: CurrentUser,
-    dataset_id: str = Query(..., description="目标数据集 ID"),
+    dataset_id: int = Query(..., description="目标数据集 ID"),
     file: UploadFile = File(...),
     text_column: str = Form("text"),
 ):
@@ -62,7 +62,7 @@ async def upload(
 @router.get("/list")
 async def list_data(
     user: CurrentUser,
-    dataset_id: str = Query(..., description="数据集 ID"),
+    dataset_id: int = Query(..., description="数据集 ID"),
     status: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -76,7 +76,7 @@ async def list_data(
 @router.get("/stats")
 async def stats(
     user: CurrentUser,
-    dataset_id: str = Query(..., description="数据集 ID"),
+    dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """各阶段数据量统计"""
     db = get_db()
@@ -84,7 +84,7 @@ async def stats(
 
 
 @router.get("/{item_id}")
-async def get_item(item_id: str, user: CurrentUser):
+async def get_item(item_id: int, user: CurrentUser):
     db = get_db()
     item = db.get(item_id)
     if not item:
@@ -93,7 +93,7 @@ async def get_item(item_id: str, user: CurrentUser):
 
 
 @router.delete("/{item_id}")
-async def delete_item(item_id: str, user: CurrentUser):
+async def delete_item(item_id: int, user: CurrentUser):
     db = get_db()
     ok = db.delete(item_id)
     if not ok:

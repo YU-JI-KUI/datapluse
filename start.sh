@@ -1,10 +1,10 @@
 #!/bin/bash
-# Datapluse 启动脚本（uv 版本）
+# Datapulse 启动脚本（uv 版本）
 
 set -e
 
 echo "======================================"
-echo "  Datapluse 数据飞轮 - 启动中"
+echo "  Datapulse 数据飞轮 - 启动中"
 echo "======================================"
 
 # 切换到项目根目录
