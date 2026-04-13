@@ -149,6 +149,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码错误")
 
         user_service.update_last_login(user["username"])
+        session.commit()   # ← 必须 commit，否则 last_login_at 不会持久化
         token = _create_token(user["id"], user["username"], user["roles"])
         return Token(
             access_token=token,

@@ -106,8 +106,26 @@ def _enrich(session: Session, base: dict[str, Any], my_username: str | None = No
     base["label_source"]    = label_source        # "auto" | "manual" | None
     base["annotator_count"] = annotator_count
     base["resolver"]        = resolver
-    # 向前兼容：annotator 取第一个有效标注者
-    if annotations:
+
+    # annotators：所有有效标注者，逗号分隔（导出/展示多人标注明细用）
+    base["annotators"] = ", ".join(a["username"] for a in annotations) if annotations else None
+
+    # result_updated_at：最终标注结果确定的时间（投票或裁决时写入）
+    base["result_updated_at"] = (
+        ann_result.updated_at.isoformat() if ann_result and ann_result.updated_at else None
+    )
+
+    # annotator / annotated_at：表示"谁在什么时候确定了最终标签"
+    #   manual 裁决 → resolver 是决策者，时间取 annotation_result.updated_at
+    #   auto  投票  → 全部标注者（同 annotators），时间取 annotation_result.updated_at
+    #   无结果       → 回退到第一个有效标注者信息
+    if ann_result:
+        if label_source == "manual" and resolver:
+            base["annotator"] = resolver
+        else:
+            base["annotator"] = base["annotators"]  # 逗号分隔多人
+        base["annotated_at"] = base["result_updated_at"]
+    elif annotations:
         base["annotator"]    = annotations[0]["username"]
         base["annotated_at"] = annotations[0]["created_at"]
     else:

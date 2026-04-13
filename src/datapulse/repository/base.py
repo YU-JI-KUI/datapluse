@@ -57,33 +57,48 @@ DEFAULT_DATASET_CONFIG: dict = {
 }
 
 DEFAULT_COLUMNS = [
-    {"source": "id",           "target": "id",           "include": True},
-    {"source": "content",      "target": "content",      "include": True},
-    {"source": "label",        "target": "label",        "include": True},
-    {"source": "annotator",    "target": "annotator",    "include": True},
-    {"source": "annotated_at", "target": "annotated_at", "include": True},
-    {"source": "model_pred",   "target": "model_pred",   "include": True},
-    {"source": "model_score",  "target": "model_score",  "include": True},
-    {"source": "source_ref",   "target": "source_ref",   "include": True},
-    {"source": "status",       "target": "status",       "include": True},
-    {"source": "created_at",   "target": "created_at",   "include": True},
-    {"source": "updated_at",   "target": "updated_at",   "include": False},
+    {"source": "id",                "target": "id",                "include": True},
+    {"source": "content",           "target": "content",           "include": True},
+    {"source": "label",             "target": "label",             "include": True},
+    {"source": "label_source",      "target": "label_source",      "include": True},
+    {"source": "annotator",         "target": "annotator",         "include": True},
+    {"source": "annotated_at",      "target": "annotated_at",      "include": True},
+    {"source": "annotators",        "target": "annotators",        "include": False},
+    {"source": "resolver",          "target": "resolver",          "include": False},
+    {"source": "model_pred",        "target": "model_pred",        "include": True},
+    {"source": "model_score",       "target": "model_score",       "include": True},
+    {"source": "source_ref",        "target": "source_ref",        "include": True},
+    {"source": "status",            "target": "status",            "include": True},
+    {"source": "created_at",        "target": "created_at",        "include": True},
+    {"source": "updated_at",        "target": "updated_at",        "include": False},
+    {"source": "result_updated_at", "target": "result_updated_at", "include": False},
 ]
 
 AVAILABLE_FIELDS = [
-    {"source": "id",            "label": "数据 ID"},
-    {"source": "content",       "label": "原始文本"},
-    {"source": "label",         "label": "人工标注标签"},
-    {"source": "model_pred",    "label": "模型预测标签"},
-    {"source": "model_score",   "label": "模型置信度"},
-    {"source": "annotator",     "label": "标注员"},
-    {"source": "annotated_at",  "label": "标注时间"},
-    {"source": "source_ref",    "label": "来源文件"},
-    {"source": "created_at",    "label": "创建时间"},
-    {"source": "updated_at",    "label": "更新时间"},
-    {"source": "conflict_flag", "label": "冲突标记"},
-    {"source": "conflict_type", "label": "冲突类型"},
-    {"source": "stage",         "label": "数据阶段"},
+    # ── 基础字段 ──────────────────────────────────────────────────────────────
+    {"source": "id",                "label": "数据 ID"},
+    {"source": "content",           "label": "原始文本"},
+    {"source": "source_ref",        "label": "来源文件"},
+    {"source": "status",            "label": "数据阶段"},
+    {"source": "created_at",        "label": "创建时间"},
+    {"source": "updated_at",        "label": "数据更新时间"},
+    # ── 最终标注结果（来自 t_annotation_result）────────────────────────────────
+    {"source": "label",             "label": "最终标注标签"},
+    {"source": "label_source",      "label": "标签来源 (auto/manual)"},
+    {"source": "annotated_at",      "label": "标注完成时间"},
+    {"source": "result_updated_at", "label": "结果最后更新时间"},
+    # ── 标注人员 ──────────────────────────────────────────────────────────────
+    {"source": "annotator",         "label": "标注员（裁决者/全部参与者）"},
+    {"source": "annotators",        "label": "全部标注员（逗号分隔）"},
+    {"source": "annotator_count",   "label": "参与标注人数"},
+    {"source": "resolver",          "label": "冲突裁决人"},
+    # ── 预标注（模型预测）─────────────────────────────────────────────────────
+    {"source": "model_pred",        "label": "模型预测标签"},
+    {"source": "model_score",       "label": "模型置信度"},
+    {"source": "model_name",        "label": "预测模型名称"},
+    # ── 冲突 ──────────────────────────────────────────────────────────────────
+    {"source": "conflict_flag",     "label": "是否存在冲突"},
+    {"source": "conflict_type",     "label": "冲突类型"},
 ]
 
 _PRESET_ROLES = [

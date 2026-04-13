@@ -20,25 +20,43 @@ const FORMAT_ICONS = {
   csv:   <FileText className="w-4 h-4 text-orange-500" />,
 }
 
+// 与后端 AVAILABLE_FIELDS（base.py）保持一致
 const ALL_FIELDS = [
-  { source: 'id',                  label: '数据 ID' },
-  { source: 'content',             label: '原始文本' },
-  { source: 'annotation_label',    label: '人工标注标签' },
-  { source: 'annotation_username', label: '标注员' },
-  { source: 'pre_label',           label: '模型预测标签' },
-  { source: 'pre_score',           label: '模型置信度' },
-  { source: 'source_ref',          label: '来源文件' },
-  { source: 'status',              label: '数据状态' },
-  { source: 'created_at',          label: '创建时间' },
-  { source: 'updated_at',          label: '更新时间' },
+  // ── 基础 ──────────────────────────────────────────────────────────────────
+  { source: 'id',                label: '数据 ID' },
+  { source: 'content',           label: '原始文本' },
+  { source: 'source_ref',        label: '来源文件' },
+  { source: 'status',            label: '数据阶段' },
+  { source: 'created_at',        label: '创建时间' },
+  { source: 'updated_at',        label: '数据更新时间' },
+  // ── 最终标注结果（t_annotation_result）────────────────────────────────────
+  { source: 'label',             label: '最终标注标签' },
+  { source: 'label_source',      label: '标签来源 (auto/manual)' },
+  { source: 'annotated_at',      label: '标注完成时间' },
+  { source: 'result_updated_at', label: '结果最后更新时间' },
+  // ── 标注人员 ──────────────────────────────────────────────────────────────
+  { source: 'annotator',         label: '标注员（裁决者/全部参与者）' },
+  { source: 'annotators',        label: '全部标注员（逗号分隔）' },
+  { source: 'annotator_count',   label: '参与标注人数' },
+  { source: 'resolver',          label: '冲突裁决人' },
+  // ── 预标注（模型预测）────────────────────────────────────────────────────
+  { source: 'model_pred',        label: '模型预测标签' },
+  { source: 'model_score',       label: '模型置信度' },
+  { source: 'model_name',        label: '预测模型名称' },
+  // ── 冲突 ──────────────────────────────────────────────────────────────────
+  { source: 'conflict_flag',     label: '是否存在冲突' },
+  { source: 'conflict_type',     label: '冲突类型' },
 ]
 
 // ── 模板编辑器 ─────────────────────────────────────────────────────────────────
 
 function TemplateEditor({ initial, onSave, onCancel }) {
-  const defaultColumns = ALL_FIELDS.slice(0, 7).map(f => ({
-    source: f.source, target: f.source, include: true,
-  }))
+  // 默认模板：与后端 DEFAULT_COLUMNS 核心字段对齐
+  const DEFAULT_SOURCES = ['id', 'content', 'label', 'label_source', 'annotator', 'annotated_at', 'model_pred', 'model_score', 'source_ref', 'status', 'created_at']
+  const defaultColumns = DEFAULT_SOURCES
+    .map(src => ALL_FIELDS.find(f => f.source === src))
+    .filter(Boolean)
+    .map(f => ({ source: f.source, target: f.source, include: true }))
 
   const [name, setName] = useState(initial?.name || '')
   const [description, setDescription] = useState(initial?.description || '')
