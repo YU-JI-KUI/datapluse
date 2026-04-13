@@ -30,6 +30,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import TablePagination from '@/components/TablePagination'
 import { dataApi, commentApi, getCurrentDatasetId } from '@/lib/api'
 import {
   formatDate, getStatusLabel, getStatusColor,
@@ -265,6 +266,7 @@ export default function DataExplorer() {
   const [debouncedKw, setDebouncedKw] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage]               = useState(1)
+  const [pageSize, setPageSize]       = useState(10)
   const [sideItem, setSideItem]       = useState(null)   // 当前侧边栏展示的 item
   const [sideMode, setSideMode]       = useState('detail') // 'detail' | 'comment'
   const [datasetId, setDatasetId]     = useState(() => getCurrentDatasetId())
@@ -283,21 +285,20 @@ export default function DataExplorer() {
   }, [keyword])
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['explorer', datasetId, statusFilter, debouncedKw, page],
+    queryKey: ['explorer', datasetId, statusFilter, debouncedKw, page, pageSize],
     queryFn: () => dataApi.list({
       status:   statusFilter === 'all' ? undefined : statusFilter || undefined,
       keyword:  debouncedKw || undefined,
       page,
-      page_size: 25,
+      page_size: pageSize,
     }, datasetId),
     enabled: !!datasetId,
     staleTime: 0,
   })
 
-  const result     = data?.data?.data ?? {}
-  const items      = result.list || []
-  const total      = result.pagination?.total || 0
-  const totalPages = Math.ceil(total / 25)
+  const result = data?.data?.data ?? {}
+  const items  = result.list || []
+  const total  = result.pagination?.total || 0
 
   function openDetail(item) {
     setSideItem(item)
@@ -498,14 +499,14 @@ export default function DataExplorer() {
                 </TableBody>
               </Table>
 
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-2 p-4 border-t">
-                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>上一页</Button>
-                  <span className="text-sm text-muted-foreground">第 {page} / {totalPages} 页</span>
-                  <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>下一页</Button>
-                </div>
-              )}
+              {/* 分页 */}
+              <TablePagination
+                page={page}
+                pageSize={pageSize}
+                total={total}
+                onPageChange={setPage}
+                onSizeChange={size => { setPageSize(size); setPage(1) }}
+              />
             </CardContent>
           </Card>
         </div>

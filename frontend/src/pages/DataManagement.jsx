@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import TablePagination from '@/components/TablePagination'
 import { dataApi } from '@/lib/api'
 import { formatDate, getStatusLabel, getStatusColor, getActiveLabel, getPreLabel, getPreScore } from '@/lib/utils'
 
@@ -24,20 +25,20 @@ export default function DataManagement() {
   const qc = useQueryClient()
   const fileRef = useRef()
   const [statusFilter, setStatusFilter] = useState('all')
-  const [page, setPage] = useState(1)
+  const [page, setPage]         = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [uploading, setUploading] = useState(false)
   const [dragging, setDragging] = useState(false)
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['data-list', statusFilter, page],
-    queryFn: () => dataApi.list({ status: statusFilter === 'all' ? undefined : statusFilter, page, page_size: 20 }),
+    queryKey: ['data-list', statusFilter, page, pageSize],
+    queryFn: () => dataApi.list({ status: statusFilter === 'all' ? undefined : statusFilter, page, page_size: pageSize }),
     staleTime: 0,
   })
 
   const result = data?.data?.data ?? {}
-  const items = result.list || []
-  const total = result.pagination?.total || 0
-  const totalPages = Math.ceil(total / 20)
+  const items  = result.list || []
+  const total  = result.pagination?.total || 0
 
   async function uploadFile(file) {
     setUploading(true)
@@ -199,14 +200,14 @@ export default function DataManagement() {
             </TableBody>
           </Table>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 p-4 border-t">
-              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>上一页</Button>
-              <span className="text-sm text-muted-foreground">{page} / {totalPages}</span>
-              <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>下一页</Button>
-            </div>
-          )}
+          {/* 分页 */}
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onPageChange={setPage}
+            onSizeChange={size => { setPageSize(size); setPage(1) }}
+          />
         </CardContent>
       </Card>
       <ConfirmDialog

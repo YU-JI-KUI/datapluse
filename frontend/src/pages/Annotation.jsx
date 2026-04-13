@@ -30,6 +30,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Input } from '@/components/ui/input'
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { annotationApi, configApi, getCurrentDatasetId } from '@/lib/api'
 import { formatDate, scoreColor } from '@/lib/utils'
 
@@ -199,7 +200,7 @@ export default function Annotation() {
   const [keyword, setKeyword]         = useState('')
   const [keywordInput, setKeywordInput] = useState('')
   const [page, setPage]               = useState(1)
-  const PAGE_SIZE = 50
+  const [pageSize, setPageSize]       = useState(10)
 
   const myUsername = localStorage.getItem('username') || ''
 
@@ -222,10 +223,10 @@ export default function Annotation() {
   }
 
   // ── 主列表查询 ────────────────────────────────────────────────────────────
-  const listKey = ['annotation-items', datasetId, view, page, keyword]
+  const listKey = ['annotation-items', datasetId, view, page, pageSize, keyword]
   const { data: itemsData, isLoading: listLoading, refetch: refetchList } = useQuery({
     queryKey: listKey,
-    queryFn: () => annotationApi.myItems({ view, page, page_size: PAGE_SIZE, keyword: keyword || undefined }),
+    queryFn: () => annotationApi.myItems({ view, page, page_size: pageSize, keyword: keyword || undefined }),
     enabled: !!datasetId,
     refetchInterval: 20000,
   })
@@ -257,7 +258,7 @@ export default function Annotation() {
   const result    = itemsData?.data?.data  ?? {}
   const items     = result.list            ?? []
   const total     = result.pagination?.total ?? 0
-  const totalPages = Math.ceil(total / PAGE_SIZE) || 1
+  const totalPages = Math.ceil(total / pageSize) || 1
 
   const countAll         = cntAll?.data?.data?.pagination?.total          ?? 0
   const countUnannotated = cntUnannotated?.data?.data?.pagination?.total  ?? 0
@@ -443,25 +444,36 @@ export default function Annotation() {
           )}
 
           {/* 分页 */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-3 py-2 border-t text-xs text-muted-foreground shrink-0">
-              <button
-                disabled={page <= 1}
-                onClick={() => { setPage(p => p - 1); setCurrentItem(null) }}
-                className="disabled:opacity-40 hover:text-foreground p-1"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span>{page} / {totalPages}</span>
-              <button
-                disabled={page >= totalPages}
-                onClick={() => { setPage(p => p + 1); setCurrentItem(null) }}
-                className="disabled:opacity-40 hover:text-foreground p-1"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          )}
+          <div className="flex items-center justify-end gap-1.5 px-2 py-2 border-t text-xs text-muted-foreground shrink-0">
+            <Select
+              value={String(pageSize)}
+              onValueChange={v => { setPageSize(Number(v)); setPage(1); setCurrentItem(null) }}
+            >
+              <SelectTrigger className="h-6 w-[58px] text-xs px-1.5">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {['10','25','50','100'].map(opt => (
+                  <SelectItem key={opt} value={opt} className="text-xs">{opt}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="whitespace-nowrap">{page}/{totalPages}</span>
+            <button
+              disabled={page <= 1}
+              onClick={() => { setPage(p => p - 1); setCurrentItem(null) }}
+              className="disabled:opacity-40 hover:text-foreground p-0.5"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              disabled={page >= totalPages}
+              onClick={() => { setPage(p => p + 1); setCurrentItem(null) }}
+              className="disabled:opacity-40 hover:text-foreground p-0.5"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* ── 右侧工作区 ── */}
