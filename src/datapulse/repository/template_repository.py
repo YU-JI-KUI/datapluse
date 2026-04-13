@@ -1,4 +1,4 @@
-"""Template repository - CRUD operations on export_templates table."""
+"""Template repository — t_export_template"""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from datapulse.repository.base import DEFAULT_COLUMNS
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def _now() -> str:
-    return datetime.now(_SHANGHAI).strftime("%Y-%m-%d %H:%M:%S")
+def _now() -> datetime:
+    return datetime.now(_SHANGHAI)
 
 
 def _template_to_dict(t: ExportTemplate) -> dict[str, Any]:
@@ -27,8 +27,10 @@ def _template_to_dict(t: ExportTemplate) -> dict[str, Any]:
         "format": t.format,
         "columns": t.columns or DEFAULT_COLUMNS,
         "filters": t.filters or {"status": "checked", "include_conflicts": False},
-        "created_at": t.created_at,
-        "updated_at": t.updated_at,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "created_by": t.created_by,
+        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+        "updated_by": t.updated_by,
     }
 
 
@@ -51,7 +53,7 @@ class TemplateRepository:
         row = self.session.get(ExportTemplate, template_id)
         return _template_to_dict(row) if row else None
 
-    def create(self, dataset_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    def create(self, dataset_id: int, data: dict[str, Any], created_by: str = "") -> dict[str, Any]:
         ts = _now()
         row = ExportTemplate(
             dataset_id=dataset_id,
@@ -61,13 +63,15 @@ class TemplateRepository:
             columns=data.get("columns", DEFAULT_COLUMNS),
             filters=data.get("filters", {"status": "checked", "include_conflicts": False}),
             created_at=ts,
+            created_by=created_by,
             updated_at=ts,
+            updated_by=created_by,
         )
         self.session.add(row)
         self.session.flush()
         return _template_to_dict(row)
 
-    def update(self, template_id: int, data: dict[str, Any]) -> dict[str, Any] | None:
+    def update(self, template_id: int, data: dict[str, Any], updated_by: str = "") -> dict[str, Any] | None:
         row = self.session.get(ExportTemplate, template_id)
         if row is None:
             return None
@@ -75,6 +79,7 @@ class TemplateRepository:
             if field in data:
                 setattr(row, field, data[field])
         row.updated_at = _now()
+        row.updated_by = updated_by
         return _template_to_dict(row)
 
     def delete(self, template_id: int) -> bool:

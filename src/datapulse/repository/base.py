@@ -1,9 +1,10 @@
-"""Database session management and initialization."""
+"""Database session management, singleton DBManager, and shared constants."""
 
 from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import create_engine
@@ -14,25 +15,24 @@ from datapulse.model.entities import Base, Dataset, Role, SystemConfig
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def _hash_password(password: str) -> str:
-    """bcrypt 哈希（直接调用 bcrypt 库，兼容 3.x / 4.x，无 passlib 依赖）"""
-    import bcrypt as _bcrypt
+# ── 密码工具 ──────────────────────────────────────────────────────────────────
 
+def _hash_password(password: str) -> str:
+    import bcrypt as _bcrypt
     return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
 
 
 def _verify_password(plain: str, hashed: str) -> bool:
-    """校验明文密码与 bcrypt 哈希是否匹配"""
     import bcrypt as _bcrypt
-
     return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
-def _now() -> str:
-    return datetime.now(_SHANGHAI).strftime("%Y-%m-%d %H:%M:%S")
+def _now() -> datetime:
+    return datetime.now(_SHANGHAI)
 
 
-# 默认配置（新建 dataset 时的初始值）
+# ── 共享常量 ──────────────────────────────────────────────────────────────────
+
 DEFAULT_DATASET_CONFIG: dict = {
     "llm": {
         "use_mock": True,
@@ -57,31 +57,33 @@ DEFAULT_DATASET_CONFIG: dict = {
 }
 
 DEFAULT_COLUMNS = [
-    {"source": "id", "target": "id", "include": True},
-    {"source": "text", "target": "text", "include": True},
-    {"source": "label", "target": "label", "include": True},
-    {"source": "model_pred", "target": "model_pred", "include": True},
-    {"source": "model_score", "target": "model_score", "include": True},
-    {"source": "annotator", "target": "annotator", "include": True},
+    {"source": "id",           "target": "id",           "include": True},
+    {"source": "content",      "target": "content",      "include": True},
+    {"source": "label",        "target": "label",        "include": True},
+    {"source": "annotator",    "target": "annotator",    "include": True},
     {"source": "annotated_at", "target": "annotated_at", "include": True},
-    {"source": "source_file", "target": "source_file", "include": True},
-    {"source": "created_at", "target": "created_at", "include": False},
+    {"source": "model_pred",   "target": "model_pred",   "include": True},
+    {"source": "model_score",  "target": "model_score",  "include": True},
+    {"source": "source_ref",   "target": "source_ref",   "include": True},
+    {"source": "status",       "target": "status",       "include": True},
+    {"source": "created_at",   "target": "created_at",   "include": True},
+    {"source": "updated_at",   "target": "updated_at",   "include": False},
 ]
 
 AVAILABLE_FIELDS = [
-    {"source": "id", "label": "数据 ID"},
-    {"source": "text", "label": "原始文本"},
-    {"source": "label", "label": "人工标注标签"},
-    {"source": "model_pred", "label": "模型预测标签"},
-    {"source": "model_score", "label": "模型置信度"},
-    {"source": "annotator", "label": "标注员"},
-    {"source": "annotated_at", "label": "标注时间"},
-    {"source": "source_file", "label": "来源文件"},
-    {"source": "created_at", "label": "创建时间"},
-    {"source": "updated_at", "label": "更新时间"},
+    {"source": "id",            "label": "数据 ID"},
+    {"source": "content",       "label": "原始文本"},
+    {"source": "label",         "label": "人工标注标签"},
+    {"source": "model_pred",    "label": "模型预测标签"},
+    {"source": "model_score",   "label": "模型置信度"},
+    {"source": "annotator",     "label": "标注员"},
+    {"source": "annotated_at",  "label": "标注时间"},
+    {"source": "source_ref",    "label": "来源文件"},
+    {"source": "created_at",    "label": "创建时间"},
+    {"source": "updated_at",    "label": "更新时间"},
     {"source": "conflict_flag", "label": "冲突标记"},
     {"source": "conflict_type", "label": "冲突类型"},
-    {"source": "status", "label": "数据状态"},
+    {"source": "stage",         "label": "数据阶段"},
 ]
 
 _PRESET_ROLES = [
@@ -94,31 +96,25 @@ _PRESET_ROLES = [
         "name": "annotator",
         "description": "标注员，可查看数据、提交标注、执行导出",
         "permissions": [
-            "data:read",
-            "annotation:read",
-            "annotation:write",
-            "pipeline:read",
-            "export:read",
-            "export:create",
-            "config:read",
+            "data:read", "annotation:read", "annotation:write",
+            "pipeline:read", "export:read", "export:create", "config:read",
         ],
     },
     {
         "name": "viewer",
         "description": "只读访问，可查看数据和导出结果",
         "permissions": [
-            "data:read",
-            "annotation:read",
-            "pipeline:read",
-            "export:read",
-            "config:read",
+            "data:read", "annotation:read", "pipeline:read",
+            "export:read", "config:read",
         ],
     },
 ]
 
 
+# ── DBManager ──────────────────────────────────────────────────────────────────
+
 class DBManager:
-    """PostgreSQL 存储管理器（单例）"""
+    """PostgreSQL 存储管理器（单例），所有 repository 的统一入口"""
 
     def __init__(self, db_url: str) -> None:
         self._engine = create_engine(
@@ -144,274 +140,327 @@ class DBManager:
             s.close()
 
     def seed_defaults(self) -> None:
-        """首次启动时写入预置角色和默认数据集（完全幂等，可重复调用）"""
+        """首次启动写入预置角色和默认数据集（完全幂等）"""
         with self._session() as s:
-            # 预置角色（按名称判重）
             for r in _PRESET_ROLES:
                 if not s.query(Role).filter(Role.name == r["name"]).first():
-                    s.add(
-                        Role(
-                            name=r["name"],
-                            description=r["description"],
-                            permissions=r["permissions"],
-                            created_at=_now(),
-                        )
-                    )
-            s.flush()  # 确保 roles 有 id 后再操作 dataset
+                    ts = _now()
+                    s.add(Role(
+                        name=r["name"],
+                        description=r["description"],
+                        permissions=r["permissions"],
+                        created_at=ts, created_by="system",
+                        updated_at=ts, updated_by="system",
+                    ))
+            s.flush()
 
-            # 默认数据集（按名称判重）
             if not s.query(Dataset).filter(Dataset.name == "默认数据集").first():
+                ts = _now()
                 ds = Dataset(
                     name="默认数据集",
                     description="系统初始化创建的默认数据集",
-                    is_active=True,
-                    created_at=_now(),
-                    updated_at=_now(),
+                    status="active",
+                    created_at=ts, created_by="system",
+                    updated_at=ts, updated_by="system",
                 )
                 s.add(ds)
                 s.flush()
-                s.add(
-                    SystemConfig(
-                        dataset_id=ds.id,
-                        config_data=DEFAULT_DATASET_CONFIG,
-                        updated_at=_now(),
-                        updated_by="system",
-                    )
-                )
+                s.add(SystemConfig(
+                    dataset_id=ds.id,
+                    config_data=DEFAULT_DATASET_CONFIG,
+                    updated_at=ts,
+                    updated_by="system",
+                ))
 
-    # ── User 管理 ──────────────────────────────────────────────────────────────
+    # ── User ──────────────────────────────────────────────────────────────────
+
     def list_users(self) -> list[dict]:
-        """List all users."""
         from datapulse.repository.user_repository import UserRepository
-
         with self._session() as s:
-            repo = UserRepository(s)
-            return repo.list_users()
+            return UserRepository(s).list_users()
 
     def get_user(self, user_id: int) -> dict | None:
-        """Get a user by ID."""
         from datapulse.repository.user_repository import UserRepository
-
         with self._session() as s:
-            repo = UserRepository(s)
-            return repo.get(user_id)
+            return UserRepository(s).get(user_id)
 
     def get_user_by_username(self, username: str) -> dict | None:
-        """Get a user by username (includes password_hash for auth)."""
         from datapulse.repository.user_repository import UserRepository
-
         with self._session() as s:
-            repo = UserRepository(s)
-            return repo.get_by_username(username)
+            return UserRepository(s).get_by_username(username)
 
-    def create_user(
-        self, username: str, password: str, email: str = "", role_names: list[str] | None = None
-    ) -> dict:
-        """Create a new user."""
+    def create_user(self, username: str, password: str, email: str = "",
+                    role_names: list[str] | None = None, created_by: str = "system") -> dict:
         from datapulse.repository.user_repository import UserRepository
-
         with self._session() as s:
-            repo = UserRepository(s)
-            return repo.create(username, password, email, role_names)
+            return UserRepository(s).create(username, password, email, role_names, created_by)
 
-    def update_user(self, user_id: int, data: dict) -> dict | None:
-        """Update a user."""
+    def update_user(self, user_id: int, data: dict, updated_by: str = "system") -> dict | None:
         from datapulse.repository.user_repository import UserRepository
-
         with self._session() as s:
-            repo = UserRepository(s)
-            return repo.update(user_id, data)
+            return UserRepository(s).update(user_id, data, updated_by)
 
     def delete_user(self, user_id: int) -> bool:
-        """Delete a user."""
         from datapulse.repository.user_repository import UserRepository
-
         with self._session() as s:
-            repo = UserRepository(s)
-            return repo.delete(user_id)
+            return UserRepository(s).delete(user_id)
+
+    def update_last_login(self, username: str) -> None:
+        from datapulse.repository.user_repository import UserRepository
+        with self._session() as s:
+            UserRepository(s).update_last_login(username)
 
     def list_roles(self) -> list[dict]:
-        """List all roles."""
         from datapulse.repository.user_repository import UserRepository
-
         with self._session() as s:
-            repo = UserRepository(s)
-            return repo.list_roles()
+            return UserRepository(s).list_roles()
 
-    # ── Dataset 管理 ────────────────────────────────────────────────────────────
+    # ── Dataset ───────────────────────────────────────────────────────────────
+
     def list_datasets(self, include_inactive: bool = False) -> list[dict]:
-        """List all datasets."""
         from datapulse.repository.dataset_repository import DatasetRepository
-
         with self._session() as s:
-            repo = DatasetRepository(s)
-            return repo.list_datasets(include_inactive=include_inactive)
+            return DatasetRepository(s).list_datasets(include_inactive=include_inactive)
 
     def get_dataset(self, dataset_id: int) -> dict | None:
-        """Get a dataset by ID."""
         from datapulse.repository.dataset_repository import DatasetRepository
-
         with self._session() as s:
-            repo = DatasetRepository(s)
-            return repo.get(dataset_id)
+            return DatasetRepository(s).get(dataset_id)
 
-    def create_dataset(self, name: str, description: str = "") -> dict:
-        """Create a new dataset."""
+    def create_dataset(self, name: str, description: str = "", created_by: str = "system") -> dict:
         from datapulse.repository.dataset_repository import DatasetRepository
-
         with self._session() as s:
-            repo = DatasetRepository(s)
-            return repo.create(name, description)
+            return DatasetRepository(s).create(name, description, created_by)
 
-    def update_dataset(self, dataset_id: int, data: dict) -> dict | None:
-        """Update a dataset."""
+    def update_dataset(self, dataset_id: int, data: dict, updated_by: str = "system") -> dict | None:
         from datapulse.repository.dataset_repository import DatasetRepository
-
         with self._session() as s:
-            repo = DatasetRepository(s)
-            return repo.update(dataset_id, data)
+            return DatasetRepository(s).update(dataset_id, data, updated_by)
 
     def delete_dataset(self, dataset_id: int) -> bool:
-        """Delete a dataset."""
         from datapulse.repository.dataset_repository import DatasetRepository
-
         with self._session() as s:
-            repo = DatasetRepository(s)
-            return repo.delete(dataset_id)
+            return DatasetRepository(s).delete(dataset_id)
 
-    # ── Data 管理 ───────────────────────────────────────────────────────────────
-    def create_data(self, dataset_id: int, text: str, source_file: str = "") -> dict:
-        """Create a new data item."""
+    # ── Data ──────────────────────────────────────────────────────────────────
+
+    def create_data(self, dataset_id: int, content: str, source: str = "",
+                    source_ref: str = "", created_by: str = "") -> dict | None:
         from datapulse.repository.data_repository import DataRepository
-
         with self._session() as s:
-            repo = DataRepository(s)
-            return repo.create(dataset_id, text, source_file)
+            return DataRepository(s).create(dataset_id, content, source, source_ref, created_by)
 
-    def get_data(self, item_id: int) -> dict | None:
-        """Get a data item by ID."""
+    def get_data(self, item_id: int, enrich: bool = True) -> dict | None:
         from datapulse.repository.data_repository import DataRepository
-
         with self._session() as s:
-            repo = DataRepository(s)
-            return repo.get(item_id)
+            return DataRepository(s).get(item_id, enrich=enrich)
 
-    def update_data(self, item: dict) -> dict:
-        """Update a data item."""
+    def update_stage(self, data_id: int, stage: str, updated_by: str = "") -> None:
         from datapulse.repository.data_repository import DataRepository
-
         with self._session() as s:
-            repo = DataRepository(s)
-            return repo.update(item)
+            DataRepository(s).update_stage(data_id, stage, updated_by)
 
     def delete_data(self, item_id: int) -> bool:
-        """Delete a data item."""
         from datapulse.repository.data_repository import DataRepository
-
         with self._session() as s:
-            repo = DataRepository(s)
-            return repo.delete(item_id)
+            return DataRepository(s).delete(item_id)
 
-    def list_all_data(
-        self, dataset_id: int, status: str | None = None, page: int = 1, page_size: int = 20
+    def list_all_data(self, dataset_id: int, status: str | None = None,
+                      keyword: str | None = None, page: int = 1,
+                      page_size: int = 20, enrich: bool = True) -> dict:
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).list_all(dataset_id, status, keyword, page, page_size, enrich)
+
+    def list_data_by_status(self, dataset_id: int, stage: str, enrich: bool = False) -> list[dict]:
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).list_by_status(dataset_id, stage, enrich)
+
+    def list_unannotated_by_user(self, dataset_id: int, username: str,
+                                  page: int = 1, page_size: int = 20) -> dict:
+        """多人标注模式：返回当前用户尚未标注的条目（pre_annotated | annotated）"""
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).list_unannotated_by_user(
+                dataset_id, username, page, page_size, enrich=True
+            )
+
+    def list_annotatable_for_user(
+        self,
+        dataset_id: int,
+        username: str,
+        view: str = "all",
+        page: int = 1,
+        page_size: int = 50,
+        keyword: str | None = None,
     ) -> dict:
-        """List data items with pagination."""
+        """标注工作台：返回 pre_annotated/annotated 条目，含当前用户的标注。
+        view: all | unannotated | my_annotated
+        """
         from datapulse.repository.data_repository import DataRepository
-
         with self._session() as s:
-            repo = DataRepository(s)
-            return repo.list_all(dataset_id, status, page, page_size)
-
-    def list_data_by_status(self, dataset_id: int, status: str) -> list[dict]:
-        """List data items by status."""
-        from datapulse.repository.data_repository import DataRepository
-
-        with self._session() as s:
-            repo = DataRepository(s)
-            return repo.list_by_status(dataset_id, status)
+            return DataRepository(s).list_annotatable_for_user(
+                dataset_id, username, view, page, page_size, keyword
+            )
 
     def stats(self, dataset_id: int) -> dict:
-        """Get statistics for data items."""
         from datapulse.repository.data_repository import DataRepository
-
         with self._session() as s:
-            repo = DataRepository(s)
-            return repo.stats(dataset_id)
+            return DataRepository(s).stats(dataset_id)
 
-    # ── Pipeline 管理 ────────────────────────────────────────────────────────────
+    # ── Annotation ────────────────────────────────────────────────────────────
+
+    def create_annotation(self, data_id: int, username: str, label: str,
+                           created_by: str = "") -> dict:
+        from datapulse.repository.annotation_repository import AnnotationRepository
+        with self._session() as s:
+            return AnnotationRepository(s).create_annotation(data_id, username, label, created_by)
+
+    def get_active_annotations(self, data_id: int) -> list[dict]:
+        from datapulse.repository.annotation_repository import AnnotationRepository
+        with self._session() as s:
+            return AnnotationRepository(s).get_active_annotations(data_id)
+
+    def set_annotation_result_manual(
+        self, data_id: int, final_label: str, resolver: str, updated_by: str = ""
+    ) -> dict:
+        """冲突裁决：直接设置 t_annotation_result.final_label，来源标记为 manual。
+        t_annotation 中的标注事实保持不变。
+        """
+        from datapulse.repository.annotation_repository import AnnotationRepository
+        with self._session() as s:
+            return AnnotationRepository(s).set_manual_result(
+                data_id, final_label, resolver, updated_by=updated_by or resolver
+            )
+
+    def revoke_user_annotation(self, data_id: int, username: str) -> bool:
+        """撤销用户对某条数据的有效标注，若无剩余标注则回滚状态到 pre_annotated。
+        revoke_annotation 内部已触发 _recompute_result 更新 t_annotation_result。
+        """
+        from datapulse.repository.annotation_repository import AnnotationRepository
+        with self._session() as s:
+            ok = AnnotationRepository(s).revoke_annotation(data_id, username)
+            if not ok:
+                return False
+            # 若该条数据已无任何有效标注，回滚状态到 pre_annotated
+            remaining = AnnotationRepository(s).get_active_annotations(data_id)
+            if not remaining:
+                from datapulse.repository.data_repository import DataRepository
+                DataRepository(s).update_stage(data_id, "pre_annotated", updated_by=username)
+            return True
+
+    def get_annotation_history(self, data_id: int, username: str | None = None) -> list[dict]:
+        from datapulse.repository.annotation_repository import AnnotationRepository
+        with self._session() as s:
+            return AnnotationRepository(s).get_annotation_history(data_id, username)
+
+    def create_pre_annotation(self, data_id: int, model_name: str, label: str,
+                               score: float | None = None, created_by: str = "") -> dict:
+        from datapulse.repository.annotation_repository import AnnotationRepository
+        with self._session() as s:
+            return AnnotationRepository(s).create_pre_annotation(data_id, model_name, label, score, created_by)
+
+    def get_latest_pre_annotation(self, data_id: int) -> dict | None:
+        from datapulse.repository.annotation_repository import AnnotationRepository
+        with self._session() as s:
+            return AnnotationRepository(s).get_latest_pre_annotation(data_id)
+
+    # ── Conflict ──────────────────────────────────────────────────────────────
+
+    def create_conflict(self, data_id: int, conflict_type: str, detail: dict,
+                        created_by: str = "") -> dict:
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).create(data_id, conflict_type, detail, created_by)
+
+    def clear_conflicts(self, data_id: int) -> None:
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            ConflictRepository(s).clear_conflicts(data_id)
+
+    def get_open_conflicts(self, data_id: int) -> list[dict]:
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).get_open_conflicts(data_id)
+
+    def list_conflicts_by_dataset(self, dataset_id: int, status: str | None = None) -> list[dict]:
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).list_by_dataset(dataset_id, status)
+
+    def get_conflict_by_id(self, conflict_id: int) -> dict | None:
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).get_by_id(conflict_id)
+
+    def resolve_conflict(self, conflict_id: int) -> bool:
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).resolve(conflict_id)
+
+    # ── Comment ───────────────────────────────────────────────────────────────
+
+    def create_comment(self, data_id: int, username: str, comment: str) -> dict:
+        from datapulse.repository.comment_repository import CommentRepository
+        with self._session() as s:
+            return CommentRepository(s).create(data_id, username, comment)
+
+    def list_comments(self, data_id: int) -> list[dict]:
+        from datapulse.repository.comment_repository import CommentRepository
+        with self._session() as s:
+            return CommentRepository(s).list_by_data(data_id)
+
+    # ── Pipeline ──────────────────────────────────────────────────────────────
+
     def get_pipeline_status(self, dataset_id: int) -> dict:
-        """Get pipeline status for a dataset."""
         from datapulse.repository.pipeline_repository import PipelineRepository
-
         with self._session() as s:
-            repo = PipelineRepository(s)
-            return repo.get_status(dataset_id)
+            return PipelineRepository(s).get_status(dataset_id)
 
     def set_pipeline_status(self, dataset_id: int, data: dict) -> None:
-        """Set pipeline status for a dataset."""
         from datapulse.repository.pipeline_repository import PipelineRepository
-
         with self._session() as s:
-            repo = PipelineRepository(s)
-            repo.set_status(dataset_id, data)
+            PipelineRepository(s).set_status(dataset_id, data)
 
-    # ── Config 管理 ─────────────────────────────────────────────────────────────
+    # ── Config ────────────────────────────────────────────────────────────────
+
     def get_dataset_config(self, dataset_id: int) -> dict:
-        """Get dataset configuration."""
         from datapulse.repository.config_repository import ConfigRepository
-
         with self._session() as s:
-            repo = ConfigRepository(s)
-            return repo.get_dataset_config(dataset_id)
+            return ConfigRepository(s).get_dataset_config(dataset_id)
 
-    def set_dataset_config(self, dataset_id: int, config: dict, updated_by: str) -> None:
-        """Set dataset configuration."""
+    def set_dataset_config(self, dataset_id: int, config: dict, updated_by: str = "system") -> None:
         from datapulse.repository.config_repository import ConfigRepository
-
         with self._session() as s:
-            repo = ConfigRepository(s)
-            repo.set_dataset_config(dataset_id, config, updated_by)
+            ConfigRepository(s).set_dataset_config(dataset_id, config, updated_by)
 
-    # ── Template 管理 ───────────────────────────────────────────────────────────
+    # ── Template ──────────────────────────────────────────────────────────────
+
     def list_templates(self, dataset_id: int) -> list[dict]:
-        """List templates for a dataset."""
         from datapulse.repository.template_repository import TemplateRepository
-
         with self._session() as s:
-            repo = TemplateRepository(s)
-            return repo.list_templates(dataset_id)
+            return TemplateRepository(s).list_templates(dataset_id)
 
     def get_template(self, template_id: int) -> dict | None:
-        """Get a template by ID."""
         from datapulse.repository.template_repository import TemplateRepository
-
         with self._session() as s:
-            repo = TemplateRepository(s)
-            return repo.get(template_id)
+            return TemplateRepository(s).get(template_id)
 
-    def create_template(self, dataset_id: int, data: dict) -> dict:
-        """Create a new template."""
+    def create_template(self, dataset_id: int, data: dict, created_by: str = "") -> dict:
         from datapulse.repository.template_repository import TemplateRepository
-
         with self._session() as s:
-            repo = TemplateRepository(s)
-            return repo.create(dataset_id, data)
+            return TemplateRepository(s).create(dataset_id, data, created_by)
 
-    def update_template(self, template_id: int, data: dict) -> dict | None:
-        """Update a template."""
+    def update_template(self, template_id: int, data: dict, updated_by: str = "") -> dict | None:
         from datapulse.repository.template_repository import TemplateRepository
-
         with self._session() as s:
-            repo = TemplateRepository(s)
-            return repo.update(template_id, data)
+            return TemplateRepository(s).update(template_id, data, updated_by)
 
     def delete_template(self, template_id: int) -> bool:
-        """Delete a template."""
         from datapulse.repository.template_repository import TemplateRepository
-
         with self._session() as s:
-            repo = TemplateRepository(s)
-            return repo.delete(template_id)
+            return TemplateRepository(s).delete(template_id)
 
 
 # ── 单例 ──────────────────────────────────────────────────────────────────────

@@ -17,9 +17,9 @@ import { useState, useEffect } from 'react'
 
 const STATUS_CONFIG = [
   { key: 'raw',           label: '原始',    color: '#6b7280' },
-  { key: 'processed',     label: '已清洗',  color: '#3b82f6' },
+  { key: 'cleaned',       label: '已清洗',  color: '#3b82f6' },
   { key: 'pre_annotated', label: '预标注',  color: '#8b5cf6' },
-  { key: 'labeled',       label: '已标注',  color: '#f97316' },
+  { key: 'annotated',     label: '已标注',  color: '#f97316' },
   { key: 'checked',       label: '已检测',  color: '#22c55e' },
 ]
 
@@ -153,7 +153,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="总数据量" value={stats.total} icon={Database} color="bg-gray-700" />
         <StatCard title="待标注" value={stats.pre_annotated} icon={Cpu} color="bg-violet-500" sub="预标注完成" />
-        <StatCard title="已标注" value={stats.labeled} icon={Tag} color="bg-orange-500" sub="人工标注" />
+        <StatCard title="已标注" value={stats.annotated} icon={Tag} color="bg-orange-500" sub="人工标注" />
         <StatCard title="高质量数据" value={stats.checked} icon={CheckCircle} color="bg-green-500" sub="通过冲突检测" />
       </div>
 

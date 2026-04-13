@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 // ── 角色徽章样式 ──────────────────────────────────────────────────────────────
 
@@ -236,14 +237,25 @@ export default function Users() {
     }
   }
 
-  async function handleDelete(user) {
-    if (!confirm(`确认删除用户 "${user.username}"？此操作不可恢复。`)) return
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  function requestDelete(user) {
+    setConfirmDeleteUser(user)
+    setConfirmOpen(true)
+  }
+
+  async function handleDelete() {
+    if (!confirmDeleteUser) return
     try {
-      await userApi.delete(user.id)
+      await userApi.delete(confirmDeleteUser.id)
       toast.success('已删除')
       load()
     } catch (err) {
       toast.error(err.response?.data?.detail || '删除失败')
+    } finally {
+      setConfirmDeleteUser(null)
+      setConfirmOpen(false)
     }
   }
 
@@ -342,7 +354,7 @@ export default function Users() {
                         <Pencil className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDelete(user)}
+                        onClick={() => requestDelete(user)}
                         className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
                         title="删除"
                       >
@@ -370,6 +382,15 @@ export default function Users() {
         onClose={() => { setResetOpen(false); setResetUser(null) }}
         onSave={handleResetPassword}
         user={resetUser}
+      />
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="确认删除"
+        description={`确认删除用户 "${confirmDeleteUser?.username}"？此操作不可恢复。`}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={handleDelete}
       />
     </div>
   )

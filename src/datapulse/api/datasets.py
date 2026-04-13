@@ -63,7 +63,7 @@ async def update_dataset(dataset_id: int, body: DatasetUpdate, user: AdminUser):
     if body.description is not None:
         patch["description"] = body.description
     if body.is_active is not None:
-        patch["is_active"] = body.is_active
+        patch["status"] = "active" if body.is_active else "inactive"
     updated = db.update_dataset(dataset_id, patch)
     if not updated:
         raise HTTPException(404, f"数据集不存在: {dataset_id}")

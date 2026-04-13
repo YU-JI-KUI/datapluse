@@ -1,4 +1,4 @@
-"""User repository - CRUD operations on users, roles, and user_roles tables."""
+"""User repository — t_user + t_role + t_user_role（username 逻辑外键）"""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from datapulse.repository.base import _hash_password, _verify_password
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def _now() -> str:
-    return datetime.now(_SHANGHAI).strftime("%Y-%m-%d %H:%M:%S")
+def _now() -> datetime:
+    return datetime.now(_SHANGHAI)
 
 
 def _user_to_dict(u: User, roles: list[str] | None = None) -> dict[str, Any]:
@@ -25,9 +25,9 @@ def _user_to_dict(u: User, roles: list[str] | None = None) -> dict[str, Any]:
         "email": u.email or "",
         "is_active": u.is_active,
         "roles": roles or [],
-        "created_at": u.created_at,
-        "updated_at": u.updated_at,
-        "last_login_at": u.last_login_at,
+        "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "updated_at": u.updated_at.isoformat() if u.updated_at else None,
     }
 
 
@@ -37,45 +37,50 @@ def _role_to_dict(r: Role) -> dict[str, Any]:
         "name": r.name,
         "description": r.description,
         "permissions": r.permissions or [],
-        "created_at": r.created_at,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
     }
 
 
 class UserRepository:
-    """Repository for User entity."""
+    """Repository for User entity（角色关联通过 username 逻辑外键）"""
 
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def _get_user_roles(self, user_id: int) -> list[str]:
+    def _get_user_roles(self, username: str) -> list[str]:
+        """通过 username 获取角色名列表（直接查 t_user_role，无需 JOIN role 表）"""
         rows = (
-            self.session.query(Role.name)
-            .join(UserRole, Role.id == UserRole.role_id)
-            .filter(UserRole.user_id == user_id)
+            self.session.query(UserRole.role_name)
+            .filter(UserRole.username == username)
             .all()
         )
         return [r[0] for r in rows]
 
     def list_users(self) -> list[dict[str, Any]]:
         users = self.session.query(User).order_by(User.id).all()
-        return [_user_to_dict(u, self._get_user_roles(u.id)) for u in users]
+        return [_user_to_dict(u, self._get_user_roles(u.username)) for u in users]
 
     def get(self, user_id: int) -> dict[str, Any] | None:
         u = self.session.get(User, user_id)
         if u is None:
             return None
-        return _user_to_dict(u, self._get_user_roles(user_id))
+        return _user_to_dict(u, self._get_user_roles(u.username))
 
     def get_by_username(self, username: str) -> dict[str, Any] | None:
         u = self.session.query(User).filter(User.username == username).first()
         if u is None:
             return None
-        d = _user_to_dict(u, self._get_user_roles(u.id))
+        d = _user_to_dict(u, self._get_user_roles(username))
         d["password_hash"] = u.password_hash  # 仅供认证使用
         return d
 
     def create(
-        self, username: str, password: str, email: str = "", role_names: list[str] | None = None
+        self,
+        username: str,
+        password: str,
+        email: str = "",
+        role_names: list[str] | None = None,
+        created_by: str = "system",
     ) -> dict[str, Any]:
         ts = _now()
         user = User(
@@ -84,19 +89,25 @@ class UserRepository:
             password_hash=_hash_password(password),
             is_active=True,
             created_at=ts,
+            created_by=created_by,
             updated_at=ts,
+            updated_by=created_by,
         )
         self.session.add(user)
         self.session.flush()
+
         roles: list[str] = []
         for rname in role_names or ["annotator"]:
-            role = self.session.query(Role).filter(Role.name == rname).first()
-            if role:
-                self.session.add(UserRole(user_id=user.id, role_id=role.id, created_at=ts))
+            # 校验角色是否存在
+            exists = self.session.query(Role).filter(Role.name == rname).first()
+            if exists:
+                self.session.add(
+                    UserRole(username=username, role_name=rname, created_at=ts, created_by=created_by)
+                )
                 roles.append(rname)
         return _user_to_dict(user, roles)
 
-    def update(self, user_id: int, data: dict[str, Any]) -> dict[str, Any] | None:
+    def update(self, user_id: int, data: dict[str, Any], updated_by: str = "system") -> dict[str, Any] | None:
         u = self.session.get(User, user_id)
         if u is None:
             return None
@@ -107,17 +118,21 @@ class UserRepository:
         if "password" in data and data["password"]:
             u.password_hash = _hash_password(data["password"])
         if "role_names" in data:
-            self.session.query(UserRole).filter(UserRole.user_id == user_id).delete()
+            # 删除旧绑定，重新写入
+            self.session.query(UserRole).filter(UserRole.username == u.username).delete()
+            ts = _now()
             for rname in data["role_names"]:
-                role = self.session.query(Role).filter(Role.name == rname).first()
-                if role:
-                    self.session.add(UserRole(user_id=user_id, role_id=role.id, created_at=_now()))
+                exists = self.session.query(Role).filter(Role.name == rname).first()
+                if exists:
+                    self.session.add(
+                        UserRole(username=u.username, role_name=rname, created_at=ts, created_by=updated_by)
+                    )
         u.updated_at = _now()
-        roles = self._get_user_roles(user_id)
-        return _user_to_dict(u, roles)
+        u.updated_by = updated_by
+        return _user_to_dict(u, self._get_user_roles(u.username))
 
-    def update_last_login(self, user_id: int) -> None:
-        u = self.session.get(User, user_id)
+    def update_last_login(self, username: str) -> None:
+        u = self.session.query(User).filter(User.username == username).first()
         if u:
             u.last_login_at = _now()
 
@@ -125,6 +140,7 @@ class UserRepository:
         u = self.session.get(User, user_id)
         if u is None:
             return False
+        self.session.query(UserRole).filter(UserRole.username == u.username).delete()
         self.session.delete(u)
         return True
 

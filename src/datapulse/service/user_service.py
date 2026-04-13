@@ -37,9 +37,9 @@ class UserService:
         """Update a user."""
         return self.repo.update(user_id, data)
 
-    def update_last_login(self, user_id: int) -> None:
+    def update_last_login(self, username: str) -> None:
         """Update last login timestamp."""
-        self.repo.update_last_login(user_id)
+        self.repo.update_last_login(username)
 
     def delete(self, user_id: int) -> bool:
         """Delete a user."""

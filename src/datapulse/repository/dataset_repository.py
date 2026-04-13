@@ -1,4 +1,4 @@
-"""Dataset repository - CRUD operations on datasets table."""
+"""Dataset repository — t_dataset + t_system_config"""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from datapulse.repository.base import DEFAULT_DATASET_CONFIG
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def _now() -> str:
-    return datetime.now(_SHANGHAI).strftime("%Y-%m-%d %H:%M:%S")
+def _now() -> datetime:
+    return datetime.now(_SHANGHAI)
 
 
 def _dataset_to_dict(d: Dataset) -> dict[str, Any]:
@@ -23,9 +23,11 @@ def _dataset_to_dict(d: Dataset) -> dict[str, Any]:
         "id": d.id,
         "name": d.name,
         "description": d.description,
-        "is_active": d.is_active,
-        "created_at": d.created_at,
-        "updated_at": d.updated_at,
+        "status": d.status,
+        "created_at": d.created_at.isoformat() if d.created_at else None,
+        "created_by": d.created_by,
+        "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+        "updated_by": d.updated_by,
     }
 
 
@@ -38,7 +40,7 @@ class DatasetRepository:
     def list_datasets(self, include_inactive: bool = False) -> list[dict[str, Any]]:
         q = self.session.query(Dataset)
         if not include_inactive:
-            q = q.filter(Dataset.is_active == True)
+            q = q.filter(Dataset.status == "active")
         rows = q.order_by(Dataset.id).all()
         return [_dataset_to_dict(r) for r in rows]
 
@@ -46,14 +48,16 @@ class DatasetRepository:
         row = self.session.get(Dataset, dataset_id)
         return _dataset_to_dict(row) if row else None
 
-    def create(self, name: str, description: str = "") -> dict[str, Any]:
+    def create(self, name: str, description: str = "", created_by: str = "system") -> dict[str, Any]:
         ts = _now()
         row = Dataset(
             name=name,
             description=description,
-            is_active=True,
+            status="active",
             created_at=ts,
+            created_by=created_by,
             updated_at=ts,
+            updated_by=created_by,
         )
         self.session.add(row)
         self.session.flush()
@@ -67,14 +71,15 @@ class DatasetRepository:
         )
         return _dataset_to_dict(row)
 
-    def update(self, dataset_id: int, data: dict[str, Any]) -> dict[str, Any] | None:
+    def update(self, dataset_id: int, data: dict[str, Any], updated_by: str = "system") -> dict[str, Any] | None:
         row = self.session.get(Dataset, dataset_id)
         if row is None:
             return None
-        for field in ("name", "description", "is_active"):
+        for field in ("name", "description", "status"):
             if field in data:
                 setattr(row, field, data[field])
         row.updated_at = _now()
+        row.updated_by = updated_by
         return _dataset_to_dict(row)
 
     def delete(self, dataset_id: int) -> bool:

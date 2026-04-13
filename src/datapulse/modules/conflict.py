@@ -2,10 +2,11 @@
 冲突检测模块（核心）
 
 两种冲突类型：
-1. 标注冲突（label_conflict）：同一文本被不同标注员赋予不同标签
+1. 标注冲突（label_conflict）：同一数据被不同标注员赋予不同标签
 2. 语义冲突（semantic_conflict）：语义高度相似（cosine > threshold）但标签不同
 
-所有操作均按 dataset_id 隔离，相似度阈值从 dataset 配置读取。
+结果写入 t_conflict 表（不再写回 t_data_item）。
+干净数据的 stage → checked，有冲突数据保持 annotated。
 """
 
 from __future__ import annotations
@@ -18,29 +19,30 @@ from datapulse.modules.vector import get_index
 from datapulse.repository.base import get_db
 from datapulse.repository.embeddings import get_emb
 
+
 # ── 标注冲突检测 ───────────────────────────────────────────────────────────────
 
 
-def detect_label_conflicts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    text_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+def detect_label_conflicts(items: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    """
+    同一数据条目，多位标注人给出不同标签 → label_conflict
+    返回 {data_id: conflict_detail}
+    """
+    conflicts: dict[int, dict[str, Any]] = {}
     for item in items:
-        if item.get("label") is not None:
-            text_groups[item["text"]].append(item)
-
-    conflicts = []
-    for text, group in text_groups.items():
-        labels = {i["label"] for i in group}
+        annotations = item.get("annotations", [])
+        if len(annotations) < 2:
+            continue
+        labels = {a["label"] for a in annotations}
         if len(labels) > 1:
-            for item in group:
-                item = dict(item)
-                item["conflict_flag"] = True
-                item["conflict_type"] = "label_conflict"
-                item["conflict_detail"] = {
-                    "text": text,
-                    "conflicting_labels": list(labels),
-                    "annotators": [{"annotator": i.get("annotator"), "label": i["label"]} for i in group],
-                }
-                conflicts.append(item)
+            conflicts[item["id"]] = {
+                "content": item.get("content", ""),
+                "conflicting_labels": list(labels),
+                "annotators": [
+                    {"username": a["username"], "label": a["label"]}
+                    for a in annotations
+                ],
+            }
     return conflicts
 
 
@@ -48,65 +50,62 @@ def detect_label_conflicts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def detect_semantic_conflicts(
-    dataset_id: int,
     items: list[dict[str, Any]],
     cfg: dict[str, Any],
-) -> list[dict[str, Any]]:
-    sim_cfg = cfg.get("similarity", {})
+) -> dict[int, dict[str, Any]]:
+    """
+    语义相似度 > threshold 且标签不同 → semantic_conflict
+    返回 {data_id: conflict_detail}
+    """
+    sim_cfg   = cfg.get("similarity", {})
     threshold = sim_cfg.get("threshold_high", 0.9)
-    topk = sim_cfg.get("topk", 5)
+    topk      = sim_cfg.get("topk", 5)
 
+    # 只处理有标注的数据（取第一个有效标注作为代表标签）
     labeled = [i for i in items if i.get("label") is not None]
     if len(labeled) < 2:
-        return []
+        return {}
 
-    db = get_db()
-    emb = get_emb()
+    emb   = get_emb()
     index = get_index()
 
-    conflict_ids: set[str] = set()
-    conflicts: list[dict[str, Any]] = []
+    conflict_pairs: set[tuple[int, int]] = set()
+    conflicts: dict[int, dict[str, Any]] = {}
 
     for item in labeled:
-        item_id = item["id"]
+        item_id    = item["id"]
         item_label = item["label"]
 
         vec = emb.load(item_id)
         if vec is None:
-            vec = embed_text(item["text"], cfg)
+            vec = embed_text(item["content"], cfg)
             emb.save(item_id, vec)
 
         if index.size == 0:
             continue
 
-        neighbors = index.search(vec, topk=topk + 1)
-        for neighbor_id, sim in neighbors:
+        for neighbor_id, sim in index.search(vec, topk=topk + 1):
             if neighbor_id == item_id or sim < threshold:
                 continue
-            neighbor = db.get_data(neighbor_id)
-            if neighbor is None or neighbor.get("label") is None:
-                continue
-            if neighbor["label"] == item_label:
+            neighbor = next((i for i in labeled if i["id"] == neighbor_id), None)
+            if neighbor is None or neighbor.get("label") == item_label:
                 continue
 
-            pair_key = tuple(sorted([item_id, neighbor_id]))
-            if pair_key in conflict_ids:
+            pair = tuple(sorted([item_id, neighbor_id]))
+            if pair in conflict_pairs:
                 continue
-            conflict_ids.add(pair_key)
+            conflict_pairs.add(pair)
 
-            for conflict_item, other_item in [(item, neighbor), (neighbor, item)]:
-                c = dict(conflict_item)
-                c["conflict_flag"] = True
-                c["conflict_type"] = "semantic_conflict"
-                c["conflict_detail"] = {
+            for self_item, other_item in [(item, neighbor), (neighbor, item)]:
+                detail = {
                     "similarity": round(sim, 4),
                     "threshold": threshold,
                     "paired_id": other_item["id"],
-                    "paired_text": other_item["text"],
-                    "paired_label": other_item["label"],
-                    "self_label": conflict_item.get("label"),
+                    "paired_content": other_item.get("content", ""),
+                    "paired_label": other_item.get("label"),
+                    "self_label": self_item.get("label"),
                 }
-                conflicts.append(c)
+                conflicts[self_item["id"]] = detail
 
     return conflicts
 
@@ -115,46 +114,43 @@ def detect_semantic_conflicts(
 
 
 async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
-    db = get_db()
+    db  = get_db()
     cfg = db.get_dataset_config(dataset_id)
-    labeled_items = db.list_data_by_status(dataset_id, "labeled")
-    if not labeled_items:
+
+    # 获取有标注的数据（enrich=True 以携带 annotations 列表和 label 字段）
+    annotated_items = db.list_data_by_status(dataset_id, "annotated", enrich=True)
+    if not annotated_items:
         return {"label_conflicts": 0, "semantic_conflicts": 0, "clean": 0, "total": 0}
 
-    label_conflicts = detect_label_conflicts(labeled_items)
-    label_conflict_ids = {i["id"] for i in label_conflicts}
-
-    semantic_conflicts = detect_semantic_conflicts(dataset_id, labeled_items, cfg)
-    semantic_conflict_ids = {i["id"] for i in semantic_conflicts}
+    label_conflict_map    = detect_label_conflicts(annotated_items)
+    semantic_conflict_map = detect_semantic_conflicts(annotated_items, cfg)
 
     clean_count = 0
-    for item in labeled_items:
-        item = dict(item)
-        if item["id"] in label_conflict_ids:
-            item["conflict_flag"] = True
-            item["conflict_type"] = "label_conflict"
-            item["status"] = "labeled"
-        elif item["id"] in semantic_conflict_ids:
-            item["conflict_flag"] = True
-            item["conflict_type"] = "semantic_conflict"
-            item["status"] = "labeled"
+    for item in annotated_items:
+        data_id = item["id"]
+        # 清除旧冲突记录（本次重跑覆盖）
+        db.clear_conflicts(data_id)
+
+        if data_id in label_conflict_map:
+            db.create_conflict(data_id, "label_conflict", label_conflict_map[data_id],
+                               created_by="pipeline")
+            db.update_stage(data_id, "annotated")  # 保持 annotated，待人工处理
+        elif data_id in semantic_conflict_map:
+            db.create_conflict(data_id, "semantic_conflict", semantic_conflict_map[data_id],
+                               created_by="pipeline")
+            db.update_stage(data_id, "annotated")
         else:
-            item["conflict_flag"] = False
-            item["conflict_type"] = None
-            item["conflict_detail"] = None
-            item["status"] = "checked"
+            db.update_stage(data_id, "checked")
             clean_count += 1
-        db.update_data(item)
 
     return {
-        "label_conflicts": len(label_conflict_ids),
-        "semantic_conflicts": len(semantic_conflict_ids),
+        "label_conflicts": len(label_conflict_map),
+        "semantic_conflicts": len(semantic_conflict_map),
         "clean": clean_count,
-        "total": len(labeled_items),
+        "total": len(annotated_items),
     }
 
 
 def get_conflict_items(dataset_id: int) -> list[dict[str, Any]]:
     db = get_db()
-    items = db.list_data_by_status(dataset_id, "labeled")
-    return [i for i in items if i.get("conflict_flag")]
+    return db.list_conflicts_by_dataset(dataset_id, status="open")

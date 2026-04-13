@@ -22,15 +22,19 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
-# 只在 .venv 不存在时才 sync，避免每次启动重复下载依赖
+# 清除可能存在的旧 venv 环境变量（防止与其他项目的 venv 冲突）
+unset VIRTUAL_ENV
+unset VIRTUAL_ENV_PROMPT
+
+# 安装/同步依赖（uv sync 是幂等的，依赖未变时极快）
 if [ ! -d ".venv" ]; then
     echo "[1/2] 首次运行，安装 Python 依赖..."
-    uv sync
 else
-    echo "[1/2] 依赖已就绪"
+    echo "[1/2] 同步依赖..."
 fi
+uv sync
 
-# 启动服务
+# 启动服务（直接调用 .venv 中的 Python，避免 uv run 的 venv 检测歧义）
 echo "[2/2] 启动 Web 服务 → http://localhost:8000"
 echo ""
-uv run uvicorn datapulse.main:app --host 0.0.0.0 --port 8000
+.venv/bin/python -m uvicorn datapulse.main:app --host 0.0.0.0 --port 8000

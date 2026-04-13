@@ -1,306 +1,429 @@
 -- =============================================================================
--- Datapulse 数据库初始化脚本
+-- Datapulse 数据库初始化脚本 v2.0
 -- 执行前请确认数据库已存在：CREATE DATABASE datapulse;
 -- 执行方式：psql -h <host> -p <port> -U <user> -d datapulse -f database/init.sql
+--
+-- 设计规范：
+--   - 表名以 t_ 开头
+--   - 禁止物理外键，使用逻辑外键
+--   - 所有用户字段统一使用 username（禁止 user_id）
+--   - 时间字段统一 TIMESTAMP(6)
+--   - 所有表包含完整审计字段
 -- =============================================================================
 
 
 -- =============================================================================
--- 1. 数据集表（datasets）
---    多 dataset 隔离：不同业务场景各自维护独立的数据、配置和模板
+-- 1. 数据集表
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS datasets (
-    id          SERIAL       NOT NULL,
-    name        VARCHAR(100) NOT NULL,              -- 数据集名称，如"保险意图 v1"
-    description TEXT,                               -- 业务说明，可选
-    is_active   BOOLEAN      NOT NULL DEFAULT TRUE, -- 软删除标记，FALSE 表示已归档
-    created_at  VARCHAR(30),                        -- 创建时间（上海时区，yyyy-MM-dd HH:mm:ss）
-    updated_at  VARCHAR(30),                        -- 最后更新时间
-    CONSTRAINT pk_datasets PRIMARY KEY (id)
+CREATE TABLE IF NOT EXISTS t_dataset (
+    id          BIGSERIAL    NOT NULL,
+    name        VARCHAR(100) NOT NULL,
+    description TEXT         NOT NULL DEFAULT '',
+    status      VARCHAR(20)  NOT NULL DEFAULT 'active',
+    created_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by  VARCHAR(45)  NOT NULL DEFAULT '',
+    updated_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by  VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_dataset PRIMARY KEY (id)
 );
 
-COMMENT ON TABLE  datasets            IS '数据集：多 pipeline 隔离单元，每个 dataset 有独立的数据、配置和模板';
-COMMENT ON COLUMN datasets.id         IS '数据集自增主键';
-COMMENT ON COLUMN datasets.name       IS '数据集名称，要求见名知意，如"保险意图 v2"';
-COMMENT ON COLUMN datasets.is_active  IS '是否启用。FALSE=已归档，不再接受新数据，但历史数据保留';
+COMMENT ON TABLE  t_dataset             IS '数据集表';
+COMMENT ON COLUMN t_dataset.id          IS '主键ID';
+COMMENT ON COLUMN t_dataset.name        IS '数据集名称，如"保险意图 v1"';
+COMMENT ON COLUMN t_dataset.description IS '数据集描述';
+COMMENT ON COLUMN t_dataset.status      IS '状态：active=启用，inactive=停用';
+COMMENT ON COLUMN t_dataset.created_at  IS '创建时间';
+COMMENT ON COLUMN t_dataset.created_by  IS '创建人';
+COMMENT ON COLUMN t_dataset.updated_at  IS '更新时间';
+COMMENT ON COLUMN t_dataset.updated_by  IS '最后更新人';
 
 
 -- =============================================================================
--- 2. 系统配置表（system_config）
---    每个 dataset 独立一行配置，config_data 为整块 JSONB
---    字段扩展只需修改 JSON 结构，无需 ALTER TABLE
+-- 2. 系统配置表（每个 dataset 独立一行，config_data 为整块 JSONB）
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS system_config (
-    dataset_id  INTEGER      NOT NULL,
-    config_data JSONB        NOT NULL DEFAULT '{}', -- 完整配置 JSON（见下方结构说明）
-    updated_at  VARCHAR(30),                        -- 最后保存时间
-    updated_by  VARCHAR(100),                       -- 最后保存的用户名
-    CONSTRAINT pk_system_config PRIMARY KEY (dataset_id),
-    CONSTRAINT fk_system_config_dataset FOREIGN KEY (dataset_id)
-        REFERENCES datasets(id) ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS t_system_config (
+    dataset_id  BIGINT       NOT NULL,
+    config_data JSONB        NOT NULL DEFAULT '{}',
+    updated_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by  VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_system_config PRIMARY KEY (dataset_id)
 );
 
-COMMENT ON TABLE  system_config             IS '系统配置：每个 dataset 独立一行，所有参数存于 config_data JSONB';
-COMMENT ON COLUMN system_config.dataset_id  IS '关联的 dataset，一对一关系';
-COMMENT ON COLUMN system_config.config_data IS
-    '配置 JSON 结构示例：
-    {
-      "llm": {
-        "use_mock": true,               -- true=随机预标注（开发），false=调用真实 LLM
-        "api_url": "http://...",        -- 内网 LLM 接口地址
-        "model_name": "your-model",
-        "timeout": 30
-      },
-      "embedding": {
-        "use_mock": true,               -- true=随机向量，false=加载本地模型
-        "model_path": "./models/bge-base-zh",
-        "batch_size": 64
-      },
-      "similarity": {
-        "threshold_high": 0.9,          -- 语义冲突高风险阈值（cosine 相似度）
-        "threshold_mid": 0.8,           -- 中风险阈值（预留）
-        "topk": 5                       -- 语义检索返回 top-k 邻居数
-      },
-      "pipeline": {
-        "batch_size": 32               -- LLM 预标注每批大小
-      },
-      "labels": ["寿险意图", "拒识"]   -- 标注标签列表
-    }';
-COMMENT ON COLUMN system_config.updated_by  IS '最后修改配置的用户名，用于审计';
+COMMENT ON TABLE  t_system_config             IS '系统配置表：每个 dataset 独立一行，所有参数存于 config_data JSONB';
+COMMENT ON COLUMN t_system_config.dataset_id  IS '数据集ID（逻辑外键）';
+COMMENT ON COLUMN t_system_config.config_data IS 'JSON 配置结构：{llm:{use_mock,api_url,model_name,timeout}, embedding:{use_mock,model_path,batch_size}, similarity:{threshold_high,threshold_mid,topk}, pipeline:{batch_size}, labels:[...]}';
+COMMENT ON COLUMN t_system_config.updated_at  IS '最后保存时间';
+COMMENT ON COLUMN t_system_config.updated_by  IS '最后保存的用户名';
 
 
 -- =============================================================================
--- 3. 角色表（roles）
---    预置三个角色：admin / annotator / viewer
---    permissions 为权限字符串数组，["*"] 表示全部权限
+-- 3. 角色表
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS roles (
-    id          SERIAL       NOT NULL,
-    name        VARCHAR(50)  NOT NULL,              -- 角色名称：admin / annotator / viewer
-    description TEXT,                               -- 角色说明
-    permissions JSONB        NOT NULL DEFAULT '[]', -- 权限列表，如 ["data:read", "annotation:write"]
-    created_at  VARCHAR(30),
-    CONSTRAINT pk_roles      PRIMARY KEY (id),
-    CONSTRAINT uq_roles_name UNIQUE (name)
+CREATE TABLE IF NOT EXISTS t_role (
+    id          BIGSERIAL    NOT NULL,
+    name        VARCHAR(50)  NOT NULL,
+    description TEXT         NOT NULL DEFAULT '',
+    permissions JSONB        NOT NULL DEFAULT '[]',
+    created_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by  VARCHAR(45)  NOT NULL DEFAULT '',
+    updated_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by  VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_role      PRIMARY KEY (id),
+    CONSTRAINT uq_t_role_name UNIQUE (name)
 );
 
-COMMENT ON TABLE  roles             IS 'RBAC 角色表，角色与权限的绑定';
-COMMENT ON COLUMN roles.name        IS '角色标识符，系统预置：admin / annotator / viewer';
-COMMENT ON COLUMN roles.permissions IS
-    '权限字符串数组。["*"] = 所有权限（admin 使用）。
-    细粒度权限字符串：
-      data:read          读取数据列表和详情
-      data:write         上传、删除数据
-      annotation:read    查看标注队列
-      annotation:write   提交标注结果
-      pipeline:read      查看 pipeline 状态
-      pipeline:run       触发 pipeline 运行
-      export:read        查看导出模板
-      export:create      执行导出
-      config:read        查看配置
-      config:write       修改配置
-      user:read          查看用户列表
-      user:write         创建/修改/停用用户
-      dataset:read       查看数据集列表
-      dataset:write      创建/修改数据集';
+COMMENT ON TABLE  t_role             IS 'RBAC 角色表';
+COMMENT ON COLUMN t_role.id          IS '主键ID';
+COMMENT ON COLUMN t_role.name        IS '角色标识符：admin / annotator / viewer';
+COMMENT ON COLUMN t_role.description IS '角色说明';
+COMMENT ON COLUMN t_role.permissions IS '权限字符串数组，["*"] 表示全部权限';
+COMMENT ON COLUMN t_role.created_at  IS '创建时间';
+COMMENT ON COLUMN t_role.created_by  IS '创建人';
+COMMENT ON COLUMN t_role.updated_at  IS '更新时间';
+COMMENT ON COLUMN t_role.updated_by  IS '最后更新人';
 
 
 -- =============================================================================
--- 4. 用户表（users）
+-- 4. 用户表
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS users (
-    id            SERIAL       NOT NULL,
-    username      VARCHAR(100) NOT NULL,            -- 登录用户名，全局唯一
-    email         VARCHAR(200),                      -- 邮箱（可选，暂不做认证）
-    password_hash VARCHAR(200) NOT NULL,             -- bcrypt 哈希，不存明文
-    is_active     BOOLEAN      NOT NULL DEFAULT TRUE, -- FALSE=账号已停用，无法登录
-    created_at    VARCHAR(30),
-    updated_at    VARCHAR(30),
-    last_login_at VARCHAR(30),                       -- 最近一次登录时间，用于安全审计
-    CONSTRAINT pk_users          PRIMARY KEY (id),
-    CONSTRAINT uq_users_username UNIQUE (username)
+CREATE TABLE IF NOT EXISTS t_user (
+    id            BIGSERIAL    NOT NULL,
+    username      VARCHAR(100) NOT NULL,
+    email         VARCHAR(200) NOT NULL DEFAULT '',
+    password_hash VARCHAR(200) NOT NULL,
+    is_active     BOOLEAN      NOT NULL DEFAULT TRUE,
+    last_login_at TIMESTAMP(6),
+    created_at    TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by    VARCHAR(45)  NOT NULL DEFAULT '',
+    updated_at    TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by    VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_user          PRIMARY KEY (id),
+    CONSTRAINT uq_t_user_username UNIQUE (username)
 );
 
-COMMENT ON TABLE  users                IS 'RBAC 用户表';
-COMMENT ON COLUMN users.username       IS '登录用户名，大小写敏感，全局唯一';
-COMMENT ON COLUMN users.password_hash  IS 'bcrypt 哈希密码（passlib bcrypt），绝不存储明文';
-COMMENT ON COLUMN users.is_active      IS '是否可登录。停用账号后 JWT 仍可能在有效期内，需前端配合处理';
-COMMENT ON COLUMN users.last_login_at  IS '最近登录时间（上海时区），用于安全审计，每次登录更新';
+COMMENT ON TABLE  t_user               IS '用户账号表';
+COMMENT ON COLUMN t_user.id            IS '主键ID';
+COMMENT ON COLUMN t_user.username      IS '登录用户名，全局唯一，大小写敏感';
+COMMENT ON COLUMN t_user.email         IS '邮箱，可选';
+COMMENT ON COLUMN t_user.password_hash IS 'bcrypt 哈希密码，不存明文';
+COMMENT ON COLUMN t_user.is_active     IS '账号是否可登录：TRUE=正常，FALSE=已停用';
+COMMENT ON COLUMN t_user.last_login_at IS '最近登录时间，用于安全审计';
+COMMENT ON COLUMN t_user.created_at    IS '创建时间';
+COMMENT ON COLUMN t_user.created_by    IS '创建人';
+COMMENT ON COLUMN t_user.updated_at    IS '更新时间';
+COMMENT ON COLUMN t_user.updated_by    IS '最后更新人';
 
 
 -- =============================================================================
--- 5. 用户-角色关联表（user_roles）
---    全局角色（不区分 dataset），简化 RBAC 实现
+-- 5. 用户-角色关联表（使用 username 逻辑外键，不使用 user_id）
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS user_roles (
-    user_id    INTEGER     NOT NULL,
-    role_id    INTEGER     NOT NULL,
-    created_at VARCHAR(30),                          -- 授权时间
-    CONSTRAINT pk_user_roles PRIMARY KEY (user_id, role_id),
-    CONSTRAINT fk_user_roles_user FOREIGN KEY (user_id)
-        REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_user_roles_role FOREIGN KEY (role_id)
-        REFERENCES roles(id) ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS t_user_role (
+    username   VARCHAR(100) NOT NULL,
+    role_name  VARCHAR(50)  NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_user_role PRIMARY KEY (username, role_name)
 );
 
-COMMENT ON TABLE  user_roles           IS '用户与角色的多对多关联，全局生效（不区分 dataset）';
-COMMENT ON COLUMN user_roles.user_id   IS '关联用户 ID';
-COMMENT ON COLUMN user_roles.role_id   IS '关联角色 ID';
-COMMENT ON COLUMN user_roles.created_at IS '授权时间，用于审计';
+COMMENT ON TABLE  t_user_role           IS '用户与角色的多对多关联（username 逻辑外键）';
+COMMENT ON COLUMN t_user_role.username  IS '用户名（逻辑外键 → t_user.username）';
+COMMENT ON COLUMN t_user_role.role_name IS '角色名（逻辑外键 → t_role.name）';
+COMMENT ON COLUMN t_user_role.created_at IS '授权时间';
+COMMENT ON COLUMN t_user_role.created_by IS '授权操作人';
 
 
 -- =============================================================================
--- 6. 数据条目表（data_items）
---    核心业务表，每条对应一条待标注的文本
+-- 6. 数据条目表（核心，纯数据层，不含标注信息）
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS data_items (
+CREATE TABLE IF NOT EXISTS t_data_item (
+    id           BIGSERIAL    NOT NULL,
+    dataset_id   BIGINT       NOT NULL,
+    content      TEXT         NOT NULL,
+    content_hash VARCHAR(64)  NOT NULL,
+    source       VARCHAR(50)  NOT NULL DEFAULT '',
+    source_ref   VARCHAR(255) NOT NULL DEFAULT '',
+    status       VARCHAR(30)  NOT NULL DEFAULT 'raw',
+    created_at   TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by   VARCHAR(45)  NOT NULL DEFAULT '',
+    updated_at   TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by   VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_data_item PRIMARY KEY (id)
+);
+
+COMMENT ON TABLE  t_data_item              IS '数据条目表（纯数据层，标注信息在 t_annotation 中）';
+COMMENT ON COLUMN t_data_item.id           IS '主键ID';
+COMMENT ON COLUMN t_data_item.dataset_id   IS '数据集ID（逻辑外键）';
+COMMENT ON COLUMN t_data_item.content      IS '原始文本内容';
+COMMENT ON COLUMN t_data_item.content_hash IS '文本内容 SHA-256 哈希，用于去重';
+COMMENT ON COLUMN t_data_item.source       IS '数据来源：excel=Excel文件，csv=CSV文件，json=JSON文件，manual=手动录入';
+COMMENT ON COLUMN t_data_item.source_ref   IS '来源引用，如文件名或接口地址';
+COMMENT ON COLUMN t_data_item.status       IS '当前阶段（冗余字段，与 t_data_state.stage 保持同步）：raw、cleaned、pre_annotated、annotated、checked';
+COMMENT ON COLUMN t_data_item.created_at   IS '创建时间';
+COMMENT ON COLUMN t_data_item.created_by   IS '创建人';
+COMMENT ON COLUMN t_data_item.updated_at   IS '更新时间';
+COMMENT ON COLUMN t_data_item.updated_by   IS '最后更新人';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_t_data_item_hash ON t_data_item(dataset_id, content_hash);
+CREATE INDEX IF NOT EXISTS idx_t_data_item_dataset_status ON t_data_item(dataset_id, status);
+
+
+-- =============================================================================
+-- 7. 数据流转状态表（控制流，与 t_data_item 一对一）
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS t_data_state (
+    data_id    BIGINT       NOT NULL,
+    stage      VARCHAR(50)  NOT NULL DEFAULT 'raw',
+    updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_data_state PRIMARY KEY (data_id)
+);
+
+COMMENT ON TABLE  t_data_state           IS '数据流转状态表（控制流，与 t_data_item 一对一）';
+COMMENT ON COLUMN t_data_state.data_id   IS '数据ID（逻辑外键 → t_data_item.id）';
+COMMENT ON COLUMN t_data_state.stage     IS '当前阶段：raw=原始上传，cleaned=清洗完成，pre_annotated=LLM预标注完成，annotated=人工标注完成，checked=冲突检测通过';
+COMMENT ON COLUMN t_data_state.updated_at IS '状态更新时间';
+COMMENT ON COLUMN t_data_state.updated_by IS '状态更新操作人';
+
+
+-- =============================================================================
+-- 8. LLM 预标注表（记录每次预标注结果，支持多版本）
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS t_pre_annotation (
+    id         BIGSERIAL      NOT NULL,
+    data_id    BIGINT         NOT NULL,
+    model_name VARCHAR(100)   NOT NULL,
+    label      VARCHAR(200)   NOT NULL,
+    score      NUMERIC(5, 4),
+    version    INT            NOT NULL DEFAULT 1,
+    created_at TIMESTAMP(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by VARCHAR(45)    NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_pre_annotation PRIMARY KEY (id)
+);
+
+COMMENT ON TABLE  t_pre_annotation            IS 'LLM 预标注表';
+COMMENT ON COLUMN t_pre_annotation.id         IS '主键ID';
+COMMENT ON COLUMN t_pre_annotation.data_id    IS '数据ID（逻辑外键）';
+COMMENT ON COLUMN t_pre_annotation.model_name IS '模型名称';
+COMMENT ON COLUMN t_pre_annotation.label      IS '预测标签';
+COMMENT ON COLUMN t_pre_annotation.score      IS '置信度，范围 0~1';
+COMMENT ON COLUMN t_pre_annotation.version    IS '预标注版本号，同一数据多次预标注递增';
+COMMENT ON COLUMN t_pre_annotation.created_at IS '创建时间';
+COMMENT ON COLUMN t_pre_annotation.created_by IS '触发人（pipeline 操作者）';
+
+CREATE INDEX IF NOT EXISTS idx_t_pre_annotation_data ON t_pre_annotation(data_id);
+
+
+-- =============================================================================
+-- 9. 人工标注表（核心，支持多人标注 + 多版本历史）
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS t_annotation (
+    id         BIGSERIAL    NOT NULL,
+    data_id    BIGINT       NOT NULL,
+    username   VARCHAR(100) NOT NULL,
+    label      VARCHAR(200) NOT NULL,
+    version    INT          NOT NULL DEFAULT 1,
+    is_active  BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_annotation PRIMARY KEY (id)
+);
+
+COMMENT ON TABLE  t_annotation           IS '人工标注表（支持多人标注，每人可多版本）';
+COMMENT ON COLUMN t_annotation.id        IS '主键ID';
+COMMENT ON COLUMN t_annotation.data_id   IS '数据ID（逻辑外键）';
+COMMENT ON COLUMN t_annotation.username  IS '标注人用户名（逻辑外键）';
+COMMENT ON COLUMN t_annotation.label     IS '标注标签';
+COMMENT ON COLUMN t_annotation.version   IS '版本号，同一用户对同一数据多次标注时递增';
+COMMENT ON COLUMN t_annotation.is_active IS '是否为有效版本：TRUE=当前版本，FALSE=历史版本';
+COMMENT ON COLUMN t_annotation.created_at IS '标注时间';
+COMMENT ON COLUMN t_annotation.created_by IS '操作人（通常与 username 相同）';
+
+CREATE INDEX IF NOT EXISTS idx_t_annotation_data    ON t_annotation(data_id);
+CREATE INDEX IF NOT EXISTS idx_t_annotation_user    ON t_annotation(data_id, username);
+CREATE INDEX IF NOT EXISTS idx_t_annotation_active  ON t_annotation(data_id, is_active);
+
+
+-- =============================================================================
+-- 10. 标注结果汇总表（每条数据一行，由标注写入自动触发聚合）
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS t_annotation_result (
     id              BIGSERIAL    NOT NULL,
-    dataset_id      INTEGER      NOT NULL,           -- 所属数据集（强制关联）
-    text            TEXT         NOT NULL,           -- 用户原始输入文本，不做清洗修改
-    status          VARCHAR(20)  NOT NULL DEFAULT 'raw', -- 数据当前所在阶段（见状态机）
-    label           VARCHAR(200),                    -- 人工标注的最终标签
-    model_pred      VARCHAR(200),                    -- LLM 预标注预测标签
-    model_score     FLOAT,                           -- LLM 预测置信度，范围 0~1
-    annotator       VARCHAR(100),                    -- 最后标注的用户名（来自 JWT sub）
-    annotated_at    VARCHAR(30),                     -- 标注提交时间（上海时区）
-    conflict_flag   BOOLEAN      DEFAULT FALSE,      -- 是否存在标注冲突或语义冲突
-    conflict_type   VARCHAR(50),                     -- 冲突类型：label_conflict / semantic_conflict
-    conflict_detail JSONB,                           -- 冲突详情（见注释）
-    source_file     VARCHAR(500),                    -- 来源文件名，便于溯源
-    created_at      VARCHAR(30),                     -- 首次写入时间（上海时区）
-    updated_at      VARCHAR(30),                     -- 最后更新时间（上海时区）
-    CONSTRAINT pk_data_items PRIMARY KEY (id),
-    CONSTRAINT fk_data_items_dataset FOREIGN KEY (dataset_id)
-        REFERENCES datasets(id) ON DELETE CASCADE
+    data_id         BIGINT       NOT NULL,
+    dataset_id      BIGINT       NOT NULL,
+    final_label     VARCHAR(200),
+    label_source    VARCHAR(20)  NOT NULL DEFAULT 'auto',
+    annotator_count INT          NOT NULL DEFAULT 0,
+    resolver        VARCHAR(100),
+    updated_at      TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by      VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_annotation_result        PRIMARY KEY (id),
+    CONSTRAINT uq_t_annotation_result_data   UNIQUE (data_id)
 );
 
-COMMENT ON TABLE  data_items               IS '核心数据表：意图识别数据条目，随 pipeline 流转状态';
-COMMENT ON COLUMN data_items.dataset_id    IS '所属数据集，不同 dataset 的数据完全隔离';
-COMMENT ON COLUMN data_items.status        IS
-    '状态机（线性流转）：
-      raw            → 原始上传，未经处理
-      processed      → 文本清洗完成
-      pre_annotated  → LLM 预标注完成，等待人工审核
-      labeling       → 标注员已"取走"，标注进行中
-      labeled        → 人工标注完成，待冲突检测
-      checked        → 通过冲突检测，可导出的高质量数据';
-COMMENT ON COLUMN data_items.label         IS '人工最终标签，只有 status=labeled/checked 时有值';
-COMMENT ON COLUMN data_items.model_score   IS 'LLM 置信度，0~1。高分表示模型较确定，可作为标注优先级参考';
-COMMENT ON COLUMN data_items.conflict_flag IS 'TRUE 表示存在冲突（label_conflict 或 semantic_conflict），需人工审核';
-COMMENT ON COLUMN data_items.conflict_detail IS
-    'label_conflict 结构：
-    {"text":"...", "conflicting_labels":["A","B"], "annotators":[{"annotator":"u1","label":"A"}]}
-    semantic_conflict 结构：
-    {"similarity":0.93, "threshold":0.9, "paired_id":123, "paired_text":"...",
-     "paired_label":"B", "self_label":"A"}';
+COMMENT ON TABLE  t_annotation_result                  IS '标注结果汇总表：每条数据一行，由 t_annotation 写入触发聚合维护';
+COMMENT ON COLUMN t_annotation_result.id               IS '主键ID';
+COMMENT ON COLUMN t_annotation_result.data_id          IS '数据ID（逻辑外键 → t_data_item.id），全局唯一';
+COMMENT ON COLUMN t_annotation_result.dataset_id       IS '数据集ID（冗余，方便按 dataset 聚合查询）';
+COMMENT ON COLUMN t_annotation_result.final_label      IS '最终标注标签；auto=多数投票结果，manual=冲突裁决结果；无标注时为 NULL';
+COMMENT ON COLUMN t_annotation_result.label_source     IS '标签来源：auto=多数投票自动计算，manual=冲突裁决手动设定';
+COMMENT ON COLUMN t_annotation_result.annotator_count  IS '当前有效标注人数（is_active=TRUE 的行数）';
+COMMENT ON COLUMN t_annotation_result.resolver         IS '冲突裁决人用户名；仅 label_source=manual 时有值';
+COMMENT ON COLUMN t_annotation_result.updated_at       IS '最后更新时间';
+COMMENT ON COLUMN t_annotation_result.updated_by       IS '最后更新操作人';
 
-CREATE INDEX IF NOT EXISTS idx_data_items_dataset_status
-    ON data_items(dataset_id, status);
-CREATE INDEX IF NOT EXISTS idx_data_items_created_at
-    ON data_items(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_t_annotation_result_dataset ON t_annotation_result(dataset_id);
 
 
 -- =============================================================================
--- 7. 导出模板表（export_templates）
---    每个 dataset 独立管理模板，支持自定义字段映射
+-- 11. 数据评论表（标注讨论 / 说明原因）
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS export_templates (
-    id          SERIAL       NOT NULL,
-    dataset_id  INTEGER      NOT NULL,
-    name        VARCHAR(100) NOT NULL,              -- 模板名称，如"训练集标准格式"
-    description TEXT,                               -- 模板用途说明
-    format      VARCHAR(20)  NOT NULL DEFAULT 'json', -- 输出格式：json / excel / csv
-    columns     JSONB,                              -- 字段映射列表（见注释）
-    filters     JSONB,                              -- 导出过滤条件（见注释）
-    created_at  VARCHAR(30),
-    updated_at  VARCHAR(30),
-    CONSTRAINT pk_export_templates PRIMARY KEY (id),
-    CONSTRAINT fk_export_templates_dataset FOREIGN KEY (dataset_id)
-        REFERENCES datasets(id) ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS t_data_comment (
+    id         BIGSERIAL    NOT NULL,
+    data_id    BIGINT       NOT NULL,
+    username   VARCHAR(100) NOT NULL,
+    comment    TEXT         NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_data_comment PRIMARY KEY (id)
 );
 
-COMMENT ON TABLE  export_templates            IS '导出模板：定义导出时的字段映射、格式和过滤条件，每个 dataset 独立';
-COMMENT ON COLUMN export_templates.columns    IS
-    '字段映射数组，每项为：
-    {"source": "text", "target": "sentence", "include": true}
-      source  = 数据库字段名（来自 data_items）
-      target  = 输出文件中的字段名（可自定义）
-      include = 是否包含在导出中';
-COMMENT ON COLUMN export_templates.filters    IS
-    '过滤条件：
-    {"status": "checked", "include_conflicts": false}
-      status            = 只导出该状态的数据
-      include_conflicts = false 则排除 conflict_flag=true 的数据';
-COMMENT ON COLUMN export_templates.format     IS '输出格式：json（带缩进）/ excel（xlsx）/ csv（utf-8-sig）';
+COMMENT ON TABLE  t_data_comment           IS '数据评论表（标注讨论 / 说明原因）';
+COMMENT ON COLUMN t_data_comment.id        IS '主键ID';
+COMMENT ON COLUMN t_data_comment.data_id   IS '数据ID（逻辑外键）';
+COMMENT ON COLUMN t_data_comment.username  IS '评论人用户名';
+COMMENT ON COLUMN t_data_comment.comment   IS '评论内容';
+COMMENT ON COLUMN t_data_comment.created_at IS '评论时间';
+COMMENT ON COLUMN t_data_comment.created_by IS '操作人';
+
+CREATE INDEX IF NOT EXISTS idx_t_data_comment_data ON t_data_comment(data_id);
 
 
 -- =============================================================================
--- 8. Pipeline 状态表（pipeline_status）
---    每个 dataset 独立一行，记录最近一次 pipeline 运行状态
+-- 12. 冲突检测表（标注冲突 + 语义冲突，独立可追溯）
 -- =============================================================================
-CREATE TABLE IF NOT EXISTS pipeline_status (
-    dataset_id   INTEGER      NOT NULL,
-    status       VARCHAR(20)  DEFAULT 'idle',       -- idle / running / completed / error
-    current_step VARCHAR(50),                        -- 当前执行步骤：process / pre_annotate / embed / check
-    progress     INTEGER      DEFAULT 0,             -- 整体进度百分比，0~100
-    detail       JSONB,                              -- 当前步骤进度详情（见注释）
-    started_at   VARCHAR(30),                        -- pipeline 开始时间
-    finished_at  VARCHAR(30),                        -- pipeline 完成/失败时间
-    error        TEXT,                               -- 失败时的错误信息
-    updated_at   VARCHAR(30),                        -- 最后更新时间
-    CONSTRAINT pk_pipeline_status PRIMARY KEY (dataset_id),
-    CONSTRAINT fk_pipeline_status_dataset FOREIGN KEY (dataset_id)
-        REFERENCES datasets(id) ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS t_conflict (
+    id            BIGSERIAL    NOT NULL,
+    data_id       BIGINT       NOT NULL,
+    conflict_type VARCHAR(50)  NOT NULL,
+    detail        JSONB        NOT NULL DEFAULT '{}',
+    status        VARCHAR(20)  NOT NULL DEFAULT 'open',
+    created_at    TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by    VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_conflict PRIMARY KEY (id)
 );
 
-COMMENT ON TABLE  pipeline_status             IS 'Pipeline 运行状态：每个 dataset 独立一行，记录最近一次运行';
-COMMENT ON COLUMN pipeline_status.status      IS 'idle=未运行 / running=运行中 / completed=完成 / error=失败';
-COMMENT ON COLUMN pipeline_status.progress    IS '整体进度 0-100，各步骤进度加权平均';
-COMMENT ON COLUMN pipeline_status.detail      IS
-    '当前步骤进度详情：
-    {"processed":100, "total":500, "skipped":5, "pct":"20.0%",
-     "speed_per_sec":12.5, "eta_seconds":32, "elapsed_seconds":8.0}';
+COMMENT ON TABLE  t_conflict               IS '冲突检测记录表';
+COMMENT ON COLUMN t_conflict.id            IS '主键ID';
+COMMENT ON COLUMN t_conflict.data_id       IS '数据ID（逻辑外键）';
+COMMENT ON COLUMN t_conflict.conflict_type IS '冲突类型：label_conflict=标注冲突，semantic_conflict=语义冲突';
+COMMENT ON COLUMN t_conflict.detail        IS '冲突详情 JSON：label_conflict 包含 conflicting_labels/annotators；semantic_conflict 包含 similarity/threshold/paired_id/paired_text/paired_label';
+COMMENT ON COLUMN t_conflict.status        IS '冲突状态：open=待处理，resolved=已解决';
+COMMENT ON COLUMN t_conflict.created_at    IS '创建时间';
+COMMENT ON COLUMN t_conflict.created_by    IS '检测触发人';
+
+CREATE INDEX IF NOT EXISTS idx_t_conflict_data   ON t_conflict(data_id);
+CREATE INDEX IF NOT EXISTS idx_t_conflict_status ON t_conflict(status);
+
+
+-- =============================================================================
+-- 13. 导出模板表
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS t_export_template (
+    id          BIGSERIAL    NOT NULL,
+    dataset_id  BIGINT       NOT NULL,
+    name        VARCHAR(100) NOT NULL,
+    description TEXT         NOT NULL DEFAULT '',
+    format      VARCHAR(20)  NOT NULL DEFAULT 'json',
+    columns     JSONB,
+    filters     JSONB,
+    created_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by  VARCHAR(45)  NOT NULL DEFAULT '',
+    updated_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by  VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_export_template PRIMARY KEY (id)
+);
+
+COMMENT ON TABLE  t_export_template             IS '导出模板表';
+COMMENT ON COLUMN t_export_template.id          IS '主键ID';
+COMMENT ON COLUMN t_export_template.dataset_id  IS '所属数据集ID（逻辑外键）';
+COMMENT ON COLUMN t_export_template.name        IS '模板名称';
+COMMENT ON COLUMN t_export_template.description IS '模板描述';
+COMMENT ON COLUMN t_export_template.format      IS '输出格式：json / excel / csv';
+COMMENT ON COLUMN t_export_template.columns     IS '字段映射数组：[{"source":"content","target":"text","include":true},...]';
+COMMENT ON COLUMN t_export_template.filters     IS '过滤条件：{"status":"checked","include_conflicts":false}';
+COMMENT ON COLUMN t_export_template.created_at  IS '创建时间';
+COMMENT ON COLUMN t_export_template.created_by  IS '创建人';
+COMMENT ON COLUMN t_export_template.updated_at  IS '更新时间';
+COMMENT ON COLUMN t_export_template.updated_by  IS '最后更新人';
+
+CREATE INDEX IF NOT EXISTS idx_t_export_template_dataset ON t_export_template(dataset_id);
+
+
+-- =============================================================================
+-- 14. Pipeline 运行状态表（每个 dataset 独立一行）
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS t_pipeline_status (
+    dataset_id   BIGINT       NOT NULL,
+    status       VARCHAR(20)  NOT NULL DEFAULT 'idle',
+    current_step VARCHAR(50)  NOT NULL DEFAULT '',
+    progress     INT          NOT NULL DEFAULT 0,
+    detail       JSONB,
+    started_at   TIMESTAMP(6),
+    finished_at  TIMESTAMP(6),
+    error        TEXT,
+    updated_at   TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by   VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_pipeline_status PRIMARY KEY (dataset_id)
+);
+
+COMMENT ON TABLE  t_pipeline_status              IS 'Pipeline 运行状态表，每个 dataset 独立一行';
+COMMENT ON COLUMN t_pipeline_status.dataset_id   IS '数据集ID（逻辑外键）';
+COMMENT ON COLUMN t_pipeline_status.status       IS 'Pipeline 状态：idle=未运行，running=运行中，completed=完成，error=失败';
+COMMENT ON COLUMN t_pipeline_status.current_step IS '当前执行步骤：process / pre_annotate / embed / check';
+COMMENT ON COLUMN t_pipeline_status.progress     IS '整体进度 0~100';
+COMMENT ON COLUMN t_pipeline_status.detail       IS '当前步骤详情：{processed,total,skipped,pct,speed_per_sec,eta_seconds,elapsed_seconds}';
+COMMENT ON COLUMN t_pipeline_status.started_at   IS 'Pipeline 启动时间';
+COMMENT ON COLUMN t_pipeline_status.finished_at  IS 'Pipeline 完成或失败时间';
+COMMENT ON COLUMN t_pipeline_status.error        IS '失败时的错误信息';
+COMMENT ON COLUMN t_pipeline_status.updated_at   IS '最后更新时间';
+COMMENT ON COLUMN t_pipeline_status.updated_by   IS '最后更新人';
 
 
 -- =============================================================================
 -- 初始数据：预置角色
--- SERIAL 自增，不指定 id，由数据库分配
 -- =============================================================================
-INSERT INTO roles (name, description, permissions, created_at)
+INSERT INTO t_role (name, description, permissions, created_by, updated_by)
 VALUES
     ('admin',
      '超级管理员，拥有所有权限',
      '["*"]',
-     '2026-01-01 00:00:00'),
+     'system', 'system'),
 
     ('annotator',
      '标注员，可查看数据、提交标注、执行导出',
      '["data:read","annotation:read","annotation:write","pipeline:read","export:read","export:create","config:read"]',
-     '2026-01-01 00:00:00'),
+     'system', 'system'),
 
     ('viewer',
      '只读访问，可查看数据和导出结果，不可操作',
      '["data:read","annotation:read","pipeline:read","export:read","config:read"]',
-     '2026-01-01 00:00:00')
+     'system', 'system')
 ON CONFLICT (name) DO NOTHING;
 
 
 -- =============================================================================
 -- 初始数据：默认数据集 + 配置
--- SERIAL 自增，dataset 的 id 由序列分配（通常为 1）
--- system_config 通过子查询关联
 -- =============================================================================
-INSERT INTO datasets (name, description, is_active, created_at, updated_at)
+INSERT INTO t_dataset (name, description, status, created_by, updated_by)
 VALUES (
     '默认数据集',
     '系统初始化创建的默认数据集',
-    TRUE,
-    '2026-01-01 00:00:00',
-    '2026-01-01 00:00:00'
+    'active',
+    'system', 'system'
 )
 ON CONFLICT DO NOTHING;
 
-INSERT INTO system_config (dataset_id, config_data, updated_at, updated_by)
+INSERT INTO t_system_config (dataset_id, config_data, updated_by)
 SELECT
     d.id,
     '{
@@ -325,23 +448,17 @@ SELECT
         },
         "labels": ["寿险意图", "拒识", "健康险意图", "财险意图", "其他意图"]
     }'::jsonb,
-    '2026-01-01 00:00:00',
     'system'
-FROM datasets d
+FROM t_dataset d
 WHERE d.name = '默认数据集'
 ON CONFLICT (dataset_id) DO NOTHING;
 
 
 -- =============================================================================
--- 管理员账号
--- 请使用 tools/seed_admin.py 交互式创建，或参考以下手动方式：
---   1. 运行 tools/hash_password.py 生成 bcrypt 哈希
---   2. 将 <BCRYPT_HASH> 替换为生成的哈希值后取消注释执行
+-- 管理员账号（交互式创建，见 tools/seed_admin.py）
 -- =============================================================================
--- INSERT INTO users (username, email, password_hash, is_active, created_at, updated_at)
--- VALUES ('admin', '', '<BCRYPT_HASH>', TRUE, NOW()::text, NOW()::text);
+-- INSERT INTO t_user (username, email, password_hash, is_active, created_by, updated_by)
+-- VALUES ('admin', '', '<BCRYPT_HASH>', TRUE, 'system', 'system');
 --
--- INSERT INTO user_roles (user_id, role_id, created_at)
--- SELECT u.id, r.id, NOW()::text
--- FROM users u, roles r
--- WHERE u.username = 'admin' AND r.name = 'admin';
+-- INSERT INTO t_user_role (username, role_name, created_by)
+-- VALUES ('admin', 'admin', 'system');

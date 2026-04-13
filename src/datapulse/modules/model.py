@@ -3,8 +3,8 @@
 use_mock=True  → 随机分配标签（开发用）
 use_mock=False → 发 HTTP 请求到内部平台（生产用）
 
-配置通过 cfg dict 传入（来自 DB system_config），支持热更新。
-替换真实接口时，只需修改 _call_real_llm() 函数即可。
+配置通过 cfg dict 传入（来自 DB t_system_config），支持热更新。
+返回值仅包含预测结果（label + score），不修改 item 状态。
 """
 
 from __future__ import annotations
@@ -14,18 +14,12 @@ from typing import Any
 
 import httpx
 
-# ── Mock 实现 ──────────────────────────────────────────────────────────────
-
 
 def _mock_predict(text: str, labels: list[str]) -> tuple[str, float]:
-    """随机预标注，用于开发和演示"""
     random.seed(hash(text) % (2**31))
     label = random.choice(labels)
     score = round(random.uniform(0.65, 0.99), 4)
     return label, score
-
-
-# ── 真实 LLM 接口（预留）──────────────────────────────────────────────────
 
 
 def _build_prompt(text: str, labels: list[str]) -> str:
@@ -38,73 +32,51 @@ def _build_prompt(text: str, labels: list[str]) -> str:
 
 
 async def _call_real_llm(text: str, labels: list[str], cfg: dict[str, Any]) -> tuple[str, float]:
-    """
-    调用内部大模型平台。
-    根据实际平台 API 格式修改此函数。
-    cfg 来自 DB system_config.llm 节点。
-    """
     llm_cfg = cfg.get("llm", {})
-    api_url = llm_cfg.get("api_url", "")
+    api_url    = llm_cfg.get("api_url", "")
     model_name = llm_cfg.get("model_name", "")
-    timeout = llm_cfg.get("timeout", 30)
+    timeout    = llm_cfg.get("timeout", 30)
 
-    prompt = _build_prompt(text, labels)
     payload = {
         "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": _build_prompt(text, labels)}],
         "temperature": 0.1,
         "max_tokens": 32,
     }
-
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            api_url,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-        )
+        resp = await client.post(api_url, json=payload,
+                                 headers={"Content-Type": "application/json"})
         resp.raise_for_status()
         result = resp.json()
 
     raw_label = result["choices"][0]["message"]["content"].strip()
     label = raw_label if raw_label in labels else labels[0]
-    score = result.get("usage", {}).get("confidence", 0.9)
-    return label, float(score)
+    score = float(result.get("usage", {}).get("confidence", 0.9))
+    return label, score
 
 
-# ── 公共接口 ───────────────────────────────────────────────────────────────
-
-
-async def pre_annotate(item: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
-    """对单条数据进行预标注，返回更新后的 item"""
-    llm_cfg = cfg.get("llm", {})
+async def pre_annotate(item: dict[str, Any], cfg: dict[str, Any]) -> tuple[str, float]:
+    """对单条数据预标注，返回 (label, score)"""
+    llm_cfg  = cfg.get("llm", {})
     use_mock = llm_cfg.get("use_mock", True)
-    labels = cfg.get("labels", ["意图A", "意图B"])
-    text = item["text"]
+    labels   = cfg.get("labels", ["意图A", "意图B"])
+    text     = item.get("content", "")
 
     try:
         if use_mock:
-            label, score = _mock_predict(text, labels)
-        else:
-            label, score = await _call_real_llm(text, labels, cfg)
-    except Exception as e:
-        label = labels[0]
-        score = 0.0
-        item = dict(item)
-        item["pre_annotate_error"] = str(e)
-
-    item = dict(item)
-    item["model_pred"] = label
-    item["model_score"] = score
-    item["status"] = "pre_annotated"
-    return item
+            return _mock_predict(text, labels)
+        return await _call_real_llm(text, labels, cfg)
+    except Exception:
+        return labels[0], 0.0
 
 
 async def pre_annotate_batch(
     items: list[dict[str, Any]],
     cfg: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """批量预标注"""
+) -> list[tuple[dict[str, Any], str, float]]:
+    """批量预标注，返回 [(item, label, score), ...]"""
     results = []
     for item in items:
-        results.append(await pre_annotate(item, cfg))
+        label, score = await pre_annotate(item, cfg)
+        results.append((item, label, score))
     return results

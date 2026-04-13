@@ -3,7 +3,8 @@ import { Toaster } from 'sonner'
 import Layout from '@/components/Layout'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
-import DataManagement from '@/pages/DataManagement'
+import DataUpload from '@/pages/DataUpload'
+import DataExplorer from '@/pages/DataExplorer'
 import PreAnnotation from '@/pages/PreAnnotation'
 import Annotation from '@/pages/Annotation'
 import ConflictDetection from '@/pages/ConflictDetection'
@@ -37,7 +38,8 @@ export default function App() {
         >
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard"      element={<Dashboard />} />
-          <Route path="data"           element={<DataManagement />} />
+          <Route path="data"           element={<DataUpload />} />
+          <Route path="explorer"       element={<DataExplorer />} />
           <Route path="pre-annotation" element={<PreAnnotation />} />
           <Route path="annotation"     element={<Annotation />} />
           <Route path="conflicts"      element={<ConflictDetection />} />

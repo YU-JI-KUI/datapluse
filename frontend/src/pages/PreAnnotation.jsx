@@ -15,8 +15,8 @@ export default function PreAnnotation() {
   const [running, setRunning] = useState(false)
 
   const { data: processedData } = useQuery({
-    queryKey: ['processed-count'],
-    queryFn: () => dataApi.list({ status: 'processed', page: 1, page_size: 1 }),
+    queryKey: ['cleaned-count'],
+    queryFn: () => dataApi.list({ status: 'cleaned', page: 1, page_size: 1 }),
   })
 
   const { data: preAnnotatedData, isLoading, refetch } = useQuery({
@@ -31,18 +31,18 @@ export default function PreAnnotation() {
     refetchInterval: 10000,
   })
 
-  const processedResult = processedData?.data?.data ?? processedData?.data ?? {}
-  const preAnnotatedResult = preAnnotatedData?.data?.data ?? preAnnotatedData?.data ?? {}
+  const processedResult = processedData?.data?.data ?? {}
+  const preAnnotatedResult = preAnnotatedData?.data?.data ?? {}
   const pipeline = pipelineData?.data?.data ?? pipelineData?.data ?? {}
-  const processedCount = processedResult.total || 0
-  const preAnnotatedCount = preAnnotatedResult.total || 0
-  const preAnnotated = preAnnotatedResult.items || []
+  const processedCount = processedResult.pagination?.total || 0
+  const preAnnotatedCount = preAnnotatedResult.pagination?.total || 0
+  const preAnnotated = preAnnotatedResult.list || []
 
   async function handleRunPreAnnotate() {
     setRunning(true)
     try {
       await pipelineApi.runStep('pre_annotate')
-      toast.success('预标注完成')
+      toast.success('预标注已启动（异步执行）')
       refetch()
       qc.invalidateQueries(['pipeline-status'])
     } catch (err) {
@@ -132,7 +132,7 @@ export default function PreAnnotation() {
                 <TableHead>文本</TableHead>
                 <TableHead>预测标签</TableHead>
                 <TableHead>置信度</TableHead>
-                <TableHead>创建时间</TableHead>
+                <TableHead className="w-40 whitespace-nowrap">创建时间</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -143,17 +143,17 @@ export default function PreAnnotation() {
               ) : preAnnotated.map(item => (
                 <TableRow key={item.id}>
                   <TableCell>
-                    <p className="text-sm max-w-sm truncate" title={item.text}>{item.text}</p>
+                    <p className="text-sm max-w-sm truncate" title={item.content}>{item.content}</p>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="purple">{item.model_pred || '-'}</Badge>
+                    <Badge variant="purple">{item.pre_annotation?.label || '-'}</Badge>
                   </TableCell>
                   <TableCell>
-                    <span className={`text-sm font-medium ${scoreColor(item.model_score)}`}>
-                      {item.model_score ? `${(item.model_score * 100).toFixed(1)}%` : '-'}
+                    <span className={`text-sm font-medium ${scoreColor(item.pre_annotation?.score)}`}>
+                      {item.pre_annotation?.score != null ? `${(item.pre_annotation.score * 100).toFixed(1)}%` : '-'}
                     </span>
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                     {formatDate(item.created_at)}
                   </TableCell>
                 </TableRow>

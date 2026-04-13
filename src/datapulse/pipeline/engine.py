@@ -2,9 +2,9 @@
 Pipeline 引擎（按 dataset 隔离）
 流程：process → pre_annotate → embed → check
 
-每个步骤都接受 dataset_id 参数，操作范围严格限制在该 dataset 内。
-配置从 DB system_config 表读取，支持热更新。
-进度详情：数量 / 百分比 / 速度 / ETA
+每个步骤严格按 dataset_id 隔离，配置从 DB t_system_config 读取（热更新）。
+stage 流转使用 t_data_state，不再直接更新 t_data_item 内嵌字段。
+pre_annotation 结果写入 t_pre_annotation，冲突写入 t_conflict。
 """
 
 from __future__ import annotations
@@ -23,12 +23,11 @@ from datapulse.repository.base import get_db
 from datapulse.repository.embeddings import get_emb
 
 STEPS = ["process", "pre_annotate", "embed", "check"]
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 
-SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
-
-def _now() -> str:
-    return datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d %H:%M:%S")
+def _now() -> datetime:
+    return datetime.now(_SHANGHAI)
 
 
 def _set_status(
@@ -37,15 +36,15 @@ def _set_status(
     step: str = "",
     progress: int = 0,
     detail: dict[str, Any] | None = None,
-    **extra,
+    **extra: Any,
 ) -> None:
-    db = get_db()
+    db   = get_db()
     data: dict[str, Any] = {
-        "status": status,
+        "status":       status,
         "current_step": step,
-        "progress": progress,
-        "detail": detail or {},
-        "updated_at": _now(),
+        "progress":     progress,
+        "detail":       detail or {},
+        "updated_at":   _now(),
         **extra,
     }
     db.set_pipeline_status(dataset_id, data)
@@ -53,16 +52,16 @@ def _set_status(
 
 def _make_detail(processed: int, total: int, skipped: int, start_time: float) -> dict[str, Any]:
     elapsed = time.time() - start_time
-    speed = processed / elapsed if elapsed > 0 else 0
-    eta = int((total - processed) / speed) if speed > 0 else 0
-    pct = processed / total * 100 if total > 0 else 0
+    speed   = processed / elapsed if elapsed > 0 else 0
+    eta     = int((total - processed) / speed) if speed > 0 else 0
+    pct     = processed / total * 100 if total > 0 else 0
     return {
-        "processed": processed,
-        "total": total,
-        "skipped": skipped,
-        "pct": f"{pct:.1f}%",
-        "speed_per_sec": round(speed, 1),
-        "eta_seconds": eta,
+        "processed":       processed,
+        "total":           total,
+        "skipped":         skipped,
+        "pct":             f"{pct:.1f}%",
+        "speed_per_sec":   round(speed, 1),
+        "eta_seconds":     eta,
         "elapsed_seconds": round(elapsed, 1),
     }
 
@@ -71,25 +70,21 @@ def _make_detail(processed: int, total: int, skipped: int, start_time: float) ->
 
 
 async def step_process(dataset_id: int) -> dict[str, Any]:
-    """清洗 raw → processed"""
-    db = get_db()
-    raw_items = db.list_data_by_status(dataset_id, "raw")
-    total = len(raw_items)
+    """清洗 raw → cleaned"""
+    db         = get_db()
+    raw_items  = db.list_data_by_status(dataset_id, "raw")
+    total      = len(raw_items)
     if total == 0:
         return {"step": "process", "processed": 0, "skipped": 0}
 
     start_time = time.time()
-    skipped = 0
+    skipped    = 0
     for i, item in enumerate(raw_items):
         updated = process_item(item)
-        if not updated:
-            skipped += 1
-            continue
-        db.update_data(updated)
+        # 更新文本内容（清洗后）和 stage
+        db.update_stage(updated["id"] if "id" in updated else item["id"], "cleaned")
         _set_status(
-            dataset_id,
-            "running",
-            "process",
+            dataset_id, "running", "process",
             int((i + 1) / total * 100),
             detail=_make_detail(i + 1, total, skipped, start_time),
         )
@@ -98,28 +93,29 @@ async def step_process(dataset_id: int) -> dict[str, Any]:
 
 
 async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
-    """预标注 processed → pre_annotated"""
-    db = get_db()
-    cfg = db.get_dataset_config(dataset_id)
-    items = db.list_data_by_status(dataset_id, "processed")
-    total = len(items)
+    """预标注 cleaned → pre_annotated（结果写入 t_pre_annotation）"""
+    db         = get_db()
+    cfg        = db.get_dataset_config(dataset_id)
+    items      = db.list_data_by_status(dataset_id, "cleaned")
+    total      = len(items)
     if total == 0:
         return {"step": "pre_annotate", "annotated": 0, "skipped": 0}
 
     batch_size = cfg.get("pipeline", {}).get("batch_size", 32)
-    annotated = 0
+    model_name = cfg.get("llm", {}).get("model_name", "mock")
+    annotated  = 0
     start_time = time.time()
 
     for i in range(0, total, batch_size):
-        batch = items[i : i + batch_size]
+        batch   = items[i : i + batch_size]
         results = await pre_annotate_batch(batch, cfg)
-        for r in results:
-            db.update_data(r)
-        annotated += len(results)
+        for item, label, score in results:
+            data_id = item["id"]
+            db.create_pre_annotation(data_id, model_name, label, score, created_by="pipeline")
+            db.update_stage(data_id, "pre_annotated")
+            annotated += 1
         _set_status(
-            dataset_id,
-            "running",
-            "pre_annotate",
+            dataset_id, "running", "pre_annotate",
             int(annotated / total * 100),
             detail=_make_detail(annotated, total, 0, start_time),
         )
@@ -128,34 +124,32 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
 
 
 async def step_embed(dataset_id: int) -> dict[str, Any]:
-    """为 pre_annotated / labeled / checked 数据生成 embedding"""
-    db = get_db()
-    cfg = db.get_dataset_config(dataset_id)
+    """为 pre_annotated / annotated / checked 数据生成 embedding"""
+    db    = get_db()
+    cfg   = db.get_dataset_config(dataset_id)
     items = []
-    for s in ["pre_annotated", "labeled", "checked"]:
-        items.extend(db.list_data_by_status(dataset_id, s))
+    for stage in ["pre_annotated", "annotated", "checked"]:
+        items.extend(db.list_data_by_status(dataset_id, stage))
 
     total = len(items)
     if total == 0:
         return {"step": "embed", "embedded": 0, "skipped": 0}
 
-    emb = get_emb()
-    embedded = 0
-    skipped = 0
+    emb        = get_emb()
+    embedded   = 0
+    skipped    = 0
     start_time = time.time()
 
     for item in items:
         if emb.load(item["id"]) is not None:
-            skipped += 1
+            skipped  += 1
             embedded += 1
         else:
-            vec = embed_text(item["text"], cfg)
+            vec = embed_text(item["content"], cfg)
             emb.save(item["id"], vec)
             embedded += 1
         _set_status(
-            dataset_id,
-            "running",
-            "embed",
+            dataset_id, "running", "embed",
             int(embedded / total * 100),
             detail=_make_detail(embedded, total, skipped, start_time),
         )
@@ -165,21 +159,18 @@ async def step_embed(dataset_id: int) -> dict[str, Any]:
 
 
 async def step_check(dataset_id: int) -> dict[str, Any]:
-    """冲突检测 labeled → checked"""
+    """冲突检测 annotated → checked（干净）或保持 annotated（有冲突）"""
     _set_status(dataset_id, "running", "check", 10, detail={"pct": "10%", "total": 0})
     result = await run_conflict_detection(dataset_id)
-    total = result.get("total", 0)
+    total  = result.get("total", 0)
     _set_status(
-        dataset_id,
-        "running",
-        "check",
-        100,
+        dataset_id, "running", "check", 100,
         detail={
-            "total": total,
-            "pct": "100%",
-            "label_conflicts": result.get("label_conflicts", 0),
+            "total":              total,
+            "pct":                "100%",
+            "label_conflicts":    result.get("label_conflicts", 0),
             "semantic_conflicts": result.get("semantic_conflicts", 0),
-            "clean": result.get("clean", 0),
+            "clean":              result.get("clean", 0),
         },
     )
     return {"step": "check", **result}
@@ -195,7 +186,8 @@ async def run_all(dataset_id: int) -> None:
         r2 = await step_pre_annotate(dataset_id)
         r3 = await step_embed(dataset_id)
         r4 = await step_check(dataset_id)
-        _set_status(dataset_id, "completed", "", 100, finished_at=_now(), results=[r1, r2, r3, r4])
+        _set_status(dataset_id, "completed", "", 100,
+                    finished_at=_now(), results=[r1, r2, r3, r4])
     except Exception as e:
         _set_status(dataset_id, "error", "", 0, error=str(e), finished_at=_now())
         raise
@@ -208,13 +200,14 @@ async def run_step(dataset_id: int, step: str) -> dict[str, Any]:
     _set_status(dataset_id, "running", step, 0, started_at=_now())
     try:
         fn = {
-            "process": step_process,
+            "process":      step_process,
             "pre_annotate": step_pre_annotate,
-            "embed": step_embed,
-            "check": step_check,
+            "embed":        step_embed,
+            "check":        step_check,
         }[step]
         result = await fn(dataset_id)
-        _set_status(dataset_id, "completed", step, 100, finished_at=_now(), results=result)
+        _set_status(dataset_id, "completed", step, 100,
+                    finished_at=_now(), results=result)
         return result
     except Exception as e:
         _set_status(dataset_id, "error", step, 0, error=str(e), finished_at=_now())

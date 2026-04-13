@@ -40,9 +40,9 @@ export const setCurrentDatasetId = (id) => {
   }
 }
 
-// dataset_id 为 null 时返回空响应，不发起请求，避免后端 422
-// （发生于已登录用户刷新页面、localStorage 中尚未写入 current_dataset_id 的瞬间）
-const _empty = (defaultData = null) => Promise.resolve({ data: { success: true, data: defaultData } })
+// dataset_id 为 null 时返回空响应，不发起请求
+const _empty = (defaultData = null) =>
+  Promise.resolve({ data: { code: 0, data: defaultData } })
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
@@ -79,25 +79,33 @@ export const userApi = {
   resetPassword:  (id, data) => api.post(`/users/${id}/reset-password`, data),
 }
 
-// ── Data ───────────────────────────────────────────────────────────────────────
+// ── Data Items (v2) ────────────────────────────────────────────────────────────
 
 export const dataApi = {
   upload: (file, datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty()
     const form = new FormData()
     form.append('file', file)
-    return api.post('/data/upload', form, { params: { dataset_id: datasetId } })
+    return api.post('/data-items/upload', form, {
+      params: { dataset_id: datasetId },
+    })
   },
   list: (params = {}, datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty({ total: 0, items: [], page: 1, page_size: 20 })
-    return api.get('/data/list', { params: { ...params, dataset_id: datasetId } })
+    return api.get('/data-items', {
+      params: { dataset_id: datasetId, ...params },
+    })
   },
   stats: (datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty({})
-    return api.get('/data/stats', { params: { dataset_id: datasetId } })
+    return api.get('/data-items/stats', { params: { dataset_id: datasetId } })
   },
-  getItem:    (id) => api.get(`/data/${id}`),
-  deleteItem: (id) => api.delete(`/data/${id}`),
+  create: (content, sourceRef = '', datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/data-items', { dataset_id: datasetId, content, source_ref: sourceRef })
+  },
+  getItem:    (id) => api.get(`/data-items/${id}`),
+  deleteItem: (id) => api.delete(`/data-items/${id}`),
 }
 
 // ── Pipeline ───────────────────────────────────────────────────────────────────
@@ -118,23 +126,103 @@ export const pipelineApi = {
   steps: () => api.get('/pipeline/steps'),
 }
 
-// ── Annotation ─────────────────────────────────────────────────────────────────
+// ── Annotations (v2) ──────────────────────────────────────────────────────────
 
 export const annotationApi = {
+  // 提交标注（POST /api/annotations）
+  submit: (data_id, label) =>
+    api.post('/annotations', { data_id, label }),
+
+  // 批量提交（POST /api/annotations/batch）
+  batchSubmit: (annotations) =>
+    api.post('/annotations/batch', annotations),
+
+  // 获取某条数据的当前标注（GET /api/annotations?data_id=X）
+  list: (data_id) =>
+    api.get('/annotations', { params: { data_id } }),
+
+  // 标注历史（GET /api/annotations/history?data_id=X）
+  history: (data_id, username) =>
+    api.get('/annotations/history', { params: { data_id, username } }),
+
+  // 撤销当前用户标注（DELETE /api/annotations?data_id=X）
+  revoke: (data_id) =>
+    api.delete('/annotations', { params: { data_id } }),
+
+  // 待标注队列（GET /api/annotations/queue）
   queue: (params = {}, datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty({ total: 0, items: [] })
-    return api.get('/annotation/queue', { params: { ...params, dataset_id: datasetId } })
+    return api.get('/annotations/queue', {
+      params: { dataset_id: datasetId, ...params },
+    })
   },
+
+  // 获取下一条待标注（GET /api/annotations/next）
   next: (datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty(null)
-    return api.get('/annotation/next', { params: { dataset_id: datasetId } })
+    return api.get('/annotations/next', { params: { dataset_id: datasetId } })
   },
+
+  // 标注工作台统一接口：全部 / 未标注 / 我的标注（含 my_annotation 字段）
+  // view: 'all' | 'unannotated' | 'my_annotated'
+  myItems: (params = {}, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty({ list: [], pagination: { total: 0, page: 1, page_size: 50 } })
+    return api.get('/annotations/my-items', {
+      params: { dataset_id: datasetId, ...params },
+    })
+  },
+
+  // 已标注列表（复用 dataApi，status=annotated）
   labeled: (params = {}, datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty({ total: 0, items: [] })
-    return api.get('/annotation/labeled', { params: { ...params, dataset_id: datasetId } })
+    return api.get('/data-items', {
+      params: { dataset_id: datasetId, status: 'annotated', ...params },
+    })
   },
-  submit:      (item_id, label) => api.post('/annotation/submit', { item_id, label }),
-  batchSubmit: (annotations)    => api.post('/annotation/batch-submit', { annotations }),
+}
+
+// ── Conflicts (v2) ────────────────────────────────────────────────────────────
+
+export const conflictApi = {
+  list: (params = {}, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty([])
+    return api.get('/conflicts', {
+      params: { dataset_id: datasetId, ...params },
+    })
+  },
+  listByDataId: (data_id) =>
+    api.get('/conflicts', { params: { data_id } }),
+
+  detect: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/conflicts/detect', {}, { params: { dataset_id: datasetId } })
+  },
+
+  resolve: (conflictId, label) =>
+    api.patch(`/conflicts/${conflictId}/resolve`, { label }),
+}
+
+// ── Comments (v2) ─────────────────────────────────────────────────────────────
+
+export const commentApi = {
+  list: (data_id) =>
+    api.get('/comments', { params: { data_id } }),
+
+  add: (data_id, comment) =>
+    api.post('/comments', { data_id, comment }),
+}
+
+// ── Pre-Annotations (v2) ──────────────────────────────────────────────────────
+
+export const preAnnotationApi = {
+  run: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/pre-annotations/run', {}, {
+      params: { dataset_id: datasetId },
+    })
+  },
+  get: (data_id) =>
+    api.get('/pre-annotations', { params: { data_id } }),
 }
 
 // ── Config ─────────────────────────────────────────────────────────────────────

@@ -21,18 +21,16 @@ const FORMAT_ICONS = {
 }
 
 const ALL_FIELDS = [
-  { source: 'id',           label: '数据 ID' },
-  { source: 'text',         label: '原始文本' },
-  { source: 'label',        label: '人工标注标签' },
-  { source: 'model_pred',   label: '模型预测标签' },
-  { source: 'model_score',  label: '模型置信度' },
-  { source: 'annotator',    label: '标注员' },
-  { source: 'annotated_at', label: '标注时间' },
-  { source: 'source_file',  label: '来源文件' },
-  { source: 'created_at',   label: '创建时间' },
-  { source: 'updated_at',   label: '更新时间' },
-  { source: 'conflict_flag','label': '冲突标记' },
-  { source: 'status',       label: '数据状态' },
+  { source: 'id',                  label: '数据 ID' },
+  { source: 'content',             label: '原始文本' },
+  { source: 'annotation_label',    label: '人工标注标签' },
+  { source: 'annotation_username', label: '标注员' },
+  { source: 'pre_label',           label: '模型预测标签' },
+  { source: 'pre_score',           label: '模型置信度' },
+  { source: 'source_ref',          label: '来源文件' },
+  { source: 'status',              label: '数据状态' },
+  { source: 'created_at',          label: '创建时间' },
+  { source: 'updated_at',          label: '更新时间' },
 ]
 
 // ── 模板编辑器 ─────────────────────────────────────────────────────────────────
@@ -115,7 +113,7 @@ function TemplateEditor({ initial, onSave, onCancel }) {
         <div className="flex items-center justify-between">
           <label className="text-xs font-medium text-muted-foreground">字段映射（源变量 → 输出字段名）</label>
           {availableToAdd.length > 0 && (
-            <Select onValueChange={addField} value="">
+            <Select onValueChange={(v) => { addField(v) }} value="__placeholder__">
               <SelectTrigger className="w-36 h-7 text-xs">
                 <SelectValue placeholder="+ 添加字段" />
               </SelectTrigger>
@@ -211,7 +209,7 @@ function ExportPanel() {
     queryFn: () => templateApi.list(),
   })
 
-  const checkedCount = checkedData?.data?.total || 0
+  const checkedCount = checkedData?.data?.data?.pagination?.total || 0
   const templates = tplData?.data?.data || []
 
   async function handleExport() {

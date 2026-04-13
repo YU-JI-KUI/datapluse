@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Database, Tag, CheckSquare, AlertTriangle,
+  LayoutDashboard, Database, Search, Tag, CheckSquare, AlertTriangle,
   Settings, Download, LogOut, Cpu, ChevronLeft, ChevronRight,
   Users, ChevronDown,
 } from 'lucide-react'
@@ -9,14 +9,15 @@ import { cn } from '@/lib/utils'
 import { datasetApi, getCurrentDatasetId, setCurrentDatasetId } from '@/lib/api'
 
 const navItems = [
-  { to: '/dashboard',      label: 'Dashboard',  icon: LayoutDashboard },
-  { to: '/data',           label: '数据管理',    icon: Database },
-  { to: '/pre-annotation', label: '预标注',      icon: Cpu },
-  { to: '/annotation',     label: '标注',        icon: Tag },
-  { to: '/conflicts',      label: '冲突检测',    icon: AlertTriangle },
-  { to: '/config',         label: '配置中心',    icon: Settings },
-  { to: '/export',         label: '数据导出',    icon: Download },
-  { to: '/users',          label: '用户管理',    icon: Users },
+  { to: '/dashboard',      label: 'Dashboard',    icon: LayoutDashboard },
+  { to: '/explorer',       label: 'Data Explorer', icon: Search },
+  { to: '/data',           label: '数据上传',      icon: Database },
+  { to: '/pre-annotation', label: '预标注',        icon: Cpu },
+  { to: '/annotation',     label: '标注工作台',    icon: Tag },
+  { to: '/conflicts',      label: '冲突检测',      icon: AlertTriangle },
+  { to: '/config',         label: '配置中心',      icon: Settings },
+  { to: '/export',         label: '数据导出',      icon: Download },
+  { to: '/users',          label: '用户管理',      icon: Users },
 ]
 
 export default function Layout() {

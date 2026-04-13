@@ -4,20 +4,20 @@ import { toast } from 'sonner'
 import { Upload, Trash2, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { dataApi } from '@/lib/api'
-import { formatDate, getStatusLabel, getStatusColor } from '@/lib/utils'
+import { formatDate, getStatusLabel, getStatusColor, getActiveLabel, getPreLabel, getPreScore } from '@/lib/utils'
 
 const STATUS_OPTIONS = [
-  { value: 'all', label: '全部状态' },
-  { value: 'raw', label: '原始' },
-  { value: 'processed', label: '已清洗' },
+  { value: 'all',           label: '全部状态' },
+  { value: 'raw',           label: '原始' },
+  { value: 'cleaned',       label: '已清洗' },
   { value: 'pre_annotated', label: '已预标注' },
-  { value: 'labeled', label: '已标注' },
-  { value: 'checked', label: '已检测' },
+  { value: 'annotated',     label: '已标注' },
+  { value: 'checked',       label: '已检测' },
 ]
 
 export default function DataManagement() {
@@ -34,17 +34,17 @@ export default function DataManagement() {
     staleTime: 0,
   })
 
-  const responseBody = data?.data
-  const result = responseBody?.data ?? responseBody ?? {}
-  const items = result.items || []
-  const total = result.total || 0
+  const result = data?.data?.data ?? {}
+  const items = result.list || []
+  const total = result.pagination?.total || 0
   const totalPages = Math.ceil(total / 20)
 
   async function uploadFile(file) {
     setUploading(true)
     try {
       const res = await dataApi.upload(file)
-      toast.success(`上传成功：新增 ${res.data.created} 条，跳过 ${res.data.skipped} 条`)
+      const d = res.data?.data ?? res.data ?? {}
+      toast.success(`上传成功：新增 ${d.created ?? 0} 条，跳过 ${d.skipped ?? 0} 条，去重 ${d.dup_skipped ?? 0} 条`)
       qc.invalidateQueries(['data-list'])
     } catch (err) {
       toast.error(err.response?.data?.detail || '上传失败')
@@ -64,16 +64,27 @@ export default function DataManagement() {
     setDragging(false)
     const file = e.dataTransfer.files?.[0]
     if (file) uploadFile(file)
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleDelete(id) {
-    if (!confirm('确定删除这条数据？')) return
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  function requestDelete(id) {
+    setConfirmDeleteId(id)
+    setConfirmOpen(true)
+  }
+
+  async function handleDelete() {
+    if (confirmDeleteId === null) return
     try {
-      await dataApi.deleteItem(id)
+      await dataApi.deleteItem(confirmDeleteId)
       toast.success('已删除')
       refetch()
     } catch {
       toast.error('删除失败')
+    } finally {
+      setConfirmDeleteId(null)
+      setConfirmOpen(false)
     }
   }
 
@@ -139,7 +150,7 @@ export default function DataManagement() {
                 <TableHead>预测标签</TableHead>
                 <TableHead>人工标签</TableHead>
                 <TableHead>来源文件</TableHead>
-                <TableHead>创建时间</TableHead>
+                <TableHead className="w-40 whitespace-nowrap">创建时间</TableHead>
                 <TableHead className="w-16"></TableHead>
               </TableRow>
             </TableHeader>
@@ -148,38 +159,43 @@ export default function DataManagement() {
                 <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">加载中...</TableCell></TableRow>
               ) : items.length === 0 ? (
                 <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">暂无数据，请上传文件</TableCell></TableRow>
-              ) : items.map(item => (
-                <TableRow key={item.id}>
-                  <TableCell className="max-w-xs">
-                    <p className="truncate text-sm" title={item.text}>{item.text}</p>
-                    <p className="text-xs text-muted-foreground font-mono">#{item.id}</p>
-                  </TableCell>
-                  <TableCell>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(item.status)}`}>
-                      {getStatusLabel(item.status)}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    {item.model_pred
-                      ? <><span className="text-sm">{item.model_pred}</span><span className="ml-1 text-xs text-muted-foreground">{item.model_score ? `(${(item.model_score * 100).toFixed(0)}%)` : ''}</span></>
-                      : <span className="text-muted-foreground text-sm">-</span>
-                    }
-                  </TableCell>
-                  <TableCell>
-                    {item.label
-                      ? <Badge variant="outline">{item.label}</Badge>
-                      : <span className="text-muted-foreground text-sm">-</span>
-                    }
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{item.source_file || '-'}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatDate(item.created_at)}</TableCell>
-                  <TableCell>
-                    <button onClick={() => handleDelete(item.id)} className="text-muted-foreground hover:text-destructive transition-colors">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </TableCell>
-                </TableRow>
-              ))}
+              ) : items.map(item => {
+                const preLabel = getPreLabel(item)
+                const preScore = getPreScore(item)
+                const activeLabel = getActiveLabel(item)
+                return (
+                  <TableRow key={item.id}>
+                    <TableCell className="max-w-xs">
+                      <p className="truncate text-sm" title={item.content}>{item.content}</p>
+                      <p className="text-xs text-muted-foreground font-mono">#{item.id}</p>
+                    </TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(item.status)}`}>
+                        {getStatusLabel(item.status)}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {preLabel
+                        ? <><span className="text-sm">{preLabel}</span><span className="ml-1 text-xs text-muted-foreground">{preScore != null ? `(${(preScore * 100).toFixed(0)}%)` : ''}</span></>
+                        : <span className="text-muted-foreground text-sm">-</span>
+                      }
+                    </TableCell>
+                    <TableCell>
+                      {activeLabel
+                        ? <Badge variant="outline">{activeLabel}</Badge>
+                        : <span className="text-muted-foreground text-sm">-</span>
+                      }
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{item.source_ref || '-'}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(item.created_at)}</TableCell>
+                    <TableCell>
+                      <button onClick={() => requestDelete(item.id)} className="text-muted-foreground hover:text-destructive transition-colors">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
 
@@ -193,6 +209,15 @@ export default function DataManagement() {
           )}
         </CardContent>
       </Card>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="确认删除"
+        description="确定要删除这条数据吗？此操作无法撤销。"
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={handleDelete}
+      />
     </div>
   )
 }

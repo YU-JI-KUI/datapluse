@@ -148,7 +148,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
         if not user_service.verify_password(form.password, user["password_hash"]):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码错误")
 
-        user_service.update_last_login(user["id"])
+        user_service.update_last_login(user["username"])
         token = _create_token(user["id"], user["username"], user["roles"])
         return Token(
             access_token=token,
