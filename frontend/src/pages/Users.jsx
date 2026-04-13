@@ -40,9 +40,8 @@ function StatusBadge({ active }) {
 function UserFormDialog({ open, onClose, onSave, user, roles }) {
   const isEdit = !!user
   const [form, setForm] = useState({
-    username: '',
-    display_name: '',
-    password: '',
+    username:  '',
+    password:  '',
     role_name: 'annotator',
     is_active: true,
   })
@@ -51,14 +50,13 @@ function UserFormDialog({ open, onClose, onSave, user, roles }) {
   useEffect(() => {
     if (user) {
       setForm({
-        username:     user.username,
-        display_name: user.display_name || '',
-        password:     '',
-        role_name:    user.roles?.[0] || 'annotator',
-        is_active:    user.is_active !== false,
+        username:  user.username,
+        password:  '',
+        role_name: user.roles?.[0] || 'annotator',
+        is_active: user.is_active !== false,
       })
     } else {
-      setForm({ username: '', display_name: '', password: '', role_name: 'annotator', is_active: true })
+      setForm({ username: '', password: '', role_name: 'annotator', is_active: true })
     }
     setShowPwd(false)
   }, [user, open])
@@ -83,14 +81,6 @@ function UserFormDialog({ open, onClose, onSave, user, roles }) {
               onChange={e => set('username', e.target.value)}
               disabled={isEdit}
               placeholder="仅字母、数字、下划线"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">显示名称</label>
-            <Input
-              value={form.display_name}
-              onChange={e => set('display_name', e.target.value)}
-              placeholder="可选"
             />
           </div>
           <div>
@@ -214,19 +204,23 @@ export default function Users() {
 
   async function handleSave(form, userId) {
     try {
-      const payload = {
-        username:     form.username,
-        display_name: form.display_name,
-        role_name:    form.role_name,
-        is_active:    form.is_active,
-      }
-      if (form.password) payload.password = form.password
-
       if (userId) {
+        // 编辑：只发可修改字段
+        const payload = {
+          role_names: [form.role_name],  // 后端期望数组
+          is_active:  form.is_active,
+        }
+        if (form.password) payload.password = form.password
         await userApi.update(userId, payload)
         toast.success('用户已更新')
       } else {
-        await userApi.create(payload)
+        // 新建：username + password 必填，role_names 为数组
+        const createPayload = {
+          username:   form.username,
+          password:   form.password,
+          role_names: [form.role_name],
+        }
+        await userApi.create(createPayload)
         toast.success('用户已创建')
       }
       setFormOpen(false)
@@ -316,10 +310,9 @@ export default function Users() {
             <TableHeader>
               <TableRow>
                 <TableHead>用户名</TableHead>
-                <TableHead>显示名称</TableHead>
                 <TableHead>角色</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead>最后登录</TableHead>
+                <TableHead className="w-40 whitespace-nowrap">最后登录</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -327,15 +320,14 @@ export default function Users() {
               {users.map(user => (
                 <TableRow key={user.id}>
                   <TableCell className="font-medium">{user.username}</TableCell>
-                  <TableCell className="text-gray-500">{user.display_name || '—'}</TableCell>
                   <TableCell>
                     <div className="flex gap-1 flex-wrap">
                       {(user.roles || []).map(r => <RoleBadge key={r} role={r} />)}
                     </div>
                   </TableCell>
                   <TableCell><StatusBadge active={user.is_active} /></TableCell>
-                  <TableCell className="text-gray-400 text-sm">
-                    {user.last_login ? new Date(user.last_login).toLocaleString('zh-CN') : '从未'}
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                    {user.last_login_at ? new Date(user.last_login_at).toLocaleString('zh-CN') : '从未'}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">

@@ -33,6 +33,10 @@ class UserUpdate(BaseModel):
     role_names: list[str] | None = None
 
 
+class ResetPasswordBody(BaseModel):
+    new_password: str
+
+
 @router.get("")
 async def list_users(user: AdminUser):
     """获取所有用户列表（管理员）"""
@@ -91,6 +95,17 @@ async def update_user(user_id: int, body: UserUpdate, user: AdminUser):
     if not updated:
         raise HTTPException(404, f"用户不存在: {user_id}")
     return {"success": True, "data": updated}
+
+
+@router.post("/{user_id}/reset-password")
+async def reset_password(user_id: int, body: ResetPasswordBody, user: AdminUser):
+    """重置用户密码（管理员专用，不需要知道旧密码）"""
+    if len(body.new_password) < 6:
+        raise HTTPException(400, "密码至少 6 位")
+    updated = get_db().update_user(user_id, {"password": body.new_password})
+    if not updated:
+        raise HTTPException(404, f"用户不存在: {user_id}")
+    return {"success": True, "message": "密码已重置"}
 
 
 @router.delete("/{user_id}")
