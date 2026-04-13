@@ -9,6 +9,8 @@ build/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+# uv 锁文件：内外网环境的 Python binary wheel 平台不同，不入库
+uv.lock
 
 # ── 运行时数据（向量文件，本地生成，不入库） ────────────────────────────────
 nas/
@@ -22,6 +24,8 @@ config.yaml
 frontend/dist/
 frontend/node_modules/
 frontend/.vite/
+# Vite 开发服务器内部缓存文件，非配置文件
+frontend/vite.config.js.timestamp*.mjs
 
 # ── 编辑器 ──────────────────────────────────────────────────────────────────
 .DS_Store
