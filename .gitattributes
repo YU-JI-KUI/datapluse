@@ -1,0 +1,6 @@
+# export-ignore：文件在 GitHub 上可见，但 Download ZIP 时不打包
+# 原因：这些文件内网和本地环境不同，公司内部单独维护
+#       每次 ZIP 覆盖会破坏公司版本，故排除出压缩包
+Dockerfile   export-ignore
+start.sh     export-ignore
+build.sh     export-ignore

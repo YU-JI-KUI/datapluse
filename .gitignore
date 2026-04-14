@@ -20,10 +20,6 @@ nas/
 .env
 config.yaml
 
-Dockerfile
-start.sh
-build.sh
-
 Claude.md
 CLAUDE.md
 .claude/
