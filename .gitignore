@@ -10,7 +10,6 @@ build/
 .ruff_cache/
 .mypy_cache/
 
-# uv 锁文件：内外网环境 Python binary wheel 平台不同，各自 uv sync 生成
 uv.lock
 
 # ── 运行时数据 ────────────────────────────────────────────────────────────────
@@ -21,20 +20,14 @@ nas/
 .env
 config.yaml
 
-# ── 公司内部专用文件 ──────────────────────────────────────────────────────────
-# 这些文件内网和本地不同，在公司环境单独维护，不进 GitHub
 Dockerfile
 start.sh
 build.sh
 
-# ── 提示词 / Cowork ───────────────────────────────────────────────────────────
-# 不对外公开 Claude 提示词配置
 Claude.md
 CLAUDE.md
 .claude/
 
-# ── 前端构建产物 ──────────────────────────────────────────────────────────────
-frontend/dist/
 frontend/node_modules/
 frontend/.vite/
 # Vite 开发服务器内部缓存，非配置文件
