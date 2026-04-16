@@ -292,6 +292,27 @@ class DBManager:
         with self._session() as s:
             return DataRepository(s).create(dataset_id, content, source, source_ref, created_by)
 
+    def bulk_create_data(
+        self,
+        dataset_id: int,
+        texts: list[str],
+        source: str = "",
+        source_ref: str = "",
+        created_by: str = "",
+    ) -> dict[str, int]:
+        """批量创建数据条目（高性能版，整批在一个事务内完成）。
+        返回 {"created": N, "skipped": M}。
+        """
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).bulk_create(dataset_id, texts, source, source_ref, created_by)
+
+    def bulk_update_stage(self, ids: list[int], stage: str, updated_by: str = "") -> None:
+        """批量更新数据阶段（pipeline 内部使用，一次 UPDATE 代替 N 次逐行调用）"""
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            DataRepository(s).bulk_update_stage(ids, stage, updated_by)
+
     def get_data(self, item_id: int, enrich: bool = True) -> dict | None:
         from datapulse.repository.data_repository import DataRepository
         with self._session() as s:
@@ -412,6 +433,12 @@ class DBManager:
         from datapulse.repository.annotation_repository import AnnotationRepository
         with self._session() as s:
             return AnnotationRepository(s).create_pre_annotation(data_id, model_name, label, score, created_by)
+
+    def bulk_create_pre_annotations(self, records: list[dict]) -> int:
+        """批量写入预标注（pipeline 专用）"""
+        from datapulse.repository.annotation_repository import AnnotationRepository
+        with self._session() as s:
+            return AnnotationRepository(s).bulk_create_pre_annotations(records)
 
     def get_latest_pre_annotation(self, data_id: int) -> dict | None:
         from datapulse.repository.annotation_repository import AnnotationRepository

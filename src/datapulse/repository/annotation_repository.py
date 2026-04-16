@@ -299,6 +299,33 @@ class AnnotationRepository:
         self.session.flush()
         return _pre_to_dict(pre)
 
+    def bulk_create_pre_annotations(
+        self,
+        records: list[dict],
+    ) -> int:
+        """批量写入预标注（pipeline 专用）。
+        records: [{"data_id": int, "model_name": str, "label": str, "score": float, "created_by": str}, ...]
+        版本统一设为 1（pipeline 首次运行），若已存在则跳过（重跑时会重复，可接受）。
+        返回实际插入条数。
+        """
+        if not records:
+            return 0
+        ts = _now()
+        mappings = [
+            {
+                "data_id":    r["data_id"],
+                "model_name": r["model_name"],
+                "label":      r["label"],
+                "score":      r.get("score"),
+                "version":    1,
+                "created_at": ts,
+                "created_by": r.get("created_by", "pipeline"),
+            }
+            for r in records
+        ]
+        self.session.bulk_insert_mappings(PreAnnotation, mappings)
+        return len(mappings)
+
     def get_latest_pre_annotation(self, data_id: int) -> dict[str, Any] | None:
         row = (
             self.session.query(PreAnnotation)

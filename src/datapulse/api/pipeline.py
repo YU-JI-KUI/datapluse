@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from datapulse.api.auth import UserInfo, get_current_user
-from datapulse.pipeline.engine import STEPS, run_all, run_step
+from datapulse.pipeline.engine import STEPS, run_all_sync, run_step
 from datapulse.repository.base import get_db
 
 router = APIRouter()
@@ -37,7 +37,9 @@ async def run_pipeline(
     current = db.get_pipeline_status(dataset_id)
     if current.get("status") == "running":
         raise HTTPException(409, "Pipeline 正在运行，请勿重复触发")
-    background_tasks.add_task(run_all, dataset_id)
+    # run_all_sync 是 sync 函数，BackgroundTasks 会自动放到线程池执行，
+    # 不会阻塞主 asyncio 事件循环（async 函数会直接在事件循环内 await，会卡住）
+    background_tasks.add_task(run_all_sync, dataset_id)
     return {"success": True, "message": "Pipeline 已启动，在后台运行"}
 
 

@@ -9,6 +9,8 @@ GET  /api/data-items/stats    — 各阶段统计
 
 from __future__ import annotations
 
+import asyncio
+from functools import partial
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
@@ -106,7 +108,13 @@ async def upload_data(
     file:        UploadFile  = File(...),
     text_column: str         = Form("text"),
 ):
-    """上传数据文件（xlsx / json / csv），解析后写入指定 dataset"""
+    """上传数据文件（xlsx / json / csv），解析后批量写入指定 dataset。
+
+    性能说明：
+      - 文件解析（pd.read_excel 等）是 CPU 密集型，通过 run_in_executor 放到线程池，
+        避免阻塞 asyncio 事件循环；
+      - 数据库写入使用 bulk_create_data（单事务批量 INSERT），不再逐行开关事务。
+    """
     db = get_db()
     if not db.get_dataset(dataset_id):
         raise NotFoundError(f"数据集不存在: {dataset_id}")
@@ -115,37 +123,47 @@ async def upload_data(
     if not content:
         raise ParamError("文件为空")
 
+    filename = file.filename or ""
+    ext      = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    # ── 文件解析：CPU 密集，放线程池避免阻塞事件循环 ─────────────────────────
+    loop = asyncio.get_event_loop()
     try:
-        texts = parse_file(file.filename or "", content)
+        texts: list[str] = await loop.run_in_executor(
+            None, partial(parse_file, filename, content)
+        )
     except Exception as e:
         raise ParamError(f"文件解析失败: {e}")
 
-    created  = 0
-    skipped  = 0
-    dup_skip = 0
-    for text in texts:
-        if not is_valid(text):
-            skipped += 1
-            continue
-        ext = (file.filename or "").rsplit(".", 1)[-1].lower()
-        result = db.create_data(
-            dataset_id,
-            content=text,
-            source=ext,
-            source_ref=file.filename or "",
-            created_by=user.username,
-        )
-        if result is None:
-            dup_skip += 1
-        else:
-            created += 1
+    # ── 过滤无效文本（Python 层，无 IO，可在事件循环内完成）─────────────────
+    total_parsed = len(texts)
+    valid_texts  = [t for t in texts if is_valid(t)]
+    invalid_skip = total_parsed - len(valid_texts)
+
+    if not valid_texts:
+        return success({
+            "filename":     filename,
+            "created":      0,
+            "skipped":      invalid_skip,
+            "dup_skipped":  0,
+            "total_parsed": total_parsed,
+        })
+
+    # ── 批量写入：单事务，放线程池避免阻塞事件循环 ────────────────────────────
+    result: dict[str, int] = await loop.run_in_executor(
+        None,
+        partial(
+            db.bulk_create_data,
+            dataset_id, valid_texts, ext, filename, user.username,
+        ),
+    )
 
     return success({
-        "filename":     file.filename,
-        "created":      created,
-        "skipped":      skipped,
-        "dup_skipped":  dup_skip,
-        "total_parsed": len(texts),
+        "filename":     filename,
+        "created":      result["created"],
+        "skipped":      invalid_skip,
+        "dup_skipped":  result["skipped"],
+        "total_parsed": total_parsed,
     })
 
 

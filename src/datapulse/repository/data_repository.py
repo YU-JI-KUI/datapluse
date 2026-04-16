@@ -262,6 +262,115 @@ class DataRepository:
             self.session.delete(item)
         return len(items)
 
+    def bulk_create(
+        self,
+        dataset_id: int,
+        texts: list[str],
+        source: str = "",
+        source_ref: str = "",
+        created_by: str = "",
+    ) -> dict[str, int]:
+        """批量创建数据条目，性能优化版：3 次 DB 操作代替 N×4 次。
+
+        步骤：
+          1. 一次查询取出该 dataset 已有的全部 content_hash
+          2. Python 层过滤重复，得到真正要插入的新记录
+          3. bulk_insert_mappings 批量写入 t_data_item（一次 INSERT，无逐行 flush）
+          4. 查回新插入行的 id（按 hash 过滤）
+          5. bulk_insert_mappings 批量写入 t_data_state
+        """
+        if not texts:
+            return {"created": 0, "skipped": 0}
+
+        ts = _now()
+
+        # ── Step 1: 取出已有 hash 集合（一次 SELECT）──────────────────────────
+        hash_pairs = [(t, _content_hash(t)) for t in texts]
+        all_hashes = [h for _, h in hash_pairs]
+
+        existing_hashes: set[str] = {
+            row[0]
+            for row in self.session.query(DataItem.content_hash)
+            .filter(
+                DataItem.dataset_id == dataset_id,
+                DataItem.content_hash.in_(all_hashes),
+            )
+            .all()
+        }
+
+        # ── Step 2: 过滤出新记录，hash 去重（同文件内部也可能重复）────────────
+        seen: set[str] = set(existing_hashes)
+        new_records: list[dict] = []
+        new_hashes:  list[str] = []
+        skipped = 0
+        for text, chash in hash_pairs:
+            if chash in seen:
+                skipped += 1
+            else:
+                seen.add(chash)
+                new_records.append({
+                    "dataset_id":   dataset_id,
+                    "content":      text,
+                    "content_hash": chash,
+                    "source":       source,
+                    "source_ref":   source_ref,
+                    "status":       "raw",
+                    "created_at":   ts,
+                    "created_by":   created_by,
+                    "updated_at":   ts,
+                    "updated_by":   created_by,
+                })
+                new_hashes.append(chash)
+
+        if not new_records:
+            return {"created": 0, "skipped": skipped}
+
+        # ── Step 3: 批量插入 t_data_item（一次 INSERT）───────────────────────
+        self.session.bulk_insert_mappings(DataItem, new_records)
+        self.session.flush()
+
+        # ── Step 4: 查回刚插入的 id（一次 SELECT IN）─────────────────────────
+        inserted_rows = (
+            self.session.query(DataItem.id)
+            .filter(
+                DataItem.dataset_id == dataset_id,
+                DataItem.content_hash.in_(new_hashes),
+            )
+            .all()
+        )
+
+        # ── Step 5: 批量插入 t_data_state（一次 INSERT）──────────────────────
+        state_records = [
+            {"data_id": row[0], "stage": "raw", "updated_at": ts, "updated_by": created_by}
+            for row in inserted_rows
+        ]
+        self.session.bulk_insert_mappings(DataState, state_records)
+
+        return {"created": len(new_records), "skipped": skipped}
+
+    def bulk_update_stage(
+        self,
+        ids: list[int],
+        stage: str,
+        updated_by: str = "",
+    ) -> None:
+        """批量更新 stage（一次 UPDATE 代替 N 次逐行 update_stage）。
+        用于 pipeline 各步骤结束后统一变更数据状态。
+        """
+        if not ids:
+            return
+        ts = _now()
+        # 更新 t_data_item.status（支持快速过滤）
+        self.session.query(DataItem).filter(DataItem.id.in_(ids)).update(
+            {"status": stage, "updated_at": ts, "updated_by": updated_by},
+            synchronize_session=False,
+        )
+        # 更新 t_data_state.stage（控制流）
+        self.session.query(DataState).filter(DataState.data_id.in_(ids)).update(
+            {"stage": stage, "updated_at": ts, "updated_by": updated_by},
+            synchronize_session=False,
+        )
+
     # ── Read ─────────────────────────────────────────────────────────────────
 
     def get(self, item_id: int, enrich: bool = True) -> dict[str, Any] | None:

@@ -68,32 +68,52 @@ def _make_detail(processed: int, total: int, skipped: int, start_time: float) ->
 
 # ── 单步执行 ──────────────────────────────────────────────────────────────────
 
+# 每处理多少条数据更新一次进度（防止 _set_status 每条都写一次 DB）
+_STATUS_UPDATE_INTERVAL = 500
+
 
 async def step_process(dataset_id: int) -> dict[str, Any]:
-    """清洗 raw → cleaned"""
+    """清洗 raw → cleaned
+
+    优化：
+      1. bulk_update_stage 一次 UPDATE 代替 N 次逐行 UPDATE
+      2. _set_status 每 _STATUS_UPDATE_INTERVAL 条更新一次，减少 DB 写入
+    """
     db         = get_db()
     raw_items  = db.list_data_by_status(dataset_id, "raw")
     total      = len(raw_items)
     if total == 0:
         return {"step": "process", "processed": 0, "skipped": 0}
 
-    start_time = time.time()
-    skipped    = 0
+    start_time   = time.time()
+    skipped      = 0
+    processed_ids: list[int] = []
+
     for i, item in enumerate(raw_items):
         updated = process_item(item)
-        # 更新文本内容（清洗后）和 stage
-        db.update_stage(updated["id"] if "id" in updated else item["id"], "cleaned")
-        _set_status(
-            dataset_id, "running", "process",
-            int((i + 1) / total * 100),
-            detail=_make_detail(i + 1, total, skipped, start_time),
-        )
+        processed_ids.append(updated.get("id", item["id"]))
+
+        # 每隔 N 条或最后一条才写一次状态（避免 6 万次 DB round-trip）
+        if (i + 1) % _STATUS_UPDATE_INTERVAL == 0 or (i + 1) == total:
+            _set_status(
+                dataset_id, "running", "process",
+                int((i + 1) / total * 100),
+                detail=_make_detail(i + 1, total, skipped, start_time),
+            )
+
+    # 一次 bulk UPDATE 代替 N 次逐行 update_stage
+    db.bulk_update_stage(processed_ids, "cleaned", updated_by="pipeline")
 
     return {"step": "process", "processed": total - skipped, "skipped": skipped}
 
 
 async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
-    """预标注 cleaned → pre_annotated（结果写入 t_pre_annotation）"""
+    """预标注 cleaned → pre_annotated（结果写入 t_pre_annotation）
+
+    优化：
+      1. 每个 batch 的预标注和 stage 更新都批量提交（两次 DB 操作代替 2N 次）
+      2. _set_status 按 batch 粒度更新（已经是 batch_size 级别，合理）
+    """
     db         = get_db()
     cfg        = db.get_dataset_config(dataset_id)
     items      = db.list_data_by_status(dataset_id, "cleaned")
@@ -109,22 +129,44 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
     for i in range(0, total, batch_size):
         batch   = items[i : i + batch_size]
         results = await pre_annotate_batch(batch, cfg)
+
+        # 收集本 batch 的预标注记录和 data_id 列表
+        pre_records: list[dict] = []
+        batch_ids:   list[int]  = []
         for item, label, score in results:
             data_id = item["id"]
-            db.create_pre_annotation(data_id, model_name, label, score, created_by="pipeline")
-            db.update_stage(data_id, "pre_annotated")
+            pre_records.append({
+                "data_id":    data_id,
+                "model_name": model_name,
+                "label":      label,
+                "score":      score,
+                "created_by": "pipeline",
+            })
+            batch_ids.append(data_id)
             annotated += 1
-        _set_status(
-            dataset_id, "running", "pre_annotate",
-            int(annotated / total * 100),
-            detail=_make_detail(annotated, total, 0, start_time),
-        )
+
+        # 批量写预标注（一次 INSERT）
+        db.bulk_create_pre_annotations(pre_records)
+        # 批量更新 stage（一次 UPDATE）
+        db.bulk_update_stage(batch_ids, "pre_annotated", updated_by="pipeline")
+
+        # 每隔一定 batch 数更新一次进度，避免过于频繁
+        batches_done = (i // batch_size) + 1
+        if batches_done % max(1, _STATUS_UPDATE_INTERVAL // batch_size) == 0 or annotated == total:
+            _set_status(
+                dataset_id, "running", "pre_annotate",
+                int(annotated / total * 100),
+                detail=_make_detail(annotated, total, 0, start_time),
+            )
 
     return {"step": "pre_annotate", "annotated": annotated, "skipped": 0}
 
 
 async def step_embed(dataset_id: int) -> dict[str, Any]:
-    """为 pre_annotated / annotated / checked 数据生成 embedding"""
+    """为 pre_annotated / annotated / checked 数据生成 embedding
+
+    优化：_set_status 每 _STATUS_UPDATE_INTERVAL 条更新一次。
+    """
     db    = get_db()
     cfg   = db.get_dataset_config(dataset_id)
     items = []
@@ -140,7 +182,7 @@ async def step_embed(dataset_id: int) -> dict[str, Any]:
     skipped    = 0
     start_time = time.time()
 
-    for item in items:
+    for i, item in enumerate(items):
         if emb.load(item["id"]) is not None:
             skipped  += 1
             embedded += 1
@@ -148,11 +190,13 @@ async def step_embed(dataset_id: int) -> dict[str, Any]:
             vec = embed_text(item["content"], cfg)
             emb.save(item["id"], vec)
             embedded += 1
-        _set_status(
-            dataset_id, "running", "embed",
-            int(embedded / total * 100),
-            detail=_make_detail(embedded, total, skipped, start_time),
-        )
+
+        if (i + 1) % _STATUS_UPDATE_INTERVAL == 0 or (i + 1) == total:
+            _set_status(
+                dataset_id, "running", "embed",
+                int(embedded / total * 100),
+                detail=_make_detail(embedded, total, skipped, start_time),
+            )
 
     count = rebuild_index()
     return {"step": "embed", "embedded": embedded, "skipped": skipped, "index_size": count}
@@ -191,6 +235,17 @@ async def run_all(dataset_id: int) -> None:
     except Exception as e:
         _set_status(dataset_id, "error", "", 0, error=str(e), finished_at=_now())
         raise
+
+
+def run_all_sync(dataset_id: int) -> None:
+    """同步包装器，供 FastAPI BackgroundTasks 使用。
+
+    BackgroundTasks 对 sync 函数会自动放到线程池（run_in_threadpool）执行，
+    不会阻塞主 asyncio 事件循环。内部通过 asyncio.run() 创建独立事件循环，
+    以支持 step_pre_annotate 中的 async LLM 调用。
+    """
+    import asyncio as _asyncio
+    _asyncio.run(run_all(dataset_id))
 
 
 async def run_step(dataset_id: int, step: str) -> dict[str, Any]:
