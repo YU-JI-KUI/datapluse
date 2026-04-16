@@ -95,6 +95,11 @@ if _FRONTEND_DIST.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
+        # 先尝试直接返回 dist/ 下的静态文件（logo.ico、logo.svg 等根目录资源）
+        static_file = _FRONTEND_DIST / full_path
+        if full_path and static_file.exists() and static_file.is_file():
+            return FileResponse(str(static_file))
+        # 其余路径交给 React SPA 处理
         return FileResponse(str(_FRONTEND_DIST / "index.html"))
 else:
     @app.get("/", include_in_schema=False)

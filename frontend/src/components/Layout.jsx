@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  LayoutDashboard, Database, Search, Tag, CheckSquare, AlertTriangle,
+  LayoutDashboard, Database, Search, Tag, AlertTriangle,
   Settings, Download, LogOut, Cpu, ChevronLeft, ChevronRight,
   Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen,
 } from 'lucide-react'
@@ -20,8 +20,8 @@ const navItems = [
   { to: '/pre-annotation', label: '预标注',        icon: Cpu },
   { to: '/annotation',     label: '标注工作台',    icon: Tag },
   { to: '/conflicts',      label: '冲突检测',      icon: AlertTriangle },
-  { to: '/config',         label: '配置中心',      icon: Settings },
   { to: '/export',         label: '数据导出',      icon: Download },
+  { to: '/config',         label: '配置中心',      icon: Settings },
   { to: '/datasets',       label: '数据集管理',    icon: FolderOpen, adminOnly: true },
   { to: '/users',          label: '用户管理',      icon: Users,       adminOnly: true },
 ]
@@ -117,6 +117,8 @@ export default function Layout() {
   const [currentDataset, setCurrentDataset] = useState(getCurrentDatasetId())
   const [dsOpen, setDsOpen]               = useState(false)
   const [changePwdOpen, setChangePwdOpen] = useState(false)
+  const [userMenuOpen, setUserMenuOpen]   = useState(false)
+  const userMenuRef = useRef(null)
 
   useEffect(() => {
     datasetApi.list()
@@ -137,6 +139,17 @@ export default function Layout() {
       })
       .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 点击菜单外部时关闭用户菜单
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setUserMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   function switchDataset(id) {
     setCurrentDataset(id)
@@ -254,40 +267,63 @@ export default function Layout() {
 
         {/* User + Toggle */}
         <div className="px-2 py-3 border-t border-gray-700 space-y-1">
-          {/* User info */}
-          <div className={cn(
-            'flex items-center gap-3 px-3 py-2 rounded-lg',
-            collapsed ? 'justify-center' : ''
-          )}>
-            <div
-              className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center text-xs font-semibold text-white shrink-0"
-              title={collapsed ? username : undefined}
+          {/* 用户头像 — 点击弹出菜单 */}
+          <div className="relative" ref={userMenuRef}>
+            <button
+              onClick={() => setUserMenuOpen(v => !v)}
+              className={cn(
+                'w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors',
+                collapsed ? 'justify-center' : ''
+              )}
             >
-              {username[0]?.toUpperCase()}
-            </div>
-            {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{username}</div>
-                <div className="text-xs text-gray-400">
-                  {isAdmin ? '管理员' : roles[0] || '用户'}
-                </div>
+              <div
+                className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center text-xs font-semibold text-white shrink-0"
+                title={collapsed ? username : undefined}
+              >
+                {username[0]?.toUpperCase()}
               </div>
-            )}
-            {!collapsed && (
-              <div className="flex items-center gap-1">
+              {!collapsed && (
+                <>
+                  <div className="flex-1 min-w-0 text-left">
+                    <div className="text-sm font-medium truncate text-gray-100">{username}</div>
+                    <div className="text-xs text-gray-400">
+                      {isAdmin ? '管理员' : roles[0] || '用户'}
+                    </div>
+                  </div>
+                  <ChevronDown className={cn(
+                    'w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform',
+                    userMenuOpen && 'rotate-180'
+                  )} />
+                </>
+              )}
+            </button>
+
+            {/* 下拉菜单 */}
+            {userMenuOpen && (
+              <div className={cn(
+                'absolute bottom-full mb-1 z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden',
+                collapsed ? 'left-0 w-36' : 'left-0 right-0'
+              )}>
+                {/* 用户信息头部 */}
+                <div className="px-3 py-2.5 border-b border-gray-700">
+                  <div className="text-sm font-medium text-gray-100 truncate">{username}</div>
+                  <div className="text-xs text-gray-400">{isAdmin ? '管理员' : roles[0] || '用户'}</div>
+                </div>
+                {/* 修改密码 */}
                 <button
-                  onClick={() => setChangePwdOpen(true)}
-                  className="text-gray-400 hover:text-white transition-colors"
-                  title="修改密码"
+                  onClick={() => { setUserMenuOpen(false); setChangePwdOpen(true) }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
                 >
-                  <KeyRound className="w-4 h-4" />
+                  <KeyRound className="w-4 h-4 shrink-0" />
+                  修改密码
                 </button>
+                {/* 退出登录 */}
                 <button
                   onClick={handleLogout}
-                  className="text-gray-400 hover:text-white transition-colors"
-                  title="退出"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogOut className="w-4 h-4 shrink-0" />
+                  退出登录
                 </button>
               </div>
             )}
