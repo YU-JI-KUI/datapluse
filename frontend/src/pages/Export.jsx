@@ -66,6 +66,13 @@ function TemplateEditor({ initial, onSave, onCancel }) {
   )
   const [saving, setSaving] = useState(false)
 
+  const allEnabled  = columns.length > 0 && columns.every(c => c.include)
+  const someEnabled = columns.some(c => c.include) && !allEnabled
+
+  function toggleAllInclude() {
+    const next = !allEnabled
+    setColumns(cols => cols.map(c => ({ ...c, include: next })))
+  }
   function toggleInclude(idx) {
     setColumns(cols => cols.map((c, i) => i === idx ? { ...c, include: !c.include } : c))
   }
@@ -150,7 +157,25 @@ function TemplateEditor({ initial, onSave, onCancel }) {
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
               <tr>
-                <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground w-8">启用</th>
+                <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground w-20 whitespace-nowrap">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={toggleAllInclude}
+                      title={allEnabled ? '全部禁用' : '全部启用'}
+                      className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                        allEnabled
+                          ? 'bg-primary border-primary text-white'
+                          : someEnabled
+                            ? 'bg-primary/30 border-primary'
+                            : 'border-gray-300 hover:border-primary'
+                      }`}
+                    >
+                      {allEnabled  && <Check className="w-3 h-3" />}
+                      {someEnabled && <span className="text-primary text-xs font-bold leading-none">—</span>}
+                    </button>
+                    启用
+                  </div>
+                </th>
                 <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">源变量</th>
                 <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">输出字段名</th>
                 <th className="w-8"></th>

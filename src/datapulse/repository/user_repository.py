@@ -56,9 +56,30 @@ class UserRepository:
         )
         return [r[0] for r in rows]
 
-    def list_users(self) -> list[dict[str, Any]]:
-        users = self.session.query(User).order_by(User.id).all()
-        return [_user_to_dict(u, self._get_user_roles(u.username)) for u in users]
+    def list_users(
+        self,
+        keyword: str | None = None,
+        is_active: bool | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        q = self.session.query(User)
+        if keyword:
+            q = q.filter(User.username.ilike(f"%{keyword}%"))
+        if is_active is not None:
+            q = q.filter(User.is_active == is_active)
+        if start_date:
+            q = q.filter(User.updated_at >= start_date)
+        if end_date:
+            q = q.filter(User.updated_at <= end_date + " 23:59:59")
+        total = q.count()
+        users = q.order_by(User.id).offset((page - 1) * page_size).limit(page_size).all()
+        return {
+            "list": [_user_to_dict(u, self._get_user_roles(u.username)) for u in users],
+            "total": total,
+        }
 
     def get(self, user_id: int) -> dict[str, Any] | None:
         u = self.session.get(User, user_id)

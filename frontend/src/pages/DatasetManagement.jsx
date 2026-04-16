@@ -197,7 +197,7 @@ export default function DatasetManagement() {
     queryKey: ['all-users'],
     queryFn: () => userApi.list(),
   })
-  const allUsers = usersData?.data?.data || []
+  const allUsers = usersData?.data?.data?.list || []
 
   async function handleSave(form, dsId) {
     if (dsId) {

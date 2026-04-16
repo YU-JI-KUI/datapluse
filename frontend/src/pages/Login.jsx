@@ -17,7 +17,7 @@ export default function Login() {
     if (!username || !password) return toast.error('请填写用户名和密码')
     setLoading(true)
     try {
-      const res = await authApi.login(username, password)
+      const res = await authApi.login(username.toUpperCase(), password)
       localStorage.setItem('token', res.data.access_token)
       localStorage.setItem('username', res.data.username)
       localStorage.setItem('roles', JSON.stringify(res.data.roles || []))
@@ -30,7 +30,8 @@ export default function Login() {
       } catch (_) { /* 静默失败，Layout 会在渲染时补偿 */ }
       navigate('/dashboard')
     } catch (err) {
-      toast.error(err.response?.data?.detail || '登录失败，请检查用户名密码')
+      // 后端会明确返回「用户名不存在」「密码错误」「账号已停用」
+      toast.error(err.response?.data?.detail || '登录失败')
     } finally {
       setLoading(false)
     }
@@ -55,8 +56,8 @@ export default function Login() {
               <label className="block text-sm font-medium text-gray-300 mb-1.5">用户名</label>
               <Input
                 value={username}
-                onChange={e => setUsername(e.target.value)}
-                placeholder="admin"
+                onChange={e => setUsername(e.target.value.toUpperCase())}
+                placeholder="ADMIN"
                 className="bg-white/10 border-white/20 text-white placeholder:text-gray-500"
                 autoFocus
               />

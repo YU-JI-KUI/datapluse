@@ -196,7 +196,7 @@ export default function Annotation() {
   const [currentItem, setCurrentItem] = useState(null)
   const [submitting, setSubmitting]   = useState(false)
   const [revoking, setRevoking]       = useState(false)
-  const [view, setView]               = useState('all')
+  const [view, setView]               = useState('unannotated')
   const [keyword, setKeyword]         = useState('')
   const [keywordInput, setKeywordInput] = useState('')
   const [page, setPage]               = useState(1)

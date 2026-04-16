@@ -89,6 +89,76 @@ class DatasetRepository:
         self.session.delete(row)
         return True
 
+    def delete_cascade(self, dataset_id: int) -> None:
+        """级联删除数据集及其所有关联数据（后台异步执行）。
+
+        删除顺序（无物理外键，按逻辑依赖从叶到根）：
+          AnnotationResult → Annotation → PreAnnotation →
+          Conflict → DataComment → DataState → DataItem →
+          ExportTemplate → PipelineStatus → SystemConfig →
+          UserDataset → Dataset
+        """
+        from datapulse.model.entities import (
+            Annotation,
+            AnnotationResult,
+            Conflict,
+            DataComment,
+            DataItem,
+            DataState,
+            ExportTemplate,
+            PipelineStatus,
+            PreAnnotation,
+            UserDataset,
+        )
+
+        # 先查出所有 data_item id 便于关联表删除
+        data_ids = [
+            r[0]
+            for r in self.session.query(DataItem.id)
+            .filter(DataItem.dataset_id == dataset_id)
+            .all()
+        ]
+
+        if data_ids:
+            self.session.query(AnnotationResult).filter(
+                AnnotationResult.data_id.in_(data_ids)
+            ).delete(synchronize_session=False)
+            self.session.query(Annotation).filter(
+                Annotation.data_id.in_(data_ids)
+            ).delete(synchronize_session=False)
+            self.session.query(PreAnnotation).filter(
+                PreAnnotation.data_id.in_(data_ids)
+            ).delete(synchronize_session=False)
+            self.session.query(Conflict).filter(
+                Conflict.data_id.in_(data_ids)
+            ).delete(synchronize_session=False)
+            self.session.query(DataComment).filter(
+                DataComment.data_id.in_(data_ids)
+            ).delete(synchronize_session=False)
+            self.session.query(DataState).filter(
+                DataState.data_id.in_(data_ids)
+            ).delete(synchronize_session=False)
+            self.session.query(DataItem).filter(
+                DataItem.dataset_id == dataset_id
+            ).delete(synchronize_session=False)
+
+        self.session.query(ExportTemplate).filter(
+            ExportTemplate.dataset_id == dataset_id
+        ).delete(synchronize_session=False)
+        self.session.query(PipelineStatus).filter(
+            PipelineStatus.dataset_id == dataset_id
+        ).delete(synchronize_session=False)
+        self.session.query(SystemConfig).filter(
+            SystemConfig.dataset_id == dataset_id
+        ).delete(synchronize_session=False)
+        self.session.query(UserDataset).filter(
+            UserDataset.dataset_id == dataset_id
+        ).delete(synchronize_session=False)
+
+        row = self.session.get(Dataset, dataset_id)
+        if row:
+            self.session.delete(row)
+
     # ── 用户-数据集分配 ─────────────────────────────────────────────────────────
 
     def get_assigned_users(self, dataset_id: int) -> list[str]:

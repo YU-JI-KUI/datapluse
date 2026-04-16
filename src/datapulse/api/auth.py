@@ -142,11 +142,14 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
     session = session_class()
     try:
         user_service = UserService(session)
-        user = user_service.get_by_username(form.username)
-        if user is None or not user.get("is_active"):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码错误")
+        # 用户名统一转大写查找
+        user = user_service.get_by_username(form.username.upper())
+        if user is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名不存在")
+        if not user.get("is_active"):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "账号已停用，请联系管理员")
         if not user_service.verify_password(form.password, user["password_hash"]):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名或密码错误")
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "密码错误")
 
         user_service.update_last_login(user["username"])
         session.commit()   # ← 必须 commit，否则 last_login_at 不会持久化
@@ -201,7 +204,7 @@ async def change_password(
             raise HTTPException(404, "用户不存在")
         if not user_service.verify_password(body.old_password, current["password_hash"]):
             raise HTTPException(400, "旧密码不正确")
-        user_service.update(current["id"], {"password": body.new_password})
+        user_service.update(current["id"], {"password": body.new_password}, updated_by=user.username)
         session.commit()
         return {"success": True, "message": "密码已更新"}
     finally:

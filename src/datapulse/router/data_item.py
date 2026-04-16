@@ -30,6 +30,10 @@ class CreateDataItemBody(BaseModel):
     source_ref: str = ""
 
 
+class BatchDeleteBody(BaseModel):
+    ids: list[int]
+
+
 @router.post("")
 async def create_data_item(body: CreateDataItemBody, user: CurrentUser):
     """手动录入单条数据"""
@@ -56,13 +60,18 @@ async def list_data_items(
     dataset_id: int           = Query(..., description="数据集 ID"),
     status:     str | None    = Query(None, description="按阶段过滤"),
     keyword:    str | None    = Query(None, description="文本关键词搜索"),
+    start_date: str | None    = Query(None, description="更新时间起（YYYY-MM-DD）"),
+    end_date:   str | None    = Query(None, description="更新时间止（YYYY-MM-DD）"),
     page:       int           = Query(1, ge=1),
     page_size:  int           = Query(20, ge=1, le=200),
 ):
     """分页查询数据列表"""
     db     = get_db()
-    result = db.list_all_data(dataset_id, status=status, keyword=keyword,
-                               page=page, page_size=page_size, enrich=True)
+    result = db.list_all_data(
+        dataset_id, status=status, keyword=keyword,
+        start_date=start_date, end_date=end_date,
+        page=page, page_size=page_size, enrich=True,
+    )
     return success(page_data(result["list"], page, page_size, result["total"]))
 
 
@@ -138,6 +147,16 @@ async def upload_data(
         "dup_skipped":  dup_skip,
         "total_parsed": len(texts),
     })
+
+
+@router.post("/batch-delete")
+async def batch_delete_data_items(body: BatchDeleteBody, user: CurrentUser):
+    """批量删除数据条目"""
+    if not body.ids:
+        raise ParamError("ids 不能为空")
+    db = get_db()
+    deleted = db.batch_delete_data(body.ids)
+    return success({"deleted_count": deleted, "ids": body.ids})
 
 
 @router.delete("/{item_id}")

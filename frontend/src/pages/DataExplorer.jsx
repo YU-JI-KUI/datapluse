@@ -20,17 +20,17 @@ import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  Search, MessageSquare, ChevronDown, ChevronUp, RefreshCw,
+  MessageSquare, RefreshCw,
   X, Send, Eye, Clock, User, Tag, Cpu, Trash2,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
+import SearchBar from '@/components/SearchBar'
 import { dataApi, commentApi, getCurrentDatasetId } from '@/lib/api'
 import {
   formatDate, getStatusLabel, getStatusColor,
@@ -253,7 +253,6 @@ function DetailPanel({ item, onClose }) {
 // ── 主页面 ────────────────────────────────────────────────────────────────────
 
 const STATUS_OPTIONS = [
-  { value: 'all',           label: '全部状态' },
   { value: 'raw',           label: '原始' },
   { value: 'cleaned',       label: '已清洗' },
   { value: 'pre_annotated', label: '已预标注' },
@@ -262,33 +261,30 @@ const STATUS_OPTIONS = [
 ]
 
 export default function DataExplorer() {
-  const [keyword, setKeyword]         = useState('')
-  const [debouncedKw, setDebouncedKw] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [filters, setFilters]         = useState({})
   const [page, setPage]               = useState(1)
   const [pageSize, setPageSize]       = useState(10)
-  const [sideItem, setSideItem]       = useState(null)   // 当前侧边栏展示的 item
-  const [sideMode, setSideMode]       = useState('detail') // 'detail' | 'comment'
+  const [sideItem, setSideItem]       = useState(null)
+  const [sideMode, setSideMode]       = useState('detail')
   const [datasetId, setDatasetId]     = useState(() => getCurrentDatasetId())
+
+  // ── 多选状态 ────────────────────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState(new Set())
 
   // 数据集切换监听
   useEffect(() => {
-    const handler = (e) => setDatasetId(e.detail.datasetId)
+    const handler = (e) => { setDatasetId(e.detail.datasetId); setSelectedIds(new Set()) }
     window.addEventListener('datasetChanged', handler)
     return () => window.removeEventListener('datasetChanged', handler)
   }, [])
 
-  // 关键词防抖 300ms
-  useEffect(() => {
-    const t = setTimeout(() => { setDebouncedKw(keyword); setPage(1) }, 300)
-    return () => clearTimeout(t)
-  }, [keyword])
-
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['explorer', datasetId, statusFilter, debouncedKw, page, pageSize],
+    queryKey: ['explorer', datasetId, filters, page, pageSize],
     queryFn: () => dataApi.list({
-      status:   statusFilter === 'all' ? undefined : statusFilter || undefined,
-      keyword:  debouncedKw || undefined,
+      status:     filters.status     || undefined,
+      keyword:    filters.keyword    || undefined,
+      start_date: filters.start_date || undefined,
+      end_date:   filters.end_date   || undefined,
       page,
       page_size: pageSize,
     }, datasetId),
@@ -300,26 +296,43 @@ export default function DataExplorer() {
   const items  = result.list || []
   const total  = result.pagination?.total || 0
 
-  function openDetail(item) {
-    setSideItem(item)
-    setSideMode('detail')
+  // 当前页全选状态
+  const pageIds     = items.map(i => i.id)
+  const allSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.has(id))
+  const someSelected = pageIds.some(id => selectedIds.has(id)) && !allSelected
+
+  function toggleSelectAll() {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (allSelected) {
+        pageIds.forEach(id => next.delete(id))
+      } else {
+        pageIds.forEach(id => next.add(id))
+      }
+      return next
+    })
   }
 
-  function openComment(item) {
-    setSideItem(item)
-    setSideMode('comment')
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
+  function openDetail(item) { setSideItem(item); setSideMode('detail') }
+  function openComment(item) { setSideItem(item); setSideMode('comment') }
   function closeSide() { setSideItem(null) }
 
   const qc = useQueryClient()
+
+  // ── 单条删除 ─────────────────────────────────────────────────────────────────
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const [confirmOpen, setConfirmOpen]         = useState(false)
 
-  function requestDelete(id) {
-    setConfirmDeleteId(id)
-    setConfirmOpen(true)
-  }
+  function requestDelete(id) { setConfirmDeleteId(id); setConfirmOpen(true) }
 
   async function handleDelete() {
     if (confirmDeleteId === null) return
@@ -327,16 +340,37 @@ export default function DataExplorer() {
       await dataApi.deleteItem(confirmDeleteId)
       toast.success('已删除')
       if (sideItem?.id === confirmDeleteId) closeSide()
+      setSelectedIds(prev => { const n = new Set(prev); n.delete(confirmDeleteId); return n })
       qc.invalidateQueries(['explorer'])
     } catch {
       toast.error('删除失败')
     }
   }
 
+  // ── 批量删除 ─────────────────────────────────────────────────────────────────
+  const [batchConfirmOpen, setBatchConfirmOpen] = useState(false)
+  const [batchDeleting,    setBatchDeleting]    = useState(false)
+
+  async function handleBatchDelete() {
+    const ids = [...selectedIds]
+    setBatchDeleting(true)
+    try {
+      await dataApi.deleteBatch(ids)
+      toast.success(`已删除 ${ids.length} 条数据`)
+      if (sideItem && ids.includes(sideItem.id)) closeSide()
+      setSelectedIds(new Set())
+      qc.invalidateQueries(['explorer'])
+    } catch {
+      toast.error('批量删除失败')
+    } finally {
+      setBatchDeleting(false)
+    }
+  }
+
   return (
     <div className="flex h-full">
       {/* ── 主区域 ── */}
-      <div className={`flex-1 flex flex-col min-w-0 transition-all ${sideItem ? 'mr-0' : ''}`}>
+      <div className="flex-1 flex flex-col min-w-0">
         <div className="p-8 space-y-5 flex-1 overflow-y-auto">
           {/* Header */}
           <div className="flex items-center justify-between">
@@ -344,49 +378,36 @@ export default function DataExplorer() {
               <h1 className="text-2xl font-bold">Data Explorer</h1>
               <p className="text-muted-foreground text-sm mt-1">浏览所有数据，查看标注详情，添加评论</p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              <RefreshCw className="w-4 h-4 mr-2" />刷新
-            </Button>
+            <div className="flex items-center gap-2">
+              {selectedIds.size > 0 && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setBatchConfirmOpen(true)}
+                  disabled={batchDeleting}
+                >
+                  <Trash2 className="w-4 h-4 mr-1.5" />
+                  删除选中 ({selectedIds.size})
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => refetch()}>
+                <RefreshCw className="w-4 h-4 mr-2" />刷新
+              </Button>
+            </div>
           </div>
 
           {/* Search bar */}
           <Card>
             <CardContent className="p-4">
-              <div className="flex gap-3">
-                {/* Keyword */}
-                <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    placeholder="搜索文本内容..."
-                    value={keyword}
-                    onChange={e => setKeyword(e.target.value)}
-                    className="pl-9"
-                  />
-                  {keyword && (
-                    <button
-                      onClick={() => setKeyword('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Status filter */}
-                <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setPage(1) }}>
-                  <SelectTrigger className="w-36">
-                    <SelectValue placeholder="全部状态" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STATUS_OPTIONS.map(o => (
-                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {/* Result count */}
-                <div className="flex items-center text-sm text-muted-foreground whitespace-nowrap">
-                  共 <span className="font-semibold text-foreground mx-1">{total}</span> 条
+              <div className="flex items-center gap-3 flex-wrap">
+                <SearchBar
+                  placeholder="搜索文本内容…"
+                  statusOptions={STATUS_OPTIONS}
+                  onSearch={f => { setFilters(f); setPage(1); setSelectedIds(new Set()) }}
+                  className="flex-1"
+                />
+                <div className="text-sm text-muted-foreground whitespace-nowrap">
+                  共 <span className="font-semibold text-foreground">{total}</span> 条
                 </div>
               </div>
             </CardContent>
@@ -398,6 +419,23 @@ export default function DataExplorer() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    {/* 全选 checkbox */}
+                    <TableHead className="w-10" onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={toggleSelectAll}
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                          allSelected
+                            ? 'bg-primary border-primary text-white'
+                            : someSelected
+                              ? 'bg-primary/30 border-primary'
+                              : 'border-gray-300 hover:border-primary'
+                        }`}
+                        title={allSelected ? '取消全选' : '全选本页'}
+                      >
+                        {allSelected && <span className="text-white text-xs font-bold">✓</span>}
+                        {someSelected && <span className="text-primary text-xs font-bold">—</span>}
+                      </button>
+                    </TableHead>
                     <TableHead className="w-12">ID</TableHead>
                     <TableHead>文本内容</TableHead>
                     <TableHead className="w-28">状态</TableHead>
@@ -410,28 +448,46 @@ export default function DataExplorer() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
                         <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />加载中...
                       </TableCell>
                     </TableRow>
                   ) : items.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
-                        {debouncedKw ? `未找到包含"${debouncedKw}"的数据` : '暂无数据'}
+                      <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
+                        {Object.values(filters).some(Boolean)
+                          ? '没有符合条件的数据'
+                          : '暂无数据'}
                       </TableCell>
                     </TableRow>
                   ) : items.map(item => {
-                    const preLabel   = getPreLabel(item)
-                    const preScore   = getPreScore(item)
+                    const preLabel    = getPreLabel(item)
+                    const preScore    = getPreScore(item)
                     const activeLabel = getActiveLabel(item)
-                    const isActive   = sideItem?.id === item.id
+                    const isActive    = sideItem?.id === item.id
+                    const isSelected  = selectedIds.has(item.id)
 
                     return (
                       <TableRow
                         key={item.id}
-                        className={`cursor-pointer transition-colors ${isActive ? 'bg-blue-50' : 'hover:bg-muted/50'}`}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected ? 'bg-blue-50/60' : isActive ? 'bg-blue-50' : 'hover:bg-muted/50'
+                        }`}
                         onClick={() => openDetail(item)}
                       >
+                        {/* 行 checkbox */}
+                        <TableCell onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => toggleSelect(item.id)}
+                            className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                              isSelected
+                                ? 'bg-primary border-primary text-white'
+                                : 'border-gray-300 hover:border-primary'
+                            }`}
+                          >
+                            {isSelected && <span className="text-white text-xs font-bold">✓</span>}
+                          </button>
+                        </TableCell>
                         <TableCell className="font-mono text-xs text-muted-foreground">
                           {item.id}
                         </TableCell>
@@ -504,8 +560,8 @@ export default function DataExplorer() {
                 page={page}
                 pageSize={pageSize}
                 total={total}
-                onPageChange={setPage}
-                onSizeChange={size => { setPageSize(size); setPage(1) }}
+                onPageChange={p => { setPage(p); setSelectedIds(new Set()) }}
+                onSizeChange={size => { setPageSize(size); setPage(1); setSelectedIds(new Set()) }}
               />
             </CardContent>
           </Card>
@@ -522,6 +578,7 @@ export default function DataExplorer() {
         </div>
       )}
 
+      {/* 单条删除确认 */}
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
@@ -529,6 +586,16 @@ export default function DataExplorer() {
         description="删除后无法恢复，确定要删除这条数据吗？"
         confirmLabel="删除"
         onConfirm={handleDelete}
+      />
+
+      {/* 批量删除确认 */}
+      <ConfirmDialog
+        open={batchConfirmOpen}
+        onOpenChange={setBatchConfirmOpen}
+        title={`批量删除 ${selectedIds.size} 条数据`}
+        description="选中的数据及其标注结果将被永久删除，此操作无法撤销。"
+        confirmLabel={batchDeleting ? '删除中…' : `确认删除 ${selectedIds.size} 条`}
+        onConfirm={handleBatchDelete}
       />
     </div>
   )

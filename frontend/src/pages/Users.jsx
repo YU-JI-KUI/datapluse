@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Plus, Pencil, Trash2, KeyRound, Shield, User, Eye, EyeOff } from 'lucide-react'
 import { userApi } from '@/lib/api'
@@ -10,6 +11,9 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import TablePagination from '@/components/TablePagination'
+import SearchBar from '@/components/SearchBar'
+import { formatDate } from '@/lib/utils'
 
 // ── 角色徽章样式 ──────────────────────────────────────────────────────────────
 
@@ -25,14 +29,6 @@ function RoleBadge({ role }) {
       {role}
     </span>
   )
-}
-
-// ── 状态徽章 ──────────────────────────────────────────────────────────────────
-
-function StatusBadge({ active }) {
-  return active
-    ? <Badge className="bg-green-100 text-green-700 border-0">启用</Badge>
-    : <Badge className="bg-gray-100 text-gray-500 border-0">禁用</Badge>
 }
 
 // ── 用户表单弹窗 ───────────────────────────────────────────────────────────────
@@ -78,9 +74,9 @@ function UserFormDialog({ open, onClose, onSave, user, roles }) {
             <label className="block text-sm font-medium text-gray-700 mb-1">用户名</label>
             <Input
               value={form.username}
-              onChange={e => set('username', e.target.value)}
+              onChange={e => set('username', e.target.value.toUpperCase())}
               disabled={isEdit}
-              placeholder="仅字母、数字、下划线"
+              placeholder="仅字母、数字、下划线（自动大写）"
             />
           </div>
           <div>
@@ -141,7 +137,6 @@ function UserFormDialog({ open, onClose, onSave, user, roles }) {
 function ResetPasswordDialog({ open, onClose, onSave, user }) {
   const [password, setPassword] = useState('')
   const [showPwd, setShowPwd]   = useState(false)
-
   useEffect(() => { setPassword(''); setShowPwd(false) }, [open])
 
   return (
@@ -154,7 +149,7 @@ function ResetPasswordDialog({ open, onClose, onSave, user }) {
             type={showPwd ? 'text' : 'password'}
             value={password}
             onChange={e => setPassword(e.target.value)}
-            placeholder="输入新密码"
+            placeholder="输入新密码（至少 6 位）"
           />
           <button
             type="button"
@@ -166,9 +161,7 @@ function ResetPasswordDialog({ open, onClose, onSave, user }) {
         </div>
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button
-            onClick={() => { if (!password.trim()) { toast.error('密码不能为空'); return } onSave(user.id, password) }}
-          >
+          <Button onClick={() => { if (!password.trim()) { toast.error('密码不能为空'); return } onSave(user.id, password) }}>
             确认重置
           </Button>
         </div>
@@ -177,74 +170,90 @@ function ResetPasswordDialog({ open, onClose, onSave, user }) {
   )
 }
 
+// ── 状态选项 ───────────────────────────────────────────────────────────────────
+
+const STATUS_OPTIONS = [
+  { value: 'true',  label: '已启用' },
+  { value: 'false', label: '已禁用' },
+]
+
 // ── 主页面 ─────────────────────────────────────────────────────────────────────
 
 export default function Users() {
-  const [users, setUsers]         = useState([])
-  const [roles, setRoles]         = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [formOpen, setFormOpen]   = useState(false)
-  const [editUser, setEditUser]   = useState(null)
-  const [resetOpen, setResetOpen] = useState(false)
-  const [resetUser, setResetUser] = useState(null)
+  const qc = useQueryClient()
 
-  async function load() {
-    try {
-      const [ur, rr] = await Promise.all([userApi.list(), userApi.listRoles()])
-      setUsers(ur.data?.data || [])
-      setRoles(rr.data?.data || [])
-    } catch {
-      toast.error('加载用户列表失败')
-    } finally {
-      setLoading(false)
-    }
+  const [page, setPage]         = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [filters, setFilters]   = useState({})   // { keyword, status, start_date, end_date }
+
+  const [roles, setRoles]           = useState([])
+  const [formOpen, setFormOpen]     = useState(false)
+  const [editUser, setEditUser]     = useState(null)
+  const [resetOpen, setResetOpen]   = useState(false)
+  const [resetUser, setResetUser]   = useState(null)
+  const [confirmOpen, setConfirmOpen]         = useState(false)
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState(null)
+
+  // 加载角色列表（静态，只取一次）
+  useEffect(() => {
+    userApi.listRoles().then(r => setRoles(r.data?.data || [])).catch(() => {})
+  }, [])
+
+  // 构造查询参数
+  const queryParams = {
+    page,
+    page_size: pageSize,
+    ...(filters.keyword    ? { keyword: filters.keyword }                : {}),
+    ...(filters.status     ? { is_active: filters.status === 'true' }    : {}),
+    ...(filters.start_date ? { start_date: filters.start_date }          : {}),
+    ...(filters.end_date   ? { end_date:   filters.end_date }            : {}),
   }
 
-  useEffect(() => { load() }, [])
+  const { data, isLoading } = useQuery({
+    queryKey: ['users', queryParams],
+    queryFn: () => userApi.list(queryParams),
+  })
+
+  const result  = data?.data?.data ?? {}
+  const users   = result.list || []
+  const total   = result.pagination?.total || 0
+
+  function handleSearch(f) {
+    setFilters(f)
+    setPage(1)
+  }
 
   async function handleSave(form, userId) {
     try {
       if (userId) {
-        // 编辑：只发可修改字段
-        const payload = {
-          role_names: [form.role_name],  // 后端期望数组
-          is_active:  form.is_active,
-        }
+        const payload = { role_names: [form.role_name], is_active: form.is_active }
         if (form.password) payload.password = form.password
         await userApi.update(userId, payload)
         toast.success('用户已更新')
       } else {
-        // 新建：username + password 必填，role_names 为数组
-        const createPayload = {
+        await userApi.create({
           username:   form.username,
           password:   form.password,
           role_names: [form.role_name],
-        }
-        await userApi.create(createPayload)
+        })
         toast.success('用户已创建')
       }
       setFormOpen(false)
       setEditUser(null)
-      load()
+      qc.invalidateQueries(['users'])
     } catch (err) {
       toast.error(err.response?.data?.detail || '操作失败')
     }
   }
 
-  const [confirmDeleteUser, setConfirmDeleteUser] = useState(null)
-  const [confirmOpen, setConfirmOpen] = useState(false)
-
-  function requestDelete(user) {
-    setConfirmDeleteUser(user)
-    setConfirmOpen(true)
-  }
+  function requestDelete(user) { setConfirmDeleteUser(user); setConfirmOpen(true) }
 
   async function handleDelete() {
     if (!confirmDeleteUser) return
     try {
       await userApi.delete(confirmDeleteUser.id)
       toast.success('已删除')
-      load()
+      qc.invalidateQueries(['users'])
     } catch (err) {
       toast.error(err.response?.data?.detail || '删除失败')
     } finally {
@@ -264,9 +273,6 @@ export default function Users() {
     }
   }
 
-  function openEdit(user) { setEditUser(user); setFormOpen(true) }
-  function openReset(user) { setResetUser(user); setResetOpen(true) }
-
   return (
     <div className="p-6 max-w-5xl mx-auto">
       {/* Header */}
@@ -276,13 +282,12 @@ export default function Users() {
           <p className="text-sm text-gray-500 mt-0.5">管理系统账号与角色权限</p>
         </div>
         <Button onClick={() => { setEditUser(null); setFormOpen(true) }}>
-          <Plus className="w-4 h-4 mr-2" />
-          新建用户
+          <Plus className="w-4 h-4 mr-2" />新建用户
         </Button>
       </div>
 
       {/* 角色说明卡片 */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-3 gap-3 mb-5">
         {roles.map(r => (
           <div key={r.name} className="bg-white border rounded-lg p-3">
             <div className="flex items-center gap-2 mb-1">
@@ -296,68 +301,83 @@ export default function Users() {
         ))}
       </div>
 
+      {/* 搜索栏 */}
+      <SearchBar
+        className="mb-4"
+        placeholder="搜索用户名…"
+        statusOptions={STATUS_OPTIONS}
+        onSearch={handleSearch}
+      />
+
       {/* 用户表格 */}
       <div className="bg-white border rounded-lg overflow-hidden">
-        {loading ? (
+        {isLoading ? (
           <div className="flex items-center justify-center py-16 text-gray-400 text-sm">加载中…</div>
         ) : users.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400">
             <User className="w-10 h-10 mb-2 opacity-30" />
-            <div className="text-sm">暂无用户</div>
+            <div className="text-sm">没有符合条件的用户</div>
           </div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>用户名</TableHead>
-                <TableHead>角色</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead className="w-40 whitespace-nowrap">最后登录</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map(user => (
-                <TableRow key={user.id}>
-                  <TableCell className="font-medium">{user.username}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1 flex-wrap">
-                      {(user.roles || []).map(r => <RoleBadge key={r} role={r} />)}
-                    </div>
-                  </TableCell>
-                  <TableCell><StatusBadge active={user.is_active} /></TableCell>
-                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                    {user.last_login_at ? new Date(user.last_login_at).toLocaleString('zh-CN') : '从未'}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => openReset(user)}
-                        className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
-                        title="重置密码"
-                      >
-                        <KeyRound className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => openEdit(user)}
-                        className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
-                        title="编辑"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => requestDelete(user)}
-                        className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
-                        title="删除"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </TableCell>
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>用户名</TableHead>
+                  <TableHead>角色</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead className="w-40 whitespace-nowrap">最后登录</TableHead>
+                  <TableHead className="w-40 whitespace-nowrap">更新时间</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {users.map(u => (
+                  <TableRow key={u.id}>
+                    <TableCell className="font-medium">{u.username}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-1 flex-wrap">
+                        {(u.roles || []).map(r => <RoleBadge key={r} role={r} />)}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {u.is_active
+                        ? <Badge className="bg-green-100 text-green-700 border-0">启用</Badge>
+                        : <Badge className="bg-gray-100 text-gray-500 border-0">禁用</Badge>
+                      }
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                      {u.last_login_at ? new Date(u.last_login_at).toLocaleString('zh-CN') : '从未'}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                      {formatDate(u.updated_at)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => { setResetUser(u); setResetOpen(true) }}
+                          className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors" title="重置密码">
+                          <KeyRound className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => { setEditUser(u); setFormOpen(true) }}
+                          className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors" title="编辑">
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => requestDelete(u)}
+                          className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors" title="删除">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <TablePagination
+              page={page} pageSize={pageSize} total={total}
+              onPageChange={setPage}
+              onSizeChange={size => { setPageSize(size); setPage(1) }}
+            />
+          </>
         )}
       </div>
 

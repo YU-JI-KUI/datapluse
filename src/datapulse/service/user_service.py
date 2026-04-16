@@ -15,8 +15,8 @@ class UserService:
     def __init__(self, session: Session) -> None:
         self.repo = UserRepository(session)
 
-    def list_users(self) -> list[dict[str, Any]]:
-        """List all users."""
+    def list_users(self) -> dict[str, Any]:
+        """List all users. Returns paginated dict: {"list": [...], "total": N}."""
         return self.repo.list_users()
 
     def get(self, user_id: int) -> dict[str, Any] | None:

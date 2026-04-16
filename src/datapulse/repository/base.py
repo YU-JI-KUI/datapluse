@@ -189,10 +189,16 @@ class DBManager:
 
     # ── User ──────────────────────────────────────────────────────────────────
 
-    def list_users(self) -> list[dict]:
+    def list_users(self, keyword: str | None = None, is_active: bool | None = None,
+                   start_date: str | None = None, end_date: str | None = None,
+                   page: int = 1, page_size: int = 20) -> dict:
         from datapulse.repository.user_repository import UserRepository
         with self._session() as s:
-            return UserRepository(s).list_users()
+            return UserRepository(s).list_users(
+                keyword=keyword, is_active=is_active,
+                start_date=start_date, end_date=end_date,
+                page=page, page_size=page_size,
+            )
 
     def get_user(self, user_id: int) -> dict | None:
         from datapulse.repository.user_repository import UserRepository
@@ -257,6 +263,12 @@ class DBManager:
         with self._session() as s:
             return DatasetRepository(s).delete(dataset_id)
 
+    def delete_dataset_cascade(self, dataset_id: int) -> None:
+        """后台异步级联删除数据集所有关联数据"""
+        from datapulse.repository.dataset_repository import DatasetRepository
+        with self._session() as s:
+            DatasetRepository(s).delete_cascade(dataset_id)
+
     def list_datasets_for_user(self, username: str, roles: list) -> list[dict]:
         from datapulse.repository.dataset_repository import DatasetRepository
         with self._session() as s:
@@ -295,12 +307,22 @@ class DBManager:
         with self._session() as s:
             return DataRepository(s).delete(item_id)
 
-    def list_all_data(self, dataset_id: int, status: str | None = None,
-                      keyword: str | None = None, page: int = 1,
-                      page_size: int = 20, enrich: bool = True) -> dict:
+    def batch_delete_data(self, ids: list[int]) -> int:
         from datapulse.repository.data_repository import DataRepository
         with self._session() as s:
-            return DataRepository(s).list_all(dataset_id, status, keyword, page, page_size, enrich)
+            return DataRepository(s).batch_delete(ids)
+
+    def list_all_data(self, dataset_id: int, status: str | None = None,
+                      keyword: str | None = None,
+                      start_date: str | None = None, end_date: str | None = None,
+                      page: int = 1, page_size: int = 20, enrich: bool = True) -> dict:
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).list_all(
+                dataset_id, status=status, keyword=keyword,
+                start_date=start_date, end_date=end_date,
+                page=page, page_size=page_size, enrich=enrich,
+            )
 
     def list_data_by_status(self, dataset_id: int, stage: str, enrich: bool = False) -> list[dict]:
         from datapulse.repository.data_repository import DataRepository

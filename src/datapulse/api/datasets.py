@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
 from datapulse.api.auth import UserInfo, get_current_user, require_admin
@@ -84,13 +84,16 @@ async def update_dataset(dataset_id: int, body: DatasetUpdate, user: AdminUser):
 
 
 @router.delete("/{dataset_id}")
-async def delete_dataset(dataset_id: int, user: AdminUser):
-    """删除数据集（级联删除所有关联数据，谨慎操作）"""
+async def delete_dataset(dataset_id: int, user: AdminUser, background_tasks: BackgroundTasks):
+    """删除数据集（异步级联删除所有关联数据，包括 DataItem/Annotation/Config 等）"""
     db = get_db()
-    ok = db.delete_dataset(dataset_id)
-    if not ok:
+    # 先确认数据集存在
+    ds = db.get_dataset(dataset_id)
+    if not ds:
         raise HTTPException(404, f"数据集不存在: {dataset_id}")
-    return {"success": True, "message": f"已删除数据集 {dataset_id}"}
+    # 立即返回成功，后台异步执行级联删除
+    background_tasks.add_task(db.delete_dataset_cascade, dataset_id)
+    return {"success": True, "message": f"数据集 {dataset_id} 删除已提交，正在后台清理关联数据"}
 
 
 @router.get("/{dataset_id}/users")

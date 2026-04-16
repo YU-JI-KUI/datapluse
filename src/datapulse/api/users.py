@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from datapulse.api.auth import UserInfo, get_current_user, require_admin
@@ -38,9 +38,23 @@ class ResetPasswordBody(BaseModel):
 
 
 @router.get("")
-async def list_users(user: AdminUser):
-    """获取所有用户列表（管理员）"""
-    return {"success": True, "data": get_db().list_users()}
+async def list_users(
+    user:       AdminUser,
+    keyword:    str | None = Query(None,  description="用户名关键字"),
+    is_active:  bool | None = Query(None, description="账号状态：true=启用，false=禁用"),
+    start_date: str | None = Query(None,  description="更新时间起（YYYY-MM-DD）"),
+    end_date:   str | None = Query(None,  description="更新时间止（YYYY-MM-DD）"),
+    page:       int = Query(1,  ge=1),
+    page_size:  int = Query(20, ge=1, le=200),
+):
+    """获取用户列表（管理员，支持分页和过滤）"""
+    from datapulse.core.response import page_data
+    result = get_db().list_users(
+        keyword=keyword, is_active=is_active,
+        start_date=start_date, end_date=end_date,
+        page=page, page_size=page_size,
+    )
+    return {"success": True, "data": page_data(result["list"], page, page_size, result["total"])}
 
 
 @router.get("/roles")
@@ -53,15 +67,19 @@ async def list_roles(user: CurrentUser):
 async def create_user(body: UserCreate, user: AdminUser):
     """创建新用户（管理员）"""
     db = get_db()
-    if db.get_user_by_username(body.username):
-        raise HTTPException(400, f"用户名已存在: {body.username}")
+    username = body.username.strip().upper()   # 用户名统一大写
+    if not username:
+        raise HTTPException(400, "用户名不能为空")
+    if db.get_user_by_username(username):
+        raise HTTPException(400, f"用户名已存在: {username}")
     if len(body.password) < 6:
         raise HTTPException(400, "密码至少 6 位")
     new_user = db.create_user(
-        username=body.username,
+        username=username,
         password=body.password,
         email=body.email or "",
         role_names=body.role_names,
+        created_by=user.username,
     )
     return {"success": True, "data": new_user}
 
@@ -91,7 +109,7 @@ async def update_user(user_id: int, body: UserUpdate, user: AdminUser):
         patch["password"] = body.password
     if body.role_names is not None:
         patch["role_names"] = body.role_names
-    updated = get_db().update_user(user_id, patch)
+    updated = get_db().update_user(user_id, patch, updated_by=user.username)
     if not updated:
         raise HTTPException(404, f"用户不存在: {user_id}")
     return {"success": True, "data": updated}
@@ -102,7 +120,7 @@ async def reset_password(user_id: int, body: ResetPasswordBody, user: AdminUser)
     """重置用户密码（管理员专用，不需要知道旧密码）"""
     if len(body.new_password) < 6:
         raise HTTPException(400, "密码至少 6 位")
-    updated = get_db().update_user(user_id, {"password": body.new_password})
+    updated = get_db().update_user(user_id, {"password": body.new_password}, updated_by=user.username)
     if not updated:
         raise HTTPException(404, f"用户不存在: {user_id}")
     return {"success": True, "message": "密码已重置"}

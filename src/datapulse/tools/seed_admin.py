@@ -50,7 +50,7 @@ def main() -> None:
         sys.exit(1)
 
     # ── 显示已有用户，询问是否继续 ────────────────────────────────────────────
-    existing_users = db.list_users()
+    existing_users = db.list_users().get("list", [])
     if existing_users:
         print(f"\n当前已有 {len(existing_users)} 个用户：")
         for u in existing_users:

@@ -1,42 +1,66 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Cpu, Play, RefreshCw, Loader2 } from 'lucide-react'
+import { Cpu, RefreshCw, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { pipelineApi, dataApi } from '@/lib/api'
+import { pipelineApi, dataApi, getCurrentDatasetId } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
+import TablePagination from '@/components/TablePagination'
+import SearchBar from '@/components/SearchBar'
 
 export default function PreAnnotation() {
   const qc = useQueryClient()
-  const [running, setRunning] = useState(false)
+  const [running, setRunning]   = useState(false)
+  const [datasetId]             = useState(() => getCurrentDatasetId())
 
+  // 列表搜索/分页状态
+  const [page, setPage]         = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [filters, setFilters]   = useState({})
+
+  // 待预标注数量（已清洗）
   const { data: processedData } = useQuery({
-    queryKey: ['cleaned-count'],
-    queryFn: () => dataApi.list({ status: 'cleaned', page: 1, page_size: 1 }),
+    queryKey: ['cleaned-count', datasetId],
+    queryFn:  () => dataApi.list({ status: 'cleaned', page: 1, page_size: 1 }),
+    enabled:  !!datasetId,
   })
+
+  // 预标注结果列表（带分页/搜索）
+  const queryParams = {
+    status: 'pre_annotated',
+    page,
+    page_size: pageSize,
+    ...(filters.keyword    ? { keyword:    filters.keyword    } : {}),
+    ...(filters.start_date ? { start_date: filters.start_date } : {}),
+    ...(filters.end_date   ? { end_date:   filters.end_date   } : {}),
+  }
 
   const { data: preAnnotatedData, isLoading, refetch } = useQuery({
-    queryKey: ['pre-annotated-list'],
-    queryFn: () => dataApi.list({ status: 'pre_annotated', page: 1, page_size: 50 }),
-    refetchInterval: 5000,
+    queryKey: ['pre-annotated-list', datasetId, queryParams],
+    queryFn:  () => dataApi.list(queryParams),
+    enabled:  !!datasetId,
+    refetchInterval: 8000,
   })
 
+  // Pipeline 状态
   const { data: pipelineData } = useQuery({
-    queryKey: ['pipeline-status'],
-    queryFn: () => pipelineApi.status(),
+    queryKey: ['pipeline-status', datasetId],
+    queryFn:  () => pipelineApi.status(datasetId),
+    enabled:  !!datasetId,
     refetchInterval: 10000,
   })
 
-  const processedResult = processedData?.data?.data ?? {}
+  const processedResult  = processedData?.data?.data ?? {}
   const preAnnotatedResult = preAnnotatedData?.data?.data ?? {}
-  const pipeline = pipelineData?.data?.data ?? pipelineData?.data ?? {}
-  const processedCount = processedResult.pagination?.total || 0
-  const preAnnotatedCount = preAnnotatedResult.pagination?.total || 0
-  const preAnnotated = preAnnotatedResult.list || []
+  const pipeline         = pipelineData?.data?.data ?? pipelineData?.data ?? {}
+
+  const processedCount   = processedResult.pagination?.total || 0
+  const preAnnotatedTotal = preAnnotatedResult.pagination?.total || 0
+  const preAnnotated     = preAnnotatedResult.list || []
 
   async function handleRunPreAnnotate() {
     setRunning(true)
@@ -50,6 +74,11 @@ export default function PreAnnotation() {
     } finally {
       setRunning(false)
     }
+  }
+
+  function handleSearch(f) {
+    setFilters(f)
+    setPage(1)
   }
 
   const scoreColor = (score) => {
@@ -80,7 +109,7 @@ export default function PreAnnotation() {
         </div>
       </div>
 
-      {/* Status cards */}
+      {/* 统计卡片 */}
       <div className="grid grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-5">
@@ -92,7 +121,7 @@ export default function PreAnnotation() {
         <Card>
           <CardContent className="p-5">
             <p className="text-sm text-muted-foreground">预标注完成</p>
-            <p className="text-3xl font-bold mt-1">{preAnnotatedCount}</p>
+            <p className="text-3xl font-bold mt-1">{preAnnotatedTotal}</p>
             <p className="text-xs text-muted-foreground mt-1">待人工标注</p>
           </CardContent>
         </Card>
@@ -107,7 +136,7 @@ export default function PreAnnotation() {
         </Card>
       </div>
 
-      {/* Running progress */}
+      {/* 进度条 */}
       {(running || pipeline.current_step === 'pre_annotate') && (
         <Card className="border-purple-200 bg-purple-50">
           <CardContent className="p-4">
@@ -120,26 +149,43 @@ export default function PreAnnotation() {
         </Card>
       )}
 
-      {/* Results table */}
+      {/* 预标注结果列表 */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">预标注结果</CardTitle>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <CardTitle className="text-base">预标注结果</CardTitle>
+            <SearchBar
+              placeholder="搜索文本内容…"
+              onSearch={handleSearch}
+              className="flex-1 max-w-2xl"
+            />
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>文本</TableHead>
-                <TableHead>预测标签</TableHead>
-                <TableHead>置信度</TableHead>
-                <TableHead className="w-40 whitespace-nowrap">创建时间</TableHead>
+                <TableHead className="w-32">预测标签</TableHead>
+                <TableHead className="w-24">置信度</TableHead>
+                <TableHead className="w-40 whitespace-nowrap">更新时间</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">加载中...</TableCell></TableRow>
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center py-10 text-muted-foreground">
+                    加载中…
+                  </TableCell>
+                </TableRow>
               ) : preAnnotated.length === 0 ? (
-                <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">暂无预标注数据，请先清洗数据再运行预标注</TableCell></TableRow>
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center py-10 text-muted-foreground">
+                    {Object.values(filters).some(Boolean)
+                      ? '没有符合条件的预标注数据'
+                      : '暂无预标注数据，请先清洗数据再运行预标注'}
+                  </TableCell>
+                </TableRow>
               ) : preAnnotated.map(item => (
                 <TableRow key={item.id}>
                   <TableCell>
@@ -150,16 +196,25 @@ export default function PreAnnotation() {
                   </TableCell>
                   <TableCell>
                     <span className={`text-sm font-medium ${scoreColor(item.pre_annotation?.score)}`}>
-                      {item.pre_annotation?.score != null ? `${(item.pre_annotation.score * 100).toFixed(1)}%` : '-'}
+                      {item.pre_annotation?.score != null
+                        ? `${(item.pre_annotation.score * 100).toFixed(1)}%`
+                        : '-'}
                     </span>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                    {formatDate(item.created_at)}
+                    {formatDate(item.updated_at)}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            total={preAnnotatedTotal}
+            onPageChange={setPage}
+            onSizeChange={size => { setPageSize(size); setPage(1) }}
+          />
         </CardContent>
       </Card>
     </div>

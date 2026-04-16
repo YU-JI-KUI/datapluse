@@ -252,6 +252,16 @@ class DataRepository:
         self.session.delete(item)
         return True
 
+    def batch_delete(self, ids: list[int]) -> int:
+        """批量删除数据条目（同时删除关联的 DataState 记录）"""
+        if not ids:
+            return 0
+        items = self.session.query(DataItem).filter(DataItem.id.in_(ids)).all()
+        self.session.query(DataState).filter(DataState.data_id.in_(ids)).delete(synchronize_session=False)
+        for item in items:
+            self.session.delete(item)
+        return len(items)
+
     # ── Read ─────────────────────────────────────────────────────────────────
 
     def get(self, item_id: int, enrich: bool = True) -> dict[str, Any] | None:
@@ -267,6 +277,8 @@ class DataRepository:
         dataset_id: int,
         status: str | None = None,
         keyword: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         page: int = 1,
         page_size: int = 20,
         enrich: bool = True,
@@ -276,6 +288,10 @@ class DataRepository:
             q = q.filter(DataItem.status == status)
         if keyword:
             q = q.filter(DataItem.content.ilike(f"%{keyword}%"))
+        if start_date:
+            q = q.filter(DataItem.updated_at >= start_date)
+        if end_date:
+            q = q.filter(DataItem.updated_at <= end_date + " 23:59:59")
         total = q.count()
         rows = (
             q.order_by(DataItem.created_at.desc())

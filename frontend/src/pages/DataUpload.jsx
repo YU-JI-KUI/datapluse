@@ -19,17 +19,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
+import SearchBar from '@/components/SearchBar'
 import { dataApi } from '@/lib/api'
 import { formatDate, getStatusLabel, getStatusColor, getActiveLabel, getPreLabel, getPreScore } from '@/lib/utils'
 
 // ── 状态筛选选项 ───────────────────────────────────────────────────────────────
 
 const STATUS_OPTIONS = [
-  { value: 'all',           label: '全部状态' },
   { value: 'raw',           label: '原始' },
   { value: 'cleaned',       label: '已清洗' },
   { value: 'pre_annotated', label: '已预标注' },
@@ -219,14 +218,17 @@ function ManualInputZone({ onSuccess }) {
 export default function DataUpload() {
   const qc = useQueryClient()
   const [uploadTab, setUploadTab] = useState('file')  // 'file' | 'manual'
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [filters, setFilters]   = useState({})
   const [page, setPage]         = useState(1)
   const [pageSize, setPageSize] = useState(10)
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['data-list', statusFilter, page, pageSize],
+    queryKey: ['data-list', filters, page, pageSize],
     queryFn: () => dataApi.list({
-      status: statusFilter === 'all' ? undefined : statusFilter,
+      status:     filters.status     || undefined,
+      keyword:    filters.keyword    || undefined,
+      start_date: filters.start_date || undefined,
+      end_date:   filters.end_date   || undefined,
       page,
       page_size: pageSize,
     }),
@@ -317,19 +319,17 @@ export default function DataUpload() {
       {/* 数据列表 */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-3">
-            <CardTitle className="text-base flex-1">已上传数据</CardTitle>
-            <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setPage(1) }}>
-              <SelectTrigger className="w-36">
-                <SelectValue placeholder="全部状态" />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map(o => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className="text-sm text-muted-foreground">共 {total} 条</span>
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <CardTitle className="text-base">
+              已上传数据
+              <span className="ml-2 text-sm font-normal text-muted-foreground">共 {total} 条</span>
+            </CardTitle>
+            <SearchBar
+              placeholder="搜索文本内容…"
+              statusOptions={STATUS_OPTIONS}
+              onSearch={f => { setFilters(f); setPage(1) }}
+              className="flex-1 max-w-3xl"
+            />
           </div>
         </CardHeader>
         <CardContent className="p-0">

@@ -12,11 +12,11 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// 响应拦截：401 跳转登录
+// 响应拦截：401 跳转登录（登录页本身不跳转，否则 401 错误 toast 会因页面刷新而消失）
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    if (err.response?.status === 401 && !window.location.pathname.includes('/login')) {
       localStorage.removeItem('token')
       localStorage.removeItem('username')
       localStorage.removeItem('roles')
@@ -76,7 +76,7 @@ export const datasetApi = {
 // ── Users ──────────────────────────────────────────────────────────────────────
 
 export const userApi = {
-  list:           ()         => api.get('/users'),
+  list:           (params = {}) => api.get('/users', { params }),
   create:         (data)     => api.post('/users', data),
   update:         (id, data) => api.put(`/users/${id}`, data),
   delete:         (id)       => api.delete(`/users/${id}`),
@@ -109,8 +109,9 @@ export const dataApi = {
     if (!datasetId) return _empty()
     return api.post('/data-items', { dataset_id: datasetId, content, source_ref: sourceRef })
   },
-  getItem:    (id) => api.get(`/data-items/${id}`),
-  deleteItem: (id) => api.delete(`/data-items/${id}`),
+  getItem:     (id)  => api.get(`/data-items/${id}`),
+  deleteItem:  (id)  => api.delete(`/data-items/${id}`),
+  deleteBatch: (ids) => api.post('/data-items/batch-delete', { ids }),
 }
 
 // ── Pipeline ───────────────────────────────────────────────────────────────────
@@ -248,21 +249,20 @@ export const configApi = {
 // ── Export ─────────────────────────────────────────────────────────────────────
 
 export const exportApi = {
+  /**
+   * 两步下载：
+   *  1. POST /export/prepare → 服务端生成临时文件，返回 token
+   *  2. window.location.href → 浏览器原生 GET 导航触发下载
+   * 这样浏览器把下载视为用户主动导航，不会触发 Chrome "不安全下载" 拦截。
+   */
   download: async (params, datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return null
     const body = { ...params, dataset_id: datasetId }
-    const res = await api.post('/export/create', body, { responseType: 'blob' })
-    const disposition = res.headers['content-disposition'] || ''
-    const match = disposition.match(/filename="?([^"]+)"?/)
-    const filename = match ? match[1] : `datapulse_export.${params.format || 'json'}`
-    const url = window.URL.createObjectURL(new Blob([res.data]))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
+    const res = await api.post('/export/prepare', body)
+    const { token, filename } = res.data?.data ?? {}
+    if (!token) throw new Error('导出失败：未获取到下载 token')
+    // 浏览器原生导航下载（无需 Authorization header，token 即凭据）
+    window.location.href = `/api/export/download/${token}`
     return filename
   },
   fields: (datasetId = getCurrentDatasetId()) => {
