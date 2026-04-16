@@ -1,4 +1,4 @@
-"""Dataset repository — t_dataset + t_system_config"""
+"""Dataset repository — t_dataset + t_system_config + t_user_dataset"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from datapulse.model.entities import Dataset, SystemConfig
+from datapulse.model.entities import Dataset, SystemConfig, UserDataset
 from datapulse.repository.base import DEFAULT_DATASET_CONFIG
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -88,3 +88,52 @@ class DatasetRepository:
             return False
         self.session.delete(row)
         return True
+
+    # ── 用户-数据集分配 ─────────────────────────────────────────────────────────
+
+    def get_assigned_users(self, dataset_id: int) -> list[str]:
+        """获取该数据集分配的所有用户名"""
+        rows = (
+            self.session.query(UserDataset)
+            .filter(UserDataset.dataset_id == dataset_id)
+            .all()
+        )
+        return [r.username for r in rows]
+
+    def get_user_datasets(self, username: str) -> list[int]:
+        """获取该用户被分配的所有数据集 id"""
+        rows = (
+            self.session.query(UserDataset)
+            .filter(UserDataset.username == username)
+            .all()
+        )
+        return [r.dataset_id for r in rows]
+
+    def assign_users(self, dataset_id: int, usernames: list[str], by: str = "system") -> None:
+        """将数据集分配给一批用户（覆盖式：先删除旧记录再写入新记录）"""
+        self.session.query(UserDataset).filter(UserDataset.dataset_id == dataset_id).delete()
+        ts = _now()
+        for username in usernames:
+            self.session.add(
+                UserDataset(
+                    username=username,
+                    dataset_id=dataset_id,
+                    created_at=ts,
+                    created_by=by,
+                )
+            )
+
+    def list_datasets_for_user(self, username: str, roles: list[str]) -> list[dict[str, Any]]:
+        """普通用户只能看到分配给自己的活跃数据集"""
+        if "admin" in roles:
+            return self.list_datasets(include_inactive=False)
+        assigned_ids = self.get_user_datasets(username)
+        if not assigned_ids:
+            return []
+        rows = (
+            self.session.query(Dataset)
+            .filter(Dataset.status == "active", Dataset.id.in_(assigned_ids))
+            .order_by(Dataset.id)
+            .all()
+        )
+        return [_dataset_to_dict(r) for r in rows]

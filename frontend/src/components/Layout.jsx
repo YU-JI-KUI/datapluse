@@ -1,12 +1,17 @@
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   LayoutDashboard, Database, Search, Tag, CheckSquare, AlertTriangle,
   Settings, Download, LogOut, Cpu, ChevronLeft, ChevronRight,
-  Users, ChevronDown,
+  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { datasetApi, getCurrentDatasetId, setCurrentDatasetId } from '@/lib/api'
+import { datasetApi, authApi, getCurrentDatasetId, setCurrentDatasetId } from '@/lib/api'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 const navItems = [
   { to: '/dashboard',      label: 'Dashboard',    icon: LayoutDashboard },
@@ -17,11 +22,90 @@ const navItems = [
   { to: '/conflicts',      label: '冲突检测',      icon: AlertTriangle },
   { to: '/config',         label: '配置中心',      icon: Settings },
   { to: '/export',         label: '数据导出',      icon: Download },
-  { to: '/users',          label: '用户管理',      icon: Users },
+  { to: '/datasets',       label: '数据集管理',    icon: FolderOpen, adminOnly: true },
+  { to: '/users',          label: '用户管理',      icon: Users,       adminOnly: true },
 ]
+
+// ── 修改密码弹窗 ───────────────────────────────────────────────────────────────
+
+function ChangePasswordDialog({ open, onClose }) {
+  const [oldPwd, setOldPwd]   = useState('')
+  const [newPwd, setNewPwd]   = useState('')
+  const [showOld, setShowOld] = useState(false)
+  const [showNew, setShowNew] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open) { setOldPwd(''); setNewPwd(''); setShowOld(false); setShowNew(false) }
+  }, [open])
+
+  async function handleSubmit() {
+    if (!oldPwd) { toast.error('请输入旧密码'); return }
+    if (newPwd.length < 6) { toast.error('新密码至少 6 位'); return }
+    setLoading(true)
+    try {
+      await authApi.changePassword(oldPwd, newPwd)
+      toast.success('密码已更新')
+      onClose()
+    } catch (err) {
+      toast.error(err.response?.data?.detail || '修改失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-sm">
+        <h2 className="text-base font-semibold mb-4">修改密码</h2>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">旧密码</label>
+            <div className="relative">
+              <Input
+                type={showOld ? 'text' : 'password'}
+                value={oldPwd}
+                onChange={e => setOldPwd(e.target.value)}
+                placeholder="请输入旧密码"
+              />
+              <button type="button" onClick={() => setShowOld(v => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                {showOld ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">新密码</label>
+            <div className="relative">
+              <Input
+                type={showNew ? 'text' : 'password'}
+                value={newPwd}
+                onChange={e => setNewPwd(e.target.value)}
+                placeholder="至少 6 位"
+              />
+              <button type="button" onClick={() => setShowNew(v => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <Button variant="outline" onClick={onClose} disabled={loading}>取消</Button>
+          <Button onClick={handleSubmit} disabled={loading}>
+            {loading ? '提交中…' : '确认修改'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── 主布局 ─────────────────────────────────────────────────────────────────────
 
 export default function Layout() {
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const username = localStorage.getItem('username') || 'admin'
   const roles    = JSON.parse(localStorage.getItem('roles') || '[]')
   const isAdmin  = roles.includes('admin')
@@ -32,6 +116,7 @@ export default function Layout() {
   const [datasets, setDatasets]           = useState([])
   const [currentDataset, setCurrentDataset] = useState(getCurrentDatasetId())
   const [dsOpen, setDsOpen]               = useState(false)
+  const [changePwdOpen, setChangePwdOpen] = useState(false)
 
   useEffect(() => {
     datasetApi.list()
@@ -55,10 +140,12 @@ export default function Layout() {
 
   function switchDataset(id) {
     setCurrentDataset(id)
-    setCurrentDatasetId(id)
+    setCurrentDatasetId(id)   // 先更新 localStorage
     setDsOpen(false)
-    // 刷新当前页面数据（通知子组件）
+    // 通知各页面（监听事件的页面会重置自身的 datasetId state）
     window.dispatchEvent(new CustomEvent('datasetChanged', { detail: { datasetId: id } }))
+    // 清除所有 React Query 缓存，确保未监听事件的页面也能获取新数据集数据
+    qc.invalidateQueries()
   }
 
   function toggleSidebar() {
@@ -143,7 +230,7 @@ export default function Layout() {
         {/* Navigation */}
         <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
           {navItems
-            .filter(item => item.to !== '/users' || isAdmin)
+            .filter(item => !item.adminOnly || isAdmin)
             .map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
@@ -187,13 +274,22 @@ export default function Layout() {
               </div>
             )}
             {!collapsed && (
-              <button
-                onClick={handleLogout}
-                className="text-gray-400 hover:text-white transition-colors"
-                title="退出"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setChangePwdOpen(true)}
+                  className="text-gray-400 hover:text-white transition-colors"
+                  title="修改密码"
+                >
+                  <KeyRound className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="text-gray-400 hover:text-white transition-colors"
+                  title="退出"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
             )}
           </div>
 
@@ -220,6 +316,9 @@ export default function Layout() {
       <main className="flex-1 overflow-y-auto">
         <Outlet />
       </main>
+
+      {/* 修改密码弹窗 */}
+      <ChangePasswordDialog open={changePwdOpen} onClose={() => setChangePwdOpen(false)} />
     </div>
   )
 }

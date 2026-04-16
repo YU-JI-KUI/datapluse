@@ -390,6 +390,30 @@ COMMENT ON COLUMN t_pipeline_status.updated_by   IS '最后更新人';
 
 
 -- =============================================================================
+-- 15. 用户-数据集访问权限关联表
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS t_user_dataset (
+    id         BIGSERIAL    NOT NULL,
+    username   VARCHAR(100) NOT NULL,
+    dataset_id BIGINT       NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_user_dataset    PRIMARY KEY (id),
+    CONSTRAINT uq_t_user_dataset    UNIQUE (username, dataset_id)
+);
+
+COMMENT ON TABLE  t_user_dataset            IS '用户-数据集访问权限关联表：admin 无需记录，普通用户仅能访问分配给自己的数据集';
+COMMENT ON COLUMN t_user_dataset.id         IS '主键ID';
+COMMENT ON COLUMN t_user_dataset.username   IS '用户名（逻辑外键 → t_user.username）';
+COMMENT ON COLUMN t_user_dataset.dataset_id IS '数据集ID（逻辑外键 → t_dataset.id）';
+COMMENT ON COLUMN t_user_dataset.created_at IS '分配时间';
+COMMENT ON COLUMN t_user_dataset.created_by IS '分配操作人';
+
+-- username 单列查询已由 UNIQUE(username, dataset_id) 约束索引覆盖，无需单独创建
+CREATE INDEX IF NOT EXISTS idx_t_user_dataset_dataset_id ON t_user_dataset(dataset_id);
+
+
+-- =============================================================================
 -- 初始数据：预置角色
 -- =============================================================================
 INSERT INTO t_role (name, description, permissions, created_by, updated_by)
@@ -446,7 +470,7 @@ SELECT
         "pipeline": {
             "batch_size": 32
         },
-        "labels": ["寿险意图", "拒识", "健康险意图", "财险意图", "其他意图"]
+        "labels": ["寿险意图", "拒识"]
     }'::jsonb,
     'system'
 FROM t_dataset d

@@ -257,6 +257,21 @@ class DBManager:
         with self._session() as s:
             return DatasetRepository(s).delete(dataset_id)
 
+    def list_datasets_for_user(self, username: str, roles: list) -> list[dict]:
+        from datapulse.repository.dataset_repository import DatasetRepository
+        with self._session() as s:
+            return DatasetRepository(s).list_datasets_for_user(username, roles)
+
+    def get_assigned_users(self, dataset_id: int) -> list[str]:
+        from datapulse.repository.dataset_repository import DatasetRepository
+        with self._session() as s:
+            return DatasetRepository(s).get_assigned_users(dataset_id)
+
+    def assign_users(self, dataset_id: int, usernames: list[str], by: str = "system") -> None:
+        from datapulse.repository.dataset_repository import DatasetRepository
+        with self._session() as s:
+            DatasetRepository(s).assign_users(dataset_id, usernames, by)
+
     # ── Data ──────────────────────────────────────────────────────────────────
 
     def create_data(self, dataset_id: int, content: str, source: str = "",

@@ -171,3 +171,38 @@ async def me(user: Annotated[UserInfo, Depends(get_current_user)]):
             "roles": user.roles,
         },
     }
+
+
+class ChangePasswordBody(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordBody,
+    user: Annotated[UserInfo, Depends(get_current_user)],
+):
+    """已登录用户修改自己的密码（需验证旧密码）"""
+    if len(body.new_password) < 6:
+        raise HTTPException(400, "新密码至少 6 位")
+
+    db = get_db()
+    from sqlalchemy.orm import sessionmaker
+
+    from datapulse.service.user_service import UserService
+
+    session_class = sessionmaker(bind=db._engine)
+    session = session_class()
+    try:
+        user_service = UserService(session)
+        current = user_service.get_by_username(user.username)
+        if current is None:
+            raise HTTPException(404, "用户不存在")
+        if not user_service.verify_password(body.old_password, current["password_hash"]):
+            raise HTTPException(400, "旧密码不正确")
+        user_service.update(current["id"], {"password": body.new_password})
+        session.commit()
+        return {"success": True, "message": "密码已更新"}
+    finally:
+        session.close()

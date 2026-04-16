@@ -11,6 +11,7 @@ import ConflictDetection from '@/pages/ConflictDetection'
 import ConfigCenter from '@/pages/ConfigCenter'
 import Export from '@/pages/Export'
 import Users from '@/pages/Users'
+import DatasetManagement from '@/pages/DatasetManagement'
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem('token')
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="conflicts"      element={<ConflictDetection />} />
           <Route path="config"         element={<ConfigCenter />} />
           <Route path="export"         element={<Export />} />
+          <Route path="datasets"        element={<RequireAdmin><DatasetManagement /></RequireAdmin>} />
           <Route path="users"          element={<RequireAdmin><Users /></RequireAdmin>} />
         </Route>
       </Routes>

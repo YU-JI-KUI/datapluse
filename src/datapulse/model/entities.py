@@ -209,6 +209,22 @@ class PipelineStatus(Base):
     updated_by   = Column(String(45), nullable=False, default="")
 
 
+class UserDataset(Base):
+    """t_user_dataset — 用户-数据集访问权限（多对多关联）
+
+    admin 用户可访问所有数据集，无需入此表。
+    annotator / viewer 用户只能访问分配给自己的数据集。
+    """
+
+    __tablename__ = "t_user_dataset"
+
+    id         = Column(BigInteger, primary_key=True, autoincrement=True)
+    username   = Column(String(100), nullable=False)
+    dataset_id = Column(BigInteger, nullable=False)
+    created_at = Column(_TS, nullable=False)
+    created_by = Column(String(45), nullable=False, default="")
+
+
 class AnnotationResult(Base):
     """t_annotation_result — 标注结果汇总（每条数据一行，由标注写入自动触发聚合）
 

@@ -56,16 +56,21 @@ export const authApi = {
     })
   },
   me: () => api.get('/auth/me'),
+  changePassword: (oldPassword, newPassword) =>
+    api.post('/auth/change-password', { old_password: oldPassword, new_password: newPassword }),
 }
 
 // ── Datasets ───────────────────────────────────────────────────────────────────
 
 export const datasetApi = {
-  list:   ()         => api.get('/datasets'),
-  get:    (id)       => api.get(`/datasets/${id}`),
-  create: (data)     => api.post('/datasets', data),
-  update: (id, data) => api.put(`/datasets/${id}`, data),
-  delete: (id)       => api.delete(`/datasets/${id}`),
+  list:         ()           => api.get('/datasets'),
+  listAll:      ()           => api.get('/datasets/all'),
+  get:          (id)         => api.get(`/datasets/${id}`),
+  create:       (data)       => api.post('/datasets', data),
+  update:       (id, data)   => api.put(`/datasets/${id}`, data),
+  delete:       (id)         => api.delete(`/datasets/${id}`),
+  getUsers:     (id)         => api.get(`/datasets/${id}/users`),
+  assignUsers:  (id, names)  => api.put(`/datasets/${id}/users`, { usernames: names }),
 }
 
 // ── Users ──────────────────────────────────────────────────────────────────────
