@@ -57,7 +57,7 @@ export default function Login() {
               <Input
                 value={username}
                 onChange={e => setUsername(e.target.value.toUpperCase())}
-                placeholder="ADMIN"
+                placeholder="请输入用户名-自动转为大写"
                 className="bg-white/10 border-white/20 text-white placeholder:text-gray-500"
                 autoFocus
               />
@@ -68,7 +68,7 @@ export default function Login() {
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="请输入密码"
                 className="bg-white/10 border-white/20 text-white placeholder:text-gray-500"
               />
             </div>
