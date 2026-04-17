@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import exists
 
 from datapulse.model.entities import (
-    Annotation, AnnotationResult, Conflict, DataItem, DataState, PreAnnotation,
+    Annotation, AnnotationResult, Conflict, DataComment, DataItem, DataState, PreAnnotation,
 )
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -360,18 +360,27 @@ class DataRepository:
         source_ref: str = "",
         created_by: str = "",
     ) -> dict[str, Any]:
-        """批量创建数据，若行含 label 则同时写入预标注并将状态推进到 pre_annotated。
+        """批量创建带标注的历史数据，单事务完成以下写入：
+
+        有 label 的行：
+          - t_data_item / t_data_state → status = annotated
+          - t_annotation              → is_active=True, username=created_by, cot=迁移说明
+          - t_annotation_result       → label_source="manual", annotator_count=1
+          - t_data_comment            → 记录历史数据迁移来源
+
+        无 label 的行：
+          - t_data_item / t_data_state → status = raw（原始行为，等待 pipeline）
 
         rows: [{"content": str, "label": str | None}, ...]
-        返回: {"created": N, "skipped": M, "pre_annotated": K}
+        返回: {"created": N, "skipped": M, "annotated": K}
         """
         from datapulse.modules.processing import _MIGRATION_COT
-        from datapulse.model.entities import PreAnnotation
 
         if not rows:
-            return {"created": 0, "skipped": 0, "pre_annotated": 0}
+            return {"created": 0, "skipped": 0, "annotated": 0}
 
         ts = _now()
+        MIGRATOR = created_by or "system"
 
         # label_by_hash: content_hash → label（仅有非空 label 的行）
         label_by_hash: dict[str, str] = {}
@@ -400,7 +409,7 @@ class DataRepository:
                 skipped += 1
                 continue
             seen.add(chash)
-            initial_stage = "pre_annotated" if chash in label_by_hash else "raw"
+            initial_stage = "annotated" if chash in label_by_hash else "raw"
             new_records.append({
                 "dataset_id":   dataset_id,
                 "content":      text,
@@ -416,7 +425,7 @@ class DataRepository:
             new_hashes.append(chash)
 
         if not new_records:
-            return {"created": 0, "skipped": skipped, "pre_annotated": 0}
+            return {"created": 0, "skipped": skipped, "annotated": 0}
 
         # ── Step 3: 批量插入 t_data_item ──────────────────────────────────
         self.session.bulk_insert_mappings(DataItem, new_records)
@@ -434,7 +443,7 @@ class DataRepository:
         state_records = [
             {
                 "data_id":    hash_to_id[h],
-                "stage":      "pre_annotated" if h in label_by_hash else "raw",
+                "stage":      "annotated" if h in label_by_hash else "raw",
                 "updated_at": ts,
                 "updated_by": created_by,
             }
@@ -442,28 +451,65 @@ class DataRepository:
         ]
         self.session.bulk_insert_mappings(DataState, state_records)
 
-        # ── Step 6: 批量插入 t_pre_annotation（仅有 label 的条目）─────────
-        pre_records = [
-            {
-                "data_id":    hash_to_id[h],
-                "model_name": "manual_import",
-                "label":      label_by_hash[h],
-                "score":      1.0,
-                "cot":        _MIGRATION_COT,
-                "version":    1,
-                "created_at": ts,
-                "created_by": created_by,
-            }
+        # ── 以下仅处理有 label 的条目 ─────────────────────────────────────
+        labeled_ids: list[tuple[int, str]] = [
+            (hash_to_id[h], label_by_hash[h])
             for h in new_hashes
             if h in label_by_hash and h in hash_to_id
         ]
-        if pre_records:
-            self.session.bulk_insert_mappings(PreAnnotation, pre_records)
+
+        if labeled_ids:
+            # ── Step 6: 批量插入 t_annotation（标注事实）────────────────
+            ann_records = [
+                {
+                    "data_id":    data_id,
+                    "username":   MIGRATOR,
+                    "label":      label,
+                    "cot":        _MIGRATION_COT,
+                    "version":    1,
+                    "is_active":  True,
+                    "created_at": ts,
+                    "created_by": MIGRATOR,
+                }
+                for data_id, label in labeled_ids
+            ]
+            self.session.bulk_insert_mappings(Annotation, ann_records)
+
+            # ── Step 7: 批量插入 t_annotation_result（最终标注结果）──────
+            result_records = [
+                {
+                    "data_id":        data_id,
+                    "dataset_id":     dataset_id,
+                    "final_label":    label,
+                    "label_source":   "manual",
+                    "annotator_count": 1,
+                    "resolver":       MIGRATOR,
+                    "cot":            _MIGRATION_COT,
+                    "updated_at":     ts,
+                    "updated_by":     MIGRATOR,
+                }
+                for data_id, label in labeled_ids
+            ]
+            self.session.bulk_insert_mappings(AnnotationResult, result_records)
+
+            # ── Step 8: 批量插入 t_data_comment（迁移溯源记录）──────────
+            comment_text = f"[历史数据迁移] 来源：{source_ref or source or '文件上传'}，标注人：{MIGRATOR}"
+            comment_records = [
+                {
+                    "data_id":    data_id,
+                    "username":   MIGRATOR,
+                    "comment":    comment_text,
+                    "created_at": ts,
+                    "created_by": MIGRATOR,
+                }
+                for data_id, _ in labeled_ids
+            ]
+            self.session.bulk_insert_mappings(DataComment, comment_records)
 
         return {
-            "created":        len(new_records),
-            "skipped":        skipped,
-            "pre_annotated":  len(pre_records),
+            "created":   len(new_records),
+            "skipped":   skipped,
+            "annotated": len(labeled_ids),
         }
 
     def bulk_update_stage(

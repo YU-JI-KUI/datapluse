@@ -48,8 +48,8 @@ function FileUploadZone({ onSuccess }) {
     try {
       const res = await dataApi.upload(file)
       const d = res.data?.data ?? res.data ?? {}
-      const preAnnotatedMsg = d.pre_annotated > 0 ? `，其中 ${d.pre_annotated} 条已预标注` : ''
-      toast.success(`上传成功：新增 ${d.created ?? 0} 条${preAnnotatedMsg}，跳过 ${d.skipped ?? 0} 条，去重 ${d.dup_skipped ?? 0} 条`)
+      const annotatedMsg = d.annotated > 0 ? `，其中 ${d.annotated} 条直接标注完成` : ''
+      toast.success(`上传成功：新增 ${d.created ?? 0} 条${annotatedMsg}，跳过 ${d.skipped ?? 0} 条，去重 ${d.dup_skipped ?? 0} 条`)
       onSuccess?.()
     } catch (err) {
       toast.error(err.response?.data?.detail || '上传失败')

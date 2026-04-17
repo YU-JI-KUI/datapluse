@@ -182,7 +182,7 @@ async def upload_data(
         "created":        result["created"],
         "skipped":        invalid_skip,
         "dup_skipped":    result["skipped"],
-        "pre_annotated":  result.get("pre_annotated", 0),
+        "annotated":      result.get("annotated", 0),
         "total_parsed":   total_parsed,
     })
 
