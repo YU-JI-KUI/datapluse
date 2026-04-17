@@ -5,7 +5,8 @@ import {
 } from 'recharts'
 import {
   Database, CheckCircle, AlertTriangle, Cpu,
-  ArrowRight, Play, RefreshCw, Tag,
+  ArrowRight, Play, RefreshCw, Tag, Clock, Zap, Timer,
+  CheckCheck, ChevronRight, XCircle,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -15,6 +16,8 @@ import { dataApi, pipelineApi, getCurrentDatasetId } from '@/lib/api'
 import { toast } from 'sonner'
 import { useState, useEffect } from 'react'
 
+// ── 常量 ────────────────────────────────────────────────────────────────────
+
 const STATUS_CONFIG = [
   { key: 'raw',           label: '原始',    color: '#6b7280' },
   { key: 'cleaned',       label: '已清洗',  color: '#3b82f6' },
@@ -22,6 +25,30 @@ const STATUS_CONFIG = [
   { key: 'annotated',     label: '已标注',  color: '#f97316' },
   { key: 'checked',       label: '已检测',  color: '#22c55e' },
 ]
+
+const PIPELINE_STEPS = [
+  { key: 'process',      label: '数据清洗',   icon: '🧹' },
+  { key: 'pre_annotate', label: '预标注',     icon: '🤖' },
+  { key: 'embed',        label: '向量化',     icon: '🔢' },
+  { key: 'check',        label: '冲突检测',   icon: '🔍' },
+]
+
+// ── 工具函数 ─────────────────────────────────────────────────────────────────
+
+function fmtDuration(seconds) {
+  if (!seconds || seconds <= 0) return '-'
+  if (seconds < 60) return `${Math.round(seconds)}秒`
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  return s > 0 ? `${m}分${s}秒` : `${m}分钟`
+}
+
+function fmtNum(n) {
+  if (n == null) return '-'
+  return Number(n).toLocaleString('zh-CN')
+}
+
+// ── 子组件 ───────────────────────────────────────────────────────────────────
 
 function StatCard({ title, value, icon: Icon, color, sub }) {
   return (
@@ -42,52 +69,222 @@ function StatCard({ title, value, icon: Icon, color, sub }) {
   )
 }
 
+// 步骤时间轴（运行中/完成）
+function StepTimeline({ currentStep, pipelineStatus, results }) {
+  const stepIndex = PIPELINE_STEPS.findIndex(s => s.key === currentStep)
+
+  return (
+    <div className="flex items-center gap-1 w-full">
+      {PIPELINE_STEPS.map((step, idx) => {
+        const isCompleted = pipelineStatus === 'completed'
+          || (pipelineStatus === 'running' && idx < stepIndex)
+        const isCurrent   = pipelineStatus === 'running' && idx === stepIndex
+        const isPending   = !isCompleted && !isCurrent
+
+        return (
+          <div key={step.key} className="flex items-center flex-1 min-w-0">
+            {/* 步骤圆点 */}
+            <div className="flex flex-col items-center gap-1 flex-shrink-0">
+              <div className={`
+                w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all
+                ${isCompleted ? 'bg-green-500 text-white' :
+                  isCurrent   ? 'bg-blue-500 text-white ring-4 ring-blue-200 animate-pulse' :
+                                'bg-muted text-muted-foreground'}
+              `}>
+                {isCompleted ? <CheckCircle className="w-4 h-4" /> : step.icon}
+              </div>
+              <span className={`text-[10px] whitespace-nowrap font-medium
+                ${isCompleted ? 'text-green-600' :
+                  isCurrent   ? 'text-blue-600' :
+                                'text-muted-foreground'}`}>
+                {step.label}
+              </span>
+            </div>
+            {/* 连接线 */}
+            {idx < PIPELINE_STEPS.length - 1 && (
+              <div className={`h-0.5 flex-1 mx-1 rounded transition-all
+                ${isCompleted ? 'bg-green-400' : 'bg-muted'}`}
+              />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// 运行中的实时进度详情
+function RunningDetail({ pipeline }) {
+  const detail = pipeline.detail || {}
+  const {
+    processed, total, skipped, pct,
+    speed_per_sec, eta_seconds, elapsed_seconds,
+  } = detail
+
+  const progress = pipeline.progress || 0
+
+  return (
+    <div className="space-y-4">
+      {/* 进度条 */}
+      <div className="space-y-1.5">
+        <div className="flex justify-between text-xs font-medium">
+          <span className="text-blue-700">
+            {PIPELINE_STEPS.find(s => s.key === pipeline.current_step)?.label || pipeline.current_step}
+          </span>
+          <span className="text-blue-600 tabular-nums">{progress}%</span>
+        </div>
+        <Progress value={progress} className="h-2" />
+      </div>
+
+      {/* 数量进度 */}
+      {total > 0 && (
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">进度</span>
+          <span className="font-mono font-medium tabular-nums">
+            {fmtNum(processed)} / {fmtNum(total)}
+            {skipped > 0 && <span className="text-muted-foreground ml-1">({fmtNum(skipped)} 跳过)</span>}
+          </span>
+        </div>
+      )}
+
+      {/* 速度 + 剩余时间 + 已用时 */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-blue-50 rounded-lg p-2 text-center">
+          <div className="flex items-center justify-center gap-1 text-blue-500 mb-0.5">
+            <Zap className="w-3 h-3" />
+            <span className="text-[10px]">速度</span>
+          </div>
+          <div className="text-xs font-bold tabular-nums text-blue-700">
+            {speed_per_sec != null ? `${Math.round(speed_per_sec)}/s` : '-'}
+          </div>
+        </div>
+        <div className="bg-orange-50 rounded-lg p-2 text-center">
+          <div className="flex items-center justify-center gap-1 text-orange-500 mb-0.5">
+            <Timer className="w-3 h-3" />
+            <span className="text-[10px]">剩余</span>
+          </div>
+          <div className="text-xs font-bold tabular-nums text-orange-700">
+            {fmtDuration(eta_seconds)}
+          </div>
+        </div>
+        <div className="bg-gray-50 rounded-lg p-2 text-center">
+          <div className="flex items-center justify-center gap-1 text-gray-500 mb-0.5">
+            <Clock className="w-3 h-3" />
+            <span className="text-[10px]">已用时</span>
+          </div>
+          <div className="text-xs font-bold tabular-nums text-gray-700">
+            {fmtDuration(elapsed_seconds)}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 完成后的结果汇总
+function CompletedResults({ pipeline }) {
+  const results = Array.isArray(pipeline.results) ? pipeline.results : []
+
+  const stepLabel = {
+    process:      '数据清洗',
+    pre_annotate: 'LLM 预标注',
+    embed:        '向量化',
+    check:        '冲突检测',
+  }
+
+  function stepSummary(r) {
+    if (!r) return '-'
+    const step = r.step
+    if (step === 'process')
+      return `${fmtNum(r.processed)} 条清洗完成${r.skipped > 0 ? `，${fmtNum(r.skipped)} 跳过` : ''}`
+    if (step === 'pre_annotate')
+      return `${fmtNum(r.annotated)} 条已预标注`
+    if (step === 'embed')
+      return `${fmtNum(r.embedded)} 条已向量化（索引 ${fmtNum(r.index_size)}）`
+    if (step === 'check') {
+      const clean     = r.clean    ?? 0
+      const lConflict = r.label_conflicts    ?? 0
+      const sConflict = r.semantic_conflicts ?? 0
+      const total     = r.total ?? 0
+      return `${fmtNum(clean)} 条通过，${fmtNum(lConflict + sConflict)} 条冲突（标签 ${fmtNum(lConflict)} / 语义 ${fmtNum(sConflict)}）`
+    }
+    return JSON.stringify(r)
+  }
+
+  return (
+    <div className="space-y-2">
+      {PIPELINE_STEPS.map(step => {
+        const r = results.find(x => x.step === step.key)
+        return (
+          <div key={step.key} className="flex items-start gap-2 text-xs">
+            <CheckCheck className="w-3.5 h-3.5 text-green-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="font-medium text-foreground">{stepLabel[step.key]}</span>
+              <span className="text-muted-foreground ml-1.5">{r ? stepSummary(r) : '已完成'}</span>
+            </div>
+          </div>
+        )
+      })}
+
+      {pipeline.finished_at && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-1 border-t">
+          <Clock className="w-3 h-3" />
+          完成于 {new Date(pipeline.finished_at).toLocaleString('zh-CN')}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 主页面 ───────────────────────────────────────────────────────────────────
+
 export default function Dashboard() {
-  const navigate = useNavigate()
+  const navigate  = useNavigate()
   const [runningPipeline, setRunningPipeline] = useState(false)
   const [datasetId, setDatasetId] = useState(() => getCurrentDatasetId())
 
-  // 切换数据集时重新加载 + 初始加载
   useEffect(() => {
     const handler = (e) => setDatasetId(e.detail.datasetId)
     window.addEventListener('datasetChanged', handler)
-    
-    // 如果初始没有datasetId，等待Layout设置
     if (datasetId === null) {
-      const checkDataset = () => {
-        const current = getCurrentDatasetId()
-        if (current !== null) {
-          setDatasetId(current)
-        } else {
-          // 继续检查
-          setTimeout(checkDataset, 100)
-        }
+      const check = () => {
+        const cur = getCurrentDatasetId()
+        if (cur !== null) setDatasetId(cur)
+        else setTimeout(check, 100)
       }
-      checkDataset()
+      check()
     }
-    
     return () => window.removeEventListener('datasetChanged', handler)
   }, [])
 
+  // Stats 轮询：固定 15s，状态不影响
   const { data: statsRes, refetch: refetchStats } = useQuery({
-    queryKey: ['stats', datasetId],
-    queryFn: () => dataApi.stats(datasetId),
-    refetchInterval: 10000,
-    enabled: datasetId !== null,
+    queryKey:              ['stats', datasetId],
+    queryFn:               () => dataApi.stats(datasetId),
+    refetchInterval:       15_000,
+    refetchIntervalInBackground: true,   // 窗口非激活态也继续轮询（修复 Windows 下不更新问题）
+    enabled:               datasetId !== null,
   })
 
+  // Pipeline 轮询：
+  //   running → 每 2s 快速刷新，感知进度变化
+  //   其他状态 → 停止自动轮询（completed / error / idle 不需要持续查询）
   const { data: pipelineRes, refetch: refetchPipeline } = useQuery({
     queryKey: ['pipeline-status', datasetId],
-    queryFn: () => pipelineApi.status(datasetId),
-    refetchInterval: 10000,
+    queryFn:  () => pipelineApi.status(datasetId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.data?.data?.status
+      return status === 'running' ? 2_000 : false
+    },
+    refetchIntervalInBackground: true,   // 修复 Windows 下后台轮询不工作
     enabled: datasetId !== null,
   })
 
-  const stats = statsRes?.data?.data || {}
+  const stats    = statsRes?.data?.data    || {}
   const pipeline = pipelineRes?.data?.data || {}
 
   const chartData = STATUS_CONFIG.map(s => ({
-    name: s.label,
+    name:  s.label,
     count: stats[s.key] || 0,
     color: s.color,
   }))
@@ -96,7 +293,7 @@ export default function Dashboard() {
     setRunningPipeline(true)
     try {
       await pipelineApi.run(datasetId)
-      toast.success('Pipeline 已启动')
+      toast.success('Pipeline 已启动，后台运行中')
       refetchPipeline()
     } catch (err) {
       toast.error(err.response?.data?.detail || '启动失败')
@@ -105,16 +302,28 @@ export default function Dashboard() {
     }
   }
 
-  const pipelineStatusColor = {
-    idle: 'secondary',
-    running: 'info',
+  const isRunning   = pipeline.status === 'running'
+  const isCompleted = pipeline.status === 'completed'
+  const isError     = pipeline.status === 'error'
+
+  const statusBadgeVariant = {
+    idle:      'secondary',
+    running:   'default',
     completed: 'success',
-    error: 'destructive',
+    error:     'destructive',
   }[pipeline.status] || 'secondary'
+
+  const statusLabel = {
+    idle:      '空闲',
+    running:   '运行中',
+    completed: '已完成',
+    error:     '出错',
+  }[pipeline.status] || (pipeline.status || '空闲')
 
   return (
     <div className="p-8 space-y-6">
-      {/* Header */}
+
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Dashboard</h1>
@@ -124,42 +333,60 @@ export default function Dashboard() {
           <Button variant="outline" size="sm" onClick={() => { refetchStats(); refetchPipeline() }}>
             <RefreshCw className="w-4 h-4 mr-2" /> 刷新
           </Button>
-          <Button size="sm" onClick={handleRunPipeline} disabled={runningPipeline || pipeline.status === 'running'}>
+          <Button
+            size="sm"
+            onClick={handleRunPipeline}
+            disabled={runningPipeline || isRunning}
+          >
             <Play className="w-4 h-4 mr-2" />
-            {pipeline.status === 'running' ? '运行中...' : '运行 Pipeline'}
+            {isRunning ? '运行中...' : '运行 Pipeline'}
           </Button>
         </div>
       </div>
 
-      {/* Pipeline 状态条 */}
-      {pipeline.status === 'running' && (
+      {/* ── Pipeline 运行横幅（仅 running 时显示）────────────────────────────── */}
+      {isRunning && (
         <Card className="border-blue-200 bg-blue-50">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-2">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-sm font-medium text-blue-700">
-                  Pipeline 运行中 — {pipeline.current_step}
-                </span>
+                <span className="text-sm font-semibold text-blue-700">Pipeline 运行中</span>
               </div>
-              <span className="text-sm text-blue-600">{pipeline.progress}%</span>
+              <span className="text-xs text-blue-500 tabular-nums">
+                {pipeline.started_at && `开始于 ${new Date(pipeline.started_at).toLocaleTimeString('zh-CN')}`}
+              </span>
             </div>
-            <Progress value={pipeline.progress} className="h-1.5" />
+
+            {/* 步骤时间轴 */}
+            <StepTimeline
+              currentStep={pipeline.current_step}
+              pipelineStatus={pipeline.status}
+              results={pipeline.results}
+            />
+
+            {/* 当前步骤进度详情 */}
+            {pipeline.detail && Object.keys(pipeline.detail).length > 0 && (
+              <div className="pt-1">
+                <RunningDetail pipeline={pipeline} />
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
 
-      {/* Stat cards */}
+      {/* ── Stat cards ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="总数据量" value={stats.total} icon={Database} color="bg-gray-700" />
-        <StatCard title="待标注" value={stats.pre_annotated} icon={Cpu} color="bg-violet-500" sub="预标注完成" />
-        <StatCard title="已标注" value={stats.annotated} icon={Tag} color="bg-orange-500" sub="人工标注" />
-        <StatCard title="高质量数据" value={stats.checked} icon={CheckCircle} color="bg-green-500" sub="通过冲突检测" />
+        <StatCard title="总数据量"   value={fmtNum(stats.total)}         icon={Database}     color="bg-gray-700" />
+        <StatCard title="待标注"     value={fmtNum(stats.pre_annotated)} icon={Cpu}          color="bg-violet-500" sub="预标注完成" />
+        <StatCard title="已标注"     value={fmtNum(stats.annotated)}     icon={Tag}          color="bg-orange-500" sub="人工标注" />
+        <StatCard title="高质量数据" value={fmtNum(stats.checked)}       icon={CheckCircle}  color="bg-green-500"  sub="通过冲突检测" />
       </div>
 
-      {/* Chart + Pipeline status */}
+      {/* ── 图表 + Pipeline 状态面板 ─────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Bar chart */}
+
+        {/* 柱状图 */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">各阶段数据分布</CardTitle>
@@ -169,7 +396,7 @@ export default function Dashboard() {
               <BarChart data={chartData} barSize={40}>
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip formatter={(v) => [v, '数量']} />
+                <Tooltip formatter={(v) => [fmtNum(v), '数量']} />
                 <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                   {chartData.map((entry, i) => (
                     <Cell key={i} fill={entry.color} />
@@ -185,40 +412,87 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle className="text-base flex items-center justify-between">
               Pipeline 状态
-              <Badge variant={pipelineStatusColor}>
-                {pipeline.status || 'idle'}
+              <Badge variant={statusBadgeVariant} className={isRunning ? 'animate-pulse' : ''}>
+                {statusLabel}
               </Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {pipeline.error && (
-              <div className="text-xs text-red-500 bg-red-50 rounded p-2">
-                错误: {pipeline.error}
+          <CardContent className="space-y-4">
+
+            {/* 错误信息 */}
+            {isError && pipeline.error && (
+              <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 rounded-lg p-3 border border-red-200">
+                <XCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                <span>{pipeline.error}</span>
               </div>
             )}
-            <div className="text-xs text-muted-foreground space-y-1">
-              {pipeline.started_at && <div>开始: {new Date(pipeline.started_at).toLocaleString('zh-CN')}</div>}
-              {pipeline.finished_at && <div>完成: {new Date(pipeline.finished_at).toLocaleString('zh-CN')}</div>}
-              {pipeline.current_step && <div>步骤: {pipeline.current_step}</div>}
-            </div>
 
-            <div className="pt-2 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">快速操作</p>
-              <button onClick={() => navigate('/data')} className="flex items-center justify-between w-full text-sm px-3 py-2 rounded-lg hover:bg-accent transition-colors">
-                <span className="flex items-center gap-2"><Database className="w-4 h-4" />上传数据</span>
-                <ArrowRight className="w-3 h-3 opacity-40" />
-              </button>
-              <button onClick={() => navigate('/annotation')} className="flex items-center justify-between w-full text-sm px-3 py-2 rounded-lg hover:bg-accent transition-colors">
-                <span className="flex items-center gap-2"><Tag className="w-4 h-4" />开始标注</span>
-                <ArrowRight className="w-3 h-3 opacity-40" />
-              </button>
-              <button onClick={() => navigate('/conflicts')} className="flex items-center justify-between w-full text-sm px-3 py-2 rounded-lg hover:bg-accent transition-colors">
-                <span className="flex items-center gap-2"><AlertTriangle className="w-4 h-4" />冲突检测</span>
-                <ArrowRight className="w-3 h-3 opacity-40" />
-              </button>
+            {/* 运行中：步骤轴 + 简版进度 */}
+            {isRunning && (
+              <div className="space-y-3">
+                <StepTimeline
+                  currentStep={pipeline.current_step}
+                  pipelineStatus={pipeline.status}
+                />
+                {pipeline.detail && Object.keys(pipeline.detail).length > 0 && (
+                  <RunningDetail pipeline={pipeline} />
+                )}
+              </div>
+            )}
+
+            {/* 完成：结果汇总 */}
+            {isCompleted && (
+              <CompletedResults pipeline={pipeline} />
+            )}
+
+            {/* 空闲 / 未启动 */}
+            {!isRunning && !isCompleted && !isError && (
+              <p className="text-xs text-muted-foreground">
+                点击「运行 Pipeline」开始全量处理。
+              </p>
+            )}
+
+            {/* 时间信息（非运行中时展示） */}
+            {!isRunning && (pipeline.started_at || pipeline.finished_at) && (
+              <div className="text-xs text-muted-foreground space-y-1 border-t pt-3">
+                {pipeline.started_at && (
+                  <div className="flex items-center gap-1.5">
+                    <Play className="w-3 h-3" />
+                    开始：{new Date(pipeline.started_at).toLocaleString('zh-CN')}
+                  </div>
+                )}
+                {pipeline.finished_at && (
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle className="w-3 h-3" />
+                    结束：{new Date(pipeline.finished_at).toLocaleString('zh-CN')}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 快速导航 */}
+            <div className="pt-1 space-y-1 border-t">
+              <p className="text-xs font-medium text-muted-foreground pb-1">快速操作</p>
+              {[
+                { path: '/data',       Icon: Database,      label: '上传数据' },
+                { path: '/annotation', Icon: Tag,           label: '开始标注' },
+                { path: '/conflicts',  Icon: AlertTriangle, label: '冲突检测' },
+              ].map(({ path, Icon, label }) => (
+                <button
+                  key={path}
+                  onClick={() => navigate(path)}
+                  className="flex items-center justify-between w-full text-sm px-3 py-2 rounded-lg hover:bg-accent transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon className="w-4 h-4" />{label}
+                  </span>
+                  <ChevronRight className="w-3 h-3 opacity-40" />
+                </button>
+              ))}
             </div>
           </CardContent>
         </Card>
+
       </div>
     </div>
   )
