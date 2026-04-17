@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from datapulse.api.auth import UserInfo, get_current_user
 from datapulse.core.exceptions import NotFoundError, ParamError
 from datapulse.core.response import page_data, success
-from datapulse.modules.processing import is_valid, parse_file
+from datapulse.modules.processing import is_valid, parse_file, parse_file_rows
 from datapulse.repository.base import get_db
 
 router     = APIRouter()
@@ -62,6 +62,7 @@ async def list_data_items(
     dataset_id: int           = Query(..., description="数据集 ID"),
     status:     str | None    = Query(None, description="按阶段过滤"),
     keyword:    str | None    = Query(None, description="文本关键词搜索"),
+    label:      str | None    = Query(None, description="按标注标签过滤"),
     start_date: str | None    = Query(None, description="更新时间起（YYYY-MM-DD）"),
     end_date:   str | None    = Query(None, description="更新时间止（YYYY-MM-DD）"),
     page:       int           = Query(1, ge=1),
@@ -70,7 +71,7 @@ async def list_data_items(
     """分页查询数据列表"""
     db     = get_db()
     result = db.list_all_data(
-        dataset_id, status=status, keyword=keyword,
+        dataset_id, status=status, keyword=keyword, label=label,
         start_date=start_date, end_date=end_date,
         page=page, page_size=page_size, enrich=True,
     )
@@ -85,6 +86,17 @@ async def get_stats(
     """各阶段数据量统计"""
     db = get_db()
     return success(db.stats(dataset_id))
+
+
+@router.get("/label-options")
+async def get_label_options(
+    user:       CurrentUser,
+    dataset_id: int = Query(..., description="数据集 ID"),
+):
+    """返回该 dataset 中所有已使用的标注标签（用于前端动态下拉过滤）"""
+    db = get_db()
+    labels = db.get_distinct_labels(dataset_id)
+    return success(labels)
 
 
 @router.get("/{item_id}")
@@ -103,17 +115,23 @@ async def get_data_item(item_id: int, user: CurrentUser):
 
 @router.post("/upload")
 async def upload_data(
-    user:        CurrentUser,
-    dataset_id:  int        = Query(..., description="目标数据集 ID"),
-    file:        UploadFile  = File(...),
-    text_column: str         = Form("text"),
+    user:         CurrentUser,
+    dataset_id:   int        = Query(..., description="目标数据集 ID"),
+    file:         UploadFile  = File(...),
+    text_column:  str         = Form("text"),
+    label_column: str         = Form("label"),
 ):
     """上传数据文件（xlsx / json / csv），解析后批量写入指定 dataset。
+
+    自动检测 label 列：
+      - 文件含 label（或等价列）→ 带标注上传模式：同时写入 t_pre_annotation，
+        状态直接推进到 pre_annotated，score=1，cot 为迁移说明。
+      - 文件无 label 列 → 原始上传模式：写入 raw 状态，等待 pipeline 处理。
 
     性能说明：
       - 文件解析（pd.read_excel 等）是 CPU 密集型，通过 run_in_executor 放到线程池，
         避免阻塞 asyncio 事件循环；
-      - 数据库写入使用 bulk_create_data（单事务批量 INSERT），不再逐行开关事务。
+      - 数据库写入使用单事务批量 INSERT，不逐行开关事务。
     """
     db = get_db()
     if not db.get_dataset(dataset_id):
@@ -129,41 +147,43 @@ async def upload_data(
     # ── 文件解析：CPU 密集，放线程池避免阻塞事件循环 ─────────────────────────
     loop = asyncio.get_event_loop()
     try:
-        texts: list[str] = await loop.run_in_executor(
-            None, partial(parse_file, filename, content)
+        rows: list[dict] = await loop.run_in_executor(
+            None, partial(parse_file_rows, filename, content, text_column, label_column)
         )
     except Exception as e:
         raise ParamError(f"文件解析失败: {e}")
 
-    # ── 过滤无效文本（Python 层，无 IO，可在事件循环内完成）─────────────────
-    total_parsed = len(texts)
-    valid_texts  = [t for t in texts if is_valid(t)]
-    invalid_skip = total_parsed - len(valid_texts)
+    # ── 过滤无效文本 ──────────────────────────────────────────────────────────
+    total_parsed = len(rows)
+    valid_rows   = [r for r in rows if is_valid(r["content"])]
+    invalid_skip = total_parsed - len(valid_rows)
 
-    if not valid_texts:
+    if not valid_rows:
         return success({
-            "filename":     filename,
-            "created":      0,
-            "skipped":      invalid_skip,
-            "dup_skipped":  0,
-            "total_parsed": total_parsed,
+            "filename":       filename,
+            "created":        0,
+            "skipped":        invalid_skip,
+            "dup_skipped":    0,
+            "pre_annotated":  0,
+            "total_parsed":   total_parsed,
         })
 
     # ── 批量写入：单事务，放线程池避免阻塞事件循环 ────────────────────────────
     result: dict[str, int] = await loop.run_in_executor(
         None,
         partial(
-            db.bulk_create_data,
-            dataset_id, valid_texts, ext, filename, user.username,
+            db.bulk_create_data_with_labels,
+            dataset_id, valid_rows, ext, filename, user.username,
         ),
     )
 
     return success({
-        "filename":     filename,
-        "created":      result["created"],
-        "skipped":      invalid_skip,
-        "dup_skipped":  result["skipped"],
-        "total_parsed": total_parsed,
+        "filename":       filename,
+        "created":        result["created"],
+        "skipped":        invalid_skip,
+        "dup_skipped":    result["skipped"],
+        "pre_annotated":  result.get("pre_annotated", 0),
+        "total_parsed":   total_parsed,
     })
 
 

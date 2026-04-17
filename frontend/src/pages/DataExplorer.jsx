@@ -21,17 +21,21 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   MessageSquare, RefreshCw,
-  X, Send, Eye, Clock, User, Tag, Cpu, Trash2, GitBranch,
+  X, Send, Eye, Clock, User, Tag, Cpu, Trash2, GitBranch, Pencil,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
 import SearchBar from '@/components/SearchBar'
-import { dataApi, commentApi, getCurrentDatasetId } from '@/lib/api'
+import { dataApi, commentApi, annotationApi, configApi, getCurrentDatasetId } from '@/lib/api'
 import {
   formatDate, getStatusLabel, getStatusColor,
   getActiveLabel, getPreLabel, getPreScore, scoreColor,
@@ -332,6 +336,103 @@ function DetailPanel({ item, onClose }) {
   )
 }
 
+// ── 修改标注标签对话框 ────────────────────────────────────────────────────────
+
+function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
+  const [label,      setLabel]      = useState('')
+  const [cot,        setCot]        = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  // 从配置拿标签列表
+  const { data: cfgRes } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => configApi.get(),
+    enabled:  open,
+  })
+  const labels = cfgRes?.data?.data?.labels || []
+
+  // 打开时重置
+  useEffect(() => {
+    if (open) { setLabel(''); setCot('') }
+  }, [open])
+
+  async function handleSubmit() {
+    if (!label)       { toast.error('请选择标注标签'); return }
+    if (!cot.trim())  { toast.error('请填写标注理由（COT）'); return }
+    setSubmitting(true)
+    try {
+      await annotationApi.submit(item.id, label, cot.trim())
+      toast.success(`已更新标注：${label}`)
+      onSuccess?.()
+      onOpenChange(false)
+    } catch (err) {
+      toast.error(err.response?.data?.detail || '提交失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>修改标注标签 · #{item?.id}</DialogTitle>
+        </DialogHeader>
+
+        {item && (
+          <div className="text-sm bg-muted/50 rounded-lg p-3 my-1 line-clamp-3 text-muted-foreground leading-relaxed">
+            {item.content}
+          </div>
+        )}
+
+        <div className="space-y-4 py-1">
+          {/* 标签选择 */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5">
+              标注标签 <span className="text-destructive">*</span>
+            </label>
+            <Select value={label} onValueChange={setLabel}>
+              <SelectTrigger className={`w-full ${!label ? 'border-orange-300' : 'border-green-400'}`}>
+                <SelectValue placeholder="请选择意图标签…" />
+              </SelectTrigger>
+              <SelectContent>
+                {labels.map(l => (
+                  <SelectItem key={l} value={l}>{l}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* COT */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5">
+              标注理由（COT）<span className="text-destructive">*</span>
+            </label>
+            <textarea
+              className={`w-full min-h-[100px] rounded-md border px-3 py-2 text-sm bg-background
+                         placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y
+                         ${!cot.trim() ? 'border-orange-300' : 'border-green-400'}`}
+              placeholder="请说明选择该标签的依据，例如：用户询问了保费金额，符合寿险意图的定义…"
+              value={cot}
+              onChange={e => setCot(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={submitting || !label || !cot.trim()}
+          >
+            {submitting ? '提交中…' : '确认修改'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── 主页面 ────────────────────────────────────────────────────────────────────
 
 const STATUS_OPTIONS = [
@@ -344,27 +445,46 @@ const STATUS_OPTIONS = [
 
 export default function DataExplorer() {
   const [filters, setFilters]         = useState({})
+  const [labelFilter, setLabelFilter] = useState('all')
   const [page, setPage]               = useState(1)
   const [pageSize, setPageSize]       = useState(10)
   const [sideItem, setSideItem]       = useState(null)
   const [sideMode, setSideMode]       = useState('detail')
   const [datasetId, setDatasetId]     = useState(() => getCurrentDatasetId())
 
+  // 修改标注标签对话框
+  const [editItem, setEditItem]       = useState(null)
+  const [editOpen, setEditOpen]       = useState(false)
+
   // ── 多选状态 ────────────────────────────────────────────────────────────────
   const [selectedIds, setSelectedIds] = useState(new Set())
 
   // 数据集切换监听
   useEffect(() => {
-    const handler = (e) => { setDatasetId(e.detail.datasetId); setSelectedIds(new Set()) }
+    const handler = (e) => {
+      setDatasetId(e.detail.datasetId)
+      setSelectedIds(new Set())
+      setLabelFilter('all')
+      setPage(1)
+    }
     window.addEventListener('datasetChanged', handler)
     return () => window.removeEventListener('datasetChanged', handler)
   }, [])
 
+  const { data: labelOptionsRes } = useQuery({
+    queryKey: ['label-options', datasetId],
+    queryFn:  () => dataApi.labelOptions(datasetId),
+    enabled:  !!datasetId,
+    staleTime: 30_000,
+  })
+  const labelOptions = labelOptionsRes?.data?.data || []
+
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['explorer', datasetId, filters, page, pageSize],
+    queryKey: ['explorer', datasetId, filters, labelFilter, page, pageSize],
     queryFn: () => dataApi.list({
       status:     filters.status     || undefined,
       keyword:    filters.keyword    || undefined,
+      label:      labelFilter !== 'all' ? labelFilter : undefined,
       start_date: filters.start_date || undefined,
       end_date:   filters.end_date   || undefined,
       page,
@@ -407,6 +527,18 @@ export default function DataExplorer() {
   function openDetail(item) { setSideItem(item); setSideMode('detail') }
   function openComment(item) { setSideItem(item); setSideMode('comment') }
   function closeSide() { setSideItem(null) }
+
+  function openEdit(item, e) {
+    e.stopPropagation()
+    setEditItem(item)
+    setEditOpen(true)
+  }
+
+  function handleEditSuccess() {
+    refetch()
+    // 如果侧边栏正在显示该条，刷新后关闭（数据已变）
+    if (sideItem?.id === editItem?.id) closeSide()
+  }
 
   const qc = useQueryClient()
 
@@ -480,7 +612,7 @@ export default function DataExplorer() {
 
           {/* Search bar */}
           <Card>
-            <CardContent className="p-4">
+            <CardContent className="p-4 space-y-3">
               <div className="flex items-center gap-3 flex-wrap">
                 <SearchBar
                   placeholder="搜索文本内容…"
@@ -491,6 +623,32 @@ export default function DataExplorer() {
                 <div className="text-sm text-muted-foreground whitespace-nowrap">
                   共 <span className="font-semibold text-foreground">{total}</span> 条
                 </div>
+              </div>
+              {/* 标注标签过滤 */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground whitespace-nowrap">标注标签：</span>
+                <Select
+                  value={labelFilter}
+                  onValueChange={v => { setLabelFilter(v); setPage(1); setSelectedIds(new Set()) }}
+                >
+                  <SelectTrigger className="w-48 h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部标签</SelectItem>
+                    {labelOptions.map(l => (
+                      <SelectItem key={l} value={l}>{l}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {labelFilter !== 'all' && (
+                  <button
+                    onClick={() => { setLabelFilter('all'); setPage(1) }}
+                    className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+                  >
+                    <X className="w-3 h-3" /> 清除
+                  </button>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -620,6 +778,13 @@ export default function DataExplorer() {
                               <Eye className="w-4 h-4" />
                             </button>
                             <button
+                              title="修改标注标签"
+                              onClick={(e) => openEdit(item, e)}
+                              className="p-1.5 rounded transition-colors text-muted-foreground hover:text-primary hover:bg-primary/10"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
                               title="添加评论"
                               onClick={() => openComment(item)}
                               className={`p-1.5 rounded transition-colors ${isActive && sideMode === 'comment' ? 'bg-blue-100 text-blue-600' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
@@ -683,6 +848,16 @@ export default function DataExplorer() {
         confirmLabel={batchDeleting ? '删除中…' : `确认删除 ${selectedIds.size} 条`}
         onConfirm={handleBatchDelete}
       />
+
+      {/* 修改标注标签对话框 */}
+      {editItem && (
+        <EditAnnotationDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          item={editItem}
+          onSuccess={handleEditSuccess}
+        />
+      )}
     </div>
   )
 }

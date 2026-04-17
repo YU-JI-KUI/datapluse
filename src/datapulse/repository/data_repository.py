@@ -352,6 +352,120 @@ class DataRepository:
 
         return {"created": len(new_records), "skipped": skipped}
 
+    def bulk_create_with_labels(
+        self,
+        dataset_id: int,
+        rows: list[dict],
+        source: str = "",
+        source_ref: str = "",
+        created_by: str = "",
+    ) -> dict[str, Any]:
+        """批量创建数据，若行含 label 则同时写入预标注并将状态推进到 pre_annotated。
+
+        rows: [{"content": str, "label": str | None}, ...]
+        返回: {"created": N, "skipped": M, "pre_annotated": K}
+        """
+        from datapulse.modules.processing import _MIGRATION_COT
+        from datapulse.model.entities import PreAnnotation
+
+        if not rows:
+            return {"created": 0, "skipped": 0, "pre_annotated": 0}
+
+        ts = _now()
+
+        # label_by_hash: content_hash → label（仅有非空 label 的行）
+        label_by_hash: dict[str, str] = {}
+        for row in rows:
+            lbl = (row.get("label") or "").strip()
+            if lbl:
+                label_by_hash[_content_hash(row["content"])] = lbl
+
+        # ── Step 1: 取出已有 hash ──────────────────────────────────────────
+        hash_pairs = [(row["content"], _content_hash(row["content"])) for row in rows]
+        all_hashes = [h for _, h in hash_pairs]
+        existing_hashes: set[str] = {
+            r[0]
+            for r in self.session.query(DataItem.content_hash)
+            .filter(DataItem.dataset_id == dataset_id, DataItem.content_hash.in_(all_hashes))
+            .all()
+        }
+
+        # ── Step 2: 过滤新记录 ────────────────────────────────────────────
+        seen: set[str] = set(existing_hashes)
+        new_records: list[dict] = []
+        new_hashes: list[str]   = []
+        skipped = 0
+        for text, chash in hash_pairs:
+            if chash in seen:
+                skipped += 1
+                continue
+            seen.add(chash)
+            initial_stage = "pre_annotated" if chash in label_by_hash else "raw"
+            new_records.append({
+                "dataset_id":   dataset_id,
+                "content":      text,
+                "content_hash": chash,
+                "source":       source,
+                "source_ref":   source_ref,
+                "status":       initial_stage,
+                "created_at":   ts,
+                "created_by":   created_by,
+                "updated_at":   ts,
+                "updated_by":   created_by,
+            })
+            new_hashes.append(chash)
+
+        if not new_records:
+            return {"created": 0, "skipped": skipped, "pre_annotated": 0}
+
+        # ── Step 3: 批量插入 t_data_item ──────────────────────────────────
+        self.session.bulk_insert_mappings(DataItem, new_records)
+        self.session.flush()
+
+        # ── Step 4: 查回新 id（content_hash → data_id）───────────────────
+        inserted = (
+            self.session.query(DataItem.id, DataItem.content_hash)
+            .filter(DataItem.dataset_id == dataset_id, DataItem.content_hash.in_(new_hashes))
+            .all()
+        )
+        hash_to_id: dict[str, int] = {r.content_hash: r.id for r in inserted}
+
+        # ── Step 5: 批量插入 t_data_state ────────────────────────────────
+        state_records = [
+            {
+                "data_id":    hash_to_id[h],
+                "stage":      "pre_annotated" if h in label_by_hash else "raw",
+                "updated_at": ts,
+                "updated_by": created_by,
+            }
+            for h in new_hashes if h in hash_to_id
+        ]
+        self.session.bulk_insert_mappings(DataState, state_records)
+
+        # ── Step 6: 批量插入 t_pre_annotation（仅有 label 的条目）─────────
+        pre_records = [
+            {
+                "data_id":    hash_to_id[h],
+                "model_name": "manual_import",
+                "label":      label_by_hash[h],
+                "score":      1.0,
+                "cot":        _MIGRATION_COT,
+                "version":    1,
+                "created_at": ts,
+                "created_by": created_by,
+            }
+            for h in new_hashes
+            if h in label_by_hash and h in hash_to_id
+        ]
+        if pre_records:
+            self.session.bulk_insert_mappings(PreAnnotation, pre_records)
+
+        return {
+            "created":        len(new_records),
+            "skipped":        skipped,
+            "pre_annotated":  len(pre_records),
+        }
+
     def bulk_update_stage(
         self,
         ids: list[int],
@@ -392,6 +506,7 @@ class DataRepository:
         keyword: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        label: str | None = None,
         page: int = 1,
         page_size: int = 20,
         enrich: bool = True,
@@ -405,6 +520,11 @@ class DataRepository:
             q = q.filter(DataItem.updated_at >= start_date)
         if end_date:
             q = q.filter(DataItem.updated_at <= end_date + " 23:59:59")
+        if label:
+            q = q.join(
+                AnnotationResult,
+                AnnotationResult.data_id == DataItem.id,
+            ).filter(AnnotationResult.final_label == label)
         total = q.count()
         rows = (
             q.order_by(DataItem.created_at.desc())
@@ -418,6 +538,21 @@ class DataRepository:
             base = _item_to_dict(row, state)
             items.append(_enrich(self.session, base) if enrich else base)
         return {"total": total, "page": page, "page_size": page_size, "list": items}
+
+    def get_distinct_labels(self, dataset_id: int) -> list[str]:
+        """返回该 dataset 中 t_annotation_result 里所有非空的 final_label（去重，升序）"""
+        rows = (
+            self.session.query(AnnotationResult.final_label)
+            .join(DataItem, DataItem.id == AnnotationResult.data_id)
+            .filter(
+                DataItem.dataset_id == dataset_id,
+                AnnotationResult.final_label.isnot(None),
+            )
+            .distinct()
+            .order_by(AnnotationResult.final_label)
+            .all()
+        )
+        return [row[0] for row in rows]
 
     def list_unannotated_by_user(
         self,

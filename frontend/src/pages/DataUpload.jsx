@@ -48,7 +48,8 @@ function FileUploadZone({ onSuccess }) {
     try {
       const res = await dataApi.upload(file)
       const d = res.data?.data ?? res.data ?? {}
-      toast.success(`上传成功：新增 ${d.created ?? 0} 条，跳过 ${d.skipped ?? 0} 条，去重 ${d.dup_skipped ?? 0} 条`)
+      const preAnnotatedMsg = d.pre_annotated > 0 ? `，其中 ${d.pre_annotated} 条已预标注` : ''
+      toast.success(`上传成功：新增 ${d.created ?? 0} 条${preAnnotatedMsg}，跳过 ${d.skipped ?? 0} 条，去重 ${d.dup_skipped ?? 0} 条`)
       onSuccess?.()
     } catch (err) {
       toast.error(err.response?.data?.detail || '上传失败')
@@ -99,7 +100,8 @@ function FileUploadZone({ onSuccess }) {
                 支持 <span className="font-medium">Excel (.xlsx)</span> · <span className="font-medium">JSON</span> · <span className="font-medium">CSV</span>
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Excel/CSV 需包含 <code className="bg-muted px-1 rounded">text</code> 列；JSON 为字符串数组或含 text 字段的对象数组
+                Excel/CSV 需含 <code className="bg-muted px-1 rounded">text</code> 列；
+                可选含 <code className="bg-muted px-1 rounded">label</code> 列，有则自动写入预标注并推进到已预标注状态
               </p>
             </>
           )}

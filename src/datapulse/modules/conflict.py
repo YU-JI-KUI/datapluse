@@ -122,11 +122,25 @@ async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
     if not annotated_items:
         return {"label_conflicts": 0, "semantic_conflicts": 0, "clean": 0, "total": 0}
 
-    label_conflict_map    = detect_label_conflicts(annotated_items)
-    semantic_conflict_map = detect_semantic_conflicts(annotated_items, cfg)
+    # 最低标注个数门槛：annotator_count < min_annotation_count 的条目跳过本轮检测
+    min_count = cfg.get("pipeline", {}).get("min_annotation_count", 1)
+    eligible_items = [
+        item for item in annotated_items
+        if len(item.get("annotations", [])) >= min_count
+    ]
+    skipped_count = len(annotated_items) - len(eligible_items)
+
+    if not eligible_items:
+        return {
+            "label_conflicts": 0, "semantic_conflicts": 0,
+            "clean": 0, "total": 0, "skipped_low_count": skipped_count,
+        }
+
+    label_conflict_map    = detect_label_conflicts(eligible_items)
+    semantic_conflict_map = detect_semantic_conflicts(eligible_items, cfg)
 
     clean_count = 0
-    for item in annotated_items:
+    for item in eligible_items:
         data_id = item["id"]
         # 清除旧冲突记录（本次重跑覆盖）
         db.clear_conflicts(data_id)
@@ -144,10 +158,11 @@ async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
             clean_count += 1
 
     return {
-        "label_conflicts": len(label_conflict_map),
+        "label_conflicts":    len(label_conflict_map),
         "semantic_conflicts": len(semantic_conflict_map),
-        "clean": clean_count,
-        "total": len(annotated_items),
+        "clean":              clean_count,
+        "total":              len(eligible_items),
+        "skipped_low_count":  skipped_count,
     }
 
 

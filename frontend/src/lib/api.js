@@ -101,6 +101,10 @@ export const dataApi = {
       params: { dataset_id: datasetId, ...params },
     })
   },
+  labelOptions: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty([])
+    return api.get('/data-items/label-options', { params: { dataset_id: datasetId } })
+  },
   stats: (datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty({})
     return api.get('/data-items/stats', { params: { dataset_id: datasetId } })

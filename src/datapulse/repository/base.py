@@ -52,8 +52,9 @@ DEFAULT_DATASET_CONFIG: dict = {
     },
     "pipeline": {
         "batch_size": 32,
+        "min_annotation_count": 2,
     },
-    "labels": ["寿险意图", "拒识", "健康险意图", "财险意图", "其他意图"],
+    "labels": ["寿险意图", "拒识"],
 }
 
 DEFAULT_COLUMNS = [
@@ -109,10 +110,10 @@ _PRESET_ROLES = [
     },
     {
         "name": "annotator",
-        "description": "标注员，可查看数据、提交标注、执行导出",
+        "description": "标注员，可查看数据、提交标注、执行导出、运行 Pipeline",
         "permissions": [
             "data:read", "annotation:read", "annotation:write",
-            "pipeline:read", "export:read", "export:create", "config:read",
+            "pipeline:read", "pipeline:run", "export:read", "export:create", "config:read",
         ],
     },
     {
@@ -155,10 +156,13 @@ class DBManager:
             s.close()
 
     def seed_defaults(self) -> None:
-        """首次启动写入预置角色和默认数据集（完全幂等）"""
+        """首次启动写入预置角色和默认数据集（完全幂等）。
+        角色已存在时也会更新 permissions/description，保证代码变更自动生效。
+        """
         with self._session() as s:
             for r in _PRESET_ROLES:
-                if not s.query(Role).filter(Role.name == r["name"]).first():
+                existing = s.query(Role).filter(Role.name == r["name"]).first()
+                if not existing:
                     ts = _now()
                     s.add(Role(
                         name=r["name"],
@@ -167,6 +171,12 @@ class DBManager:
                         created_at=ts, created_by="system",
                         updated_at=ts, updated_by="system",
                     ))
+                else:
+                    # 权限或描述有变更时自动同步
+                    existing.permissions = r["permissions"]
+                    existing.description = r["description"]
+                    existing.updated_at  = _now()
+                    existing.updated_by  = "system"
             s.flush()
 
             if not s.query(Dataset).filter(Dataset.name == "默认数据集").first():
@@ -307,6 +317,24 @@ class DBManager:
         with self._session() as s:
             return DataRepository(s).bulk_create(dataset_id, texts, source, source_ref, created_by)
 
+    def bulk_create_data_with_labels(
+        self,
+        dataset_id: int,
+        rows: list[dict],
+        source: str = "",
+        source_ref: str = "",
+        created_by: str = "",
+    ) -> dict[str, int]:
+        """批量创建数据，含 label 的行同时写入预标注并推进到 pre_annotated 状态。
+        rows: [{"content": str, "label": str | None}, ...]
+        返回 {"created": N, "skipped": M, "pre_annotated": K}。
+        """
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).bulk_create_with_labels(
+                dataset_id, rows, source, source_ref, created_by
+            )
+
     def bulk_update_stage(self, ids: list[int], stage: str, updated_by: str = "") -> None:
         """批量更新数据阶段（pipeline 内部使用，一次 UPDATE 代替 N 次逐行调用）"""
         from datapulse.repository.data_repository import DataRepository
@@ -336,14 +364,22 @@ class DBManager:
     def list_all_data(self, dataset_id: int, status: str | None = None,
                       keyword: str | None = None,
                       start_date: str | None = None, end_date: str | None = None,
+                      label: str | None = None,
                       page: int = 1, page_size: int = 20, enrich: bool = True) -> dict:
         from datapulse.repository.data_repository import DataRepository
         with self._session() as s:
             return DataRepository(s).list_all(
                 dataset_id, status=status, keyword=keyword,
                 start_date=start_date, end_date=end_date,
+                label=label,
                 page=page, page_size=page_size, enrich=enrich,
             )
+
+    def get_distinct_labels(self, dataset_id: int) -> list[str]:
+        """返回该 dataset 中 t_annotation_result 里所有非空的标注标签（去重，升序）"""
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).get_distinct_labels(dataset_id)
 
     def list_data_by_status(self, dataset_id: int, stage: str, enrich: bool = False) -> list[dict]:
         from datapulse.repository.data_repository import DataRepository
