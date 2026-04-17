@@ -66,6 +66,7 @@ def _enrich(session: Session, base: dict[str, Any], my_username: str | None = No
             "label":      pre.label,
             "score":      float(pre.score) if pre.score is not None else None,
             "model_name": pre.model_name,
+            "cot":        pre.cot,
         }
         if pre else None
     )
@@ -82,6 +83,7 @@ def _enrich(session: Session, base: dict[str, Any], my_username: str | None = No
             "id":         a.id,
             "username":   a.username,
             "label":      a.label,
+            "cot":        a.cot,
             "version":    a.version,
             "is_active":  True,
             "created_at": a.created_at.isoformat() if a.created_at else None,
@@ -106,6 +108,7 @@ def _enrich(session: Session, base: dict[str, Any], my_username: str | None = No
     base["label_source"]    = label_source        # "auto" | "manual" | None
     base["annotator_count"] = annotator_count
     base["resolver"]        = resolver
+    base["result_cot"]      = ann_result.cot if ann_result else None  # 裁决时的 COT
 
     # annotators：所有有效标注者，逗号分隔（导出/展示多人标注明细用）
     base["annotators"] = ", ".join(a["username"] for a in annotations) if annotations else None
@@ -142,6 +145,7 @@ def _enrich(session: Session, base: dict[str, Any], my_username: str | None = No
                 "id":         my_ann_row.id,
                 "username":   my_ann_row.username,
                 "label":      my_ann_row.label,
+                "cot":        my_ann_row.cot,
                 "version":    my_ann_row.version,
                 "is_active":  True,
                 "created_at": my_ann_row.created_at.isoformat() if my_ann_row.created_at else None,

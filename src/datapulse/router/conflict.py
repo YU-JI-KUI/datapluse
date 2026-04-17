@@ -26,7 +26,8 @@ _SHANGHAI   = ZoneInfo("Asia/Shanghai")
 
 
 class ResolveBody(BaseModel):
-    label: str   # 裁决后的最终标注标签
+    label: str  # 裁决后的最终标注标签
+    cot:   str  # 裁决理由（Chain of Thought，必填）
 
 
 @router.get("")
@@ -100,7 +101,7 @@ async def resolve_conflict(conflict_id: int, body: ResolveBody, user: CurrentUse
     data_id = conflict["data_id"]
 
     # 1. 写入最终标注结果（仅更新 t_annotation_result，不改动 t_annotation 事实）
-    db.set_annotation_result_manual(data_id, body.label, resolver=user.username)
+    db.set_annotation_result_manual(data_id, body.label, resolver=user.username, cot=body.cot)
 
     # 2. 状态推进到 checked
     db.update_stage(data_id, "checked", updated_by=user.username)

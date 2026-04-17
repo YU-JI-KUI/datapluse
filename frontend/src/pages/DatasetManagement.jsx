@@ -9,7 +9,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Pencil, Trash2, Users, FolderOpen } from 'lucide-react'
+import { Plus, Pencil, Trash2, Users, FolderOpen, Search, X } from 'lucide-react'
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table'
@@ -173,6 +173,8 @@ export default function DatasetManagement() {
   const qc = useQueryClient()
   const [page, setPage]     = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [keyword, setKeyword]   = useState('')
+  const [keywordInput, setKeywordInput] = useState('')
 
   const [formOpen, setFormOpen]     = useState(false)
   const [editDs, setEditDs]         = useState(null)
@@ -182,15 +184,21 @@ export default function DatasetManagement() {
   const [deleteDs, setDeleteDs]     = useState(null)
 
   // 获取全部数据集（含 inactive），admin only
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['all-datasets'],
     queryFn: () => datasetApi.listAll(),
   })
   const allDatasets = data?.data?.data || []
 
-  // 客户端分页
-  const total      = allDatasets.length
-  const paginated  = allDatasets.slice((page - 1) * pageSize, page * pageSize)
+  // 客户端搜索 + 分页
+  const filtered   = keyword
+    ? allDatasets.filter(ds =>
+        ds.name.toLowerCase().includes(keyword.toLowerCase()) ||
+        (ds.description || '').toLowerCase().includes(keyword.toLowerCase())
+      )
+    : allDatasets
+  const total      = filtered.length
+  const paginated  = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   // 获取全部用户（用于分配弹窗）
   const { data: usersData } = useQuery({
@@ -209,6 +217,7 @@ export default function DatasetManagement() {
     }
     setFormOpen(false)
     setEditDs(null)
+    await refetch()
     qc.invalidateQueries(['all-datasets'])
   }
 
@@ -217,6 +226,8 @@ export default function DatasetManagement() {
     try {
       await datasetApi.delete(deleteDs.id)
       toast.success('已删除')
+      // 立即刷新 + invalidate 双保险
+      await refetch()
       qc.invalidateQueries(['all-datasets'])
     } catch (err) {
       toast.error(err.response?.data?.detail || '删除失败')
@@ -233,7 +244,7 @@ export default function DatasetManagement() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">数据集管理</h1>
           <p className="text-sm text-gray-500 mt-0.5">创建和管理数据集，并为用户分配访问权限</p>
@@ -242,6 +253,37 @@ export default function DatasetManagement() {
           <Plus className="w-4 h-4 mr-2" />
           新建数据集
         </Button>
+      </div>
+
+      {/* Search bar */}
+      <div className="mb-4">
+        <form
+          onSubmit={e => { e.preventDefault(); setKeyword(keywordInput); setPage(1) }}
+          className="flex gap-2 max-w-sm"
+        >
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <Input
+              value={keywordInput}
+              onChange={e => {
+                setKeywordInput(e.target.value)
+                if (e.target.value === '') { setKeyword(''); setPage(1) }
+              }}
+              placeholder="搜索数据集名称或描述..."
+              className="pl-8 pr-8 h-9 text-sm"
+            />
+            {keywordInput && (
+              <button
+                type="button"
+                onClick={() => { setKeywordInput(''); setKeyword(''); setPage(1) }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <Button type="submit" variant="outline" size="sm" className="h-9">搜索</Button>
+        </form>
       </div>
 
       {/* 表格 */}

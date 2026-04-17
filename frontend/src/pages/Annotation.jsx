@@ -196,6 +196,7 @@ export default function Annotation() {
   const [currentItem, setCurrentItem] = useState(null)
   const [submitting, setSubmitting]   = useState(false)
   const [revoking, setRevoking]       = useState(false)
+  const [cot, setCot]                 = useState('')
   const [view, setView]               = useState('unannotated')
   const [keyword, setKeyword]         = useState('')
   const [keywordInput, setKeywordInput] = useState('')
@@ -220,6 +221,7 @@ export default function Annotation() {
     setView(v)
     setPage(1)
     setCurrentItem(null)
+    setCot('')
   }
 
   // ── 主列表查询 ────────────────────────────────────────────────────────────
@@ -289,8 +291,9 @@ export default function Annotation() {
     if (!currentItem || submitting) return
     setSubmitting(true)
     try {
-      await annotationApi.submit(currentItem.id, label)
+      await annotationApi.submit(currentItem.id, label, cot.trim() || null)
       toast.success(`已标注：${label}`, { duration: 1500 })
+      setCot('')  // 标注后清空 COT
 
       // 刷新各计数 + 列表
       qc.invalidateQueries(['ann-cnt-all', datasetId])
@@ -312,7 +315,7 @@ export default function Annotation() {
     } finally {
       setSubmitting(false)
     }
-  }, [currentItem, submitting, items, view, datasetId, qc, refetchList, syncCurrentItem])
+  }, [currentItem, submitting, cot, items, view, datasetId, qc, refetchList, syncCurrentItem])
 
   // 撤销标注（仅自己的）
   const handleRevoke = useCallback(async () => {
@@ -342,16 +345,22 @@ export default function Annotation() {
     }
   }, [currentItem, revoking, items, view, datasetId, qc, refetchList, syncCurrentItem])
 
-  // 键盘快捷键（数字键 1-9）
+  // 键盘快捷键（数字键 1-9）：COT 未填时禁用
   useEffect(() => {
     const handler = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
       const n = parseInt(e.key, 10)
-      if (n >= 1 && n <= labels.length) handleLabel(labels[n - 1])
+      if (n >= 1 && n <= labels.length) {
+        if (!cot.trim()) {
+          toast.error('请先填写标注理由（COT）再提交标注', { duration: 2000 })
+          return
+        }
+        handleLabel(labels[n - 1])
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [labels, handleLabel])
+  }, [labels, handleLabel, cot])
 
   // 当前 item 的预标注 & 当前用户自己的标注
   const preAnn = currentItem?.pre_annotation ?? null
@@ -546,11 +555,18 @@ export default function Annotation() {
                         const idx = labels.indexOf(a.label)
                         const c = idx >= 0 ? getLabelColor(idx).light : 'bg-gray-100 text-gray-700 border-gray-200'
                         return (
-                          <div key={a.id} className="flex items-center gap-1.5 bg-white border rounded px-2 py-1 text-xs">
-                            <span className="text-muted-foreground">{a.username}</span>
-                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded border font-medium ${c}`}>
-                              {a.label}
-                            </span>
+                          <div key={a.id} className="bg-white border rounded px-2 py-1.5 text-xs space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-muted-foreground">{a.username}</span>
+                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded border font-medium ${c}`}>
+                                {a.label}
+                              </span>
+                            </div>
+                            {a.cot && (
+                              <p className="text-muted-foreground leading-snug pl-1 border-l-2 border-emerald-200">
+                                {a.cot}
+                              </p>
+                            )}
                           </div>
                         )
                       })}
@@ -560,29 +576,71 @@ export default function Annotation() {
               })()}
 
               {/* 预标注建议 */}
-              <PreAnnotationHint preAnn={preAnn} labels={labels} onAccept={handleLabel} />
+              <PreAnnotationHint
+                preAnn={preAnn}
+                labels={labels}
+                onAccept={(label) => {
+                  if (!cot.trim()) {
+                    toast.error('请先填写标注理由（COT）再采纳建议', { duration: 2000 })
+                    return
+                  }
+                  handleLabel(label)
+                }}
+              />
 
               {/* 我的标注状态（修改 / 撤销区域）*/}
               {myAnn && (
-                <div className="flex items-center gap-2 text-sm bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
-                  <AlertCircle className="w-4 h-4 text-orange-500 shrink-0" />
-                  <span className="text-orange-700">我的标注</span>
-                  <Badge className="bg-orange-100 text-orange-800 border-orange-200 border">{myAnn.label}</Badge>
-                  <span className="text-orange-600 text-xs flex-1">点击标签可修改</span>
-                  <Button
-                    variant="ghost" size="sm"
-                    onClick={handleRevoke}
-                    disabled={revoking}
-                    className="h-7 text-xs text-orange-600 hover:text-destructive hover:bg-red-50 shrink-0"
-                  >
-                    {revoking
-                      ? <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                      : <RotateCcw className="w-3 h-3 mr-1" />
-                    }
-                    撤销标注
-                  </Button>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+                    <AlertCircle className="w-4 h-4 text-orange-500 shrink-0" />
+                    <span className="text-orange-700">我的标注</span>
+                    <Badge className="bg-orange-100 text-orange-800 border-orange-200 border">{myAnn.label}</Badge>
+                    <span className="text-orange-600 text-xs flex-1">点击标签可修改</span>
+                    <Button
+                      variant="ghost" size="sm"
+                      onClick={handleRevoke}
+                      disabled={revoking}
+                      className="h-7 text-xs text-orange-600 hover:text-destructive hover:bg-red-50 shrink-0"
+                    >
+                      {revoking
+                        ? <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                        : <RotateCcw className="w-3 h-3 mr-1" />
+                      }
+                      撤销标注
+                    </Button>
+                  </div>
+                  {myAnn.cot && (
+                    <div className="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded px-3 py-2">
+                      <span className="font-medium">我的理由：</span>{myAnn.cot}
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* COT 推理过程输入框（必填）*/}
+              <div>
+                <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                  <Tag className="w-4 h-4 text-primary" />
+                  标注理由
+                  <span className="text-xs text-red-500 font-semibold ml-0.5">*</span>
+                  <span className="text-xs text-muted-foreground font-normal ml-1">（Chain of Thought，选标签前必填）</span>
+                </p>
+                <textarea
+                  value={cot}
+                  onChange={e => setCot(e.target.value)}
+                  placeholder="请填写标注理由或推理依据，说明为什么选择该标签（必填）"
+                  rows={3}
+                  className={`w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 bg-white placeholder:text-muted-foreground/60 transition-colors ${
+                    cot.trim() ? 'border-green-300 focus:ring-green-200' : 'border-orange-300 focus:ring-orange-200 bg-orange-50/30'
+                  }`}
+                />
+                {!cot.trim() && (
+                  <p className="text-xs text-orange-500 mt-1 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    请先填写标注理由，再点击下方标签完成标注
+                  </p>
+                )}
+              </div>
 
               {/* 标签选择区 */}
               <div>
@@ -593,21 +651,31 @@ export default function Annotation() {
                 </p>
                 <div className="flex flex-wrap gap-3">
                   {labels.map((label, i) => {
-                    const color   = getLabelColor(i)
-                    const isMyAnn = myAnn?.label === label
+                    const color     = getLabelColor(i)
+                    const isMyAnn   = myAnn?.label === label
+                    const cotMissing = !cot.trim()
+                    const isDisabled = submitting || cotMissing
                     return (
                       <button
                         key={label}
-                        onClick={() => handleLabel(label)}
+                        onClick={() => {
+                          if (cotMissing) {
+                            toast.error('请先填写标注理由（COT）再提交标注', { duration: 2000 })
+                            return
+                          }
+                          handleLabel(label)
+                        }}
                         disabled={submitting}
+                        title={cotMissing ? '请先填写上方的标注理由' : `标注为「${label}」`}
                         className={`
                           relative flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold
                           transition-all duration-150 active:scale-95
                           ${isMyAnn
                             ? `${color.bg} ${color.text} ring-2 ${color.ring} ring-offset-2 shadow-md`
-                            : `${color.bg} ${color.text} shadow hover:shadow-md`
+                            : isDisabled
+                              ? `${color.bg} ${color.text} opacity-40 cursor-not-allowed`
+                              : `${color.bg} ${color.text} shadow hover:shadow-md cursor-pointer`
                           }
-                          ${submitting ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}
                         `}
                       >
                         <span className="w-5 h-5 rounded-full bg-white/30 flex items-center justify-center text-xs font-bold">

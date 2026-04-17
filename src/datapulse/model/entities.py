@@ -127,6 +127,7 @@ class PreAnnotation(Base):
     model_name = Column(String(100), nullable=False)
     label      = Column(String(200), nullable=False)
     score      = Column(Numeric(5, 4))
+    cot        = Column(Text, nullable=True)   # Chain of Thought 推理过程
     version    = Column(Integer, nullable=False, default=1)
     created_at = Column(_TS, nullable=False)
     created_by = Column(String(45), nullable=False, default="")
@@ -141,6 +142,7 @@ class Annotation(Base):
     data_id    = Column(BigInteger, nullable=False, index=True)
     username   = Column(String(100), nullable=False)
     label      = Column(String(200), nullable=False)
+    cot        = Column(Text, nullable=True)   # Chain of Thought 标注理由
     version    = Column(Integer, nullable=False, default=1)
     is_active  = Column(Boolean, nullable=False, default=True)
     created_at = Column(_TS, nullable=False)
@@ -242,5 +244,6 @@ class AnnotationResult(Base):
     label_source    = Column(String(20),  nullable=False, default="auto")  # "auto" | "manual"
     annotator_count = Column(Integer,     nullable=False, default=0)       # 当前有效标注人数
     resolver        = Column(String(100), nullable=True)                   # 裁决人（仅 manual）
+    cot             = Column(Text,        nullable=True)                   # 裁决 COT（manual 时填写）
     updated_at      = Column(_TS, nullable=False)
     updated_by      = Column(String(45), nullable=False, default="")

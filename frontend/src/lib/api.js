@@ -136,8 +136,8 @@ export const pipelineApi = {
 
 export const annotationApi = {
   // 提交标注（POST /api/annotations）
-  submit: (data_id, label) =>
-    api.post('/annotations', { data_id, label }),
+  submit: (data_id, label, cot = null) =>
+    api.post('/annotations', { data_id, label, ...(cot ? { cot } : {}) }),
 
   // 批量提交（POST /api/annotations/batch）
   batchSubmit: (annotations) =>
@@ -204,8 +204,8 @@ export const conflictApi = {
     return api.post('/conflicts/detect', {}, { params: { dataset_id: datasetId } })
   },
 
-  resolve: (conflictId, label) =>
-    api.patch(`/conflicts/${conflictId}/resolve`, { label }),
+  resolve: (conflictId, label, cot = null) =>
+    api.patch(`/conflicts/${conflictId}/resolve`, { label, ...(cot ? { cot } : {}) }),
 }
 
 // ── Comments (v2) ─────────────────────────────────────────────────────────────

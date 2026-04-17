@@ -39,6 +39,7 @@ async def submit_annotation(body: AnnotationCreate, user: CurrentUser):
         data_id=body.data_id,
         username=user.username,
         label=body.label,
+        cot=body.cot,
         created_by=user.username,
     )
     # 将数据状态推进到 annotated
@@ -170,7 +171,7 @@ async def batch_submit(
             errors.append({"data_id": req.data_id, "error": "数据不存在"})
             continue
         ann = db.create_annotation(req.data_id, user.username, req.label,
-                                    created_by=user.username)
+                                    cot=req.cot, created_by=user.username)
         db.update_stage(req.data_id, "annotated", updated_by=user.username)
         results.append(ann)
     return success({"updated": results, "errors": errors})

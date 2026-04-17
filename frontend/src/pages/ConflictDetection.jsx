@@ -66,6 +66,7 @@ function ConflictDetail({ conflict }) {
 // ── 解决冲突弹窗 ───────────────────────────────────────────────────────────────
 function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved }) {
   const [selectedLabel, setSelectedLabel] = useState('')
+  const [cot, setCot]                      = useState('')
   const [submitting, setSubmitting]        = useState(false)
 
   if (!conflict) return null
@@ -75,12 +76,14 @@ function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved }) {
 
   async function handleSubmit() {
     if (!selectedLabel) { toast.error('请选择最终标注标签'); return }
+    if (!cot.trim()) { toast.error('请填写裁决理由（COT）'); return }
     setSubmitting(true)
     try {
-      await conflictApi.resolve(conflict.id, selectedLabel)
+      await conflictApi.resolve(conflict.id, selectedLabel, cot.trim())
       toast.success(`冲突已裁决：「${selectedLabel}」`)
       onOpenChange(false)
       setSelectedLabel('')
+      setCot('')
       onResolved()
     } catch (err) {
       toast.error(err.response?.data?.detail || '裁决失败')
@@ -152,13 +155,34 @@ function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved }) {
               <p className="text-xs text-muted-foreground mt-2">请选择一个标签作为最终裁决结果</p>
             )}
           </div>
+
+          {/* 裁决理由（COT，必填）*/}
+          <div>
+            <p className="text-xs font-medium mb-1.5 flex items-center gap-1">
+              裁决理由
+              <span className="text-red-500 font-semibold">*</span>
+              <span className="font-normal text-muted-foreground ml-0.5">（Chain of Thought，必填）</span>
+            </p>
+            <textarea
+              value={cot}
+              onChange={e => setCot(e.target.value)}
+              placeholder="请填写裁决依据和推理过程（必填）"
+              rows={2}
+              className={`w-full text-sm border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 bg-white placeholder:text-muted-foreground/60 transition-colors ${
+                cot.trim() ? 'border-green-300 focus:ring-green-200' : 'border-orange-300 focus:ring-orange-200 bg-orange-50/30'
+              }`}
+            />
+            {!cot.trim() && (
+              <p className="text-xs text-orange-500 mt-1">请填写裁决理由后再提交</p>
+            )}
+          </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             取消
           </Button>
-          <Button onClick={handleSubmit} disabled={!selectedLabel || submitting}>
+          <Button onClick={handleSubmit} disabled={!selectedLabel || !cot.trim() || submitting}>
             {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             确认裁决
           </Button>

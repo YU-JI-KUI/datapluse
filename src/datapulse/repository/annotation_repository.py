@@ -33,6 +33,7 @@ def _ann_to_dict(a: Annotation) -> dict[str, Any]:
         "data_id": a.data_id,
         "username": a.username,
         "label": a.label,
+        "cot": a.cot,
         "version": a.version,
         "is_active": a.is_active,
         "created_at": a.created_at.isoformat() if a.created_at else None,
@@ -47,6 +48,7 @@ def _result_to_dict(r: AnnotationResult) -> dict[str, Any]:
         "label_source": r.label_source,
         "annotator_count": r.annotator_count,
         "resolver": r.resolver,
+        "cot": r.cot,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
         "updated_by": r.updated_by,
     }
@@ -59,6 +61,7 @@ def _pre_to_dict(p: PreAnnotation) -> dict[str, Any]:
         "model_name": p.model_name,
         "label": p.label,
         "score": float(p.score) if p.score is not None else None,
+        "cot": p.cot,
         "version": p.version,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "created_by": p.created_by,
@@ -128,6 +131,7 @@ class AnnotationRepository:
         data_id: int,
         username: str,
         label: str,
+        cot: str | None = None,
         created_by: str = "",
     ) -> dict[str, Any]:
         """提交标注，自动处理版本递增并将旧版本标记为历史，然后触发聚合更新"""
@@ -153,6 +157,7 @@ class AnnotationRepository:
             data_id=data_id,
             username=username,
             label=label,
+            cot=cot or None,
             version=new_version,
             is_active=True,
             created_at=ts,
@@ -191,6 +196,7 @@ class AnnotationRepository:
         data_id: int,
         final_label: str,
         resolver: str,
+        cot: str | None = None,
         updated_by: str = "",
     ) -> dict[str, Any]:
         """冲突裁决专用：直接设置最终标注标签，来源标记为 manual。
@@ -221,6 +227,7 @@ class AnnotationRepository:
                 label_source="manual",
                 annotator_count=count,
                 resolver=resolver,
+                cot=cot or None,
                 updated_at=ts,
                 updated_by=updated_by or resolver,
             )
@@ -230,6 +237,7 @@ class AnnotationRepository:
             result.label_source = "manual"
             result.annotator_count = count
             result.resolver = resolver
+            result.cot = cot or None
             result.updated_at = ts
             result.updated_by = updated_by or resolver
 
@@ -275,6 +283,7 @@ class AnnotationRepository:
         model_name: str,
         label: str,
         score: float | None = None,
+        cot: str | None = None,
         created_by: str = "",
     ) -> dict[str, Any]:
         """创建预标注记录，版本号自动递增"""
@@ -291,6 +300,7 @@ class AnnotationRepository:
             model_name=model_name,
             label=label,
             score=score,
+            cot=cot or None,
             version=version,
             created_at=ts,
             created_by=created_by,
@@ -317,6 +327,7 @@ class AnnotationRepository:
                 "model_name": r["model_name"],
                 "label":      r["label"],
                 "score":      r.get("score"),
+                "cot":        r.get("cot") or None,
                 "version":    1,
                 "created_at": ts,
                 "created_by": r.get("created_by", "pipeline"),

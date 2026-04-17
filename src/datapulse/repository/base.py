@@ -385,10 +385,10 @@ class DBManager:
     # ── Annotation ────────────────────────────────────────────────────────────
 
     def create_annotation(self, data_id: int, username: str, label: str,
-                           created_by: str = "") -> dict:
+                           cot: str | None = None, created_by: str = "") -> dict:
         from datapulse.repository.annotation_repository import AnnotationRepository
         with self._session() as s:
-            return AnnotationRepository(s).create_annotation(data_id, username, label, created_by)
+            return AnnotationRepository(s).create_annotation(data_id, username, label, cot=cot, created_by=created_by)
 
     def get_active_annotations(self, data_id: int) -> list[dict]:
         from datapulse.repository.annotation_repository import AnnotationRepository
@@ -396,7 +396,8 @@ class DBManager:
             return AnnotationRepository(s).get_active_annotations(data_id)
 
     def set_annotation_result_manual(
-        self, data_id: int, final_label: str, resolver: str, updated_by: str = ""
+        self, data_id: int, final_label: str, resolver: str,
+        cot: str | None = None, updated_by: str = ""
     ) -> dict:
         """冲突裁决：直接设置 t_annotation_result.final_label，来源标记为 manual。
         t_annotation 中的标注事实保持不变。
@@ -404,7 +405,7 @@ class DBManager:
         from datapulse.repository.annotation_repository import AnnotationRepository
         with self._session() as s:
             return AnnotationRepository(s).set_manual_result(
-                data_id, final_label, resolver, updated_by=updated_by or resolver
+                data_id, final_label, resolver, cot=cot, updated_by=updated_by or resolver
             )
 
     def revoke_user_annotation(self, data_id: int, username: str) -> bool:

@@ -194,6 +194,7 @@ CREATE TABLE IF NOT EXISTS t_pre_annotation (
     model_name VARCHAR(100)   NOT NULL,
     label      VARCHAR(200)   NOT NULL,
     score      NUMERIC(5, 4),
+    cot        TEXT,
     version    INT            NOT NULL DEFAULT 1,
     created_at TIMESTAMP(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     created_by VARCHAR(45)    NOT NULL DEFAULT '',
@@ -206,6 +207,7 @@ COMMENT ON COLUMN t_pre_annotation.data_id    IS '数据ID（逻辑外键）';
 COMMENT ON COLUMN t_pre_annotation.model_name IS '模型名称';
 COMMENT ON COLUMN t_pre_annotation.label      IS '预测标签';
 COMMENT ON COLUMN t_pre_annotation.score      IS '置信度，范围 0~1';
+COMMENT ON COLUMN t_pre_annotation.cot        IS 'Chain of Thought 推理过程，记录模型决策依据';
 COMMENT ON COLUMN t_pre_annotation.version    IS '预标注版本号，同一数据多次预标注递增';
 COMMENT ON COLUMN t_pre_annotation.created_at IS '创建时间';
 COMMENT ON COLUMN t_pre_annotation.created_by IS '触发人（pipeline 操作者）';
@@ -221,6 +223,7 @@ CREATE TABLE IF NOT EXISTS t_annotation (
     data_id    BIGINT       NOT NULL,
     username   VARCHAR(100) NOT NULL,
     label      VARCHAR(200) NOT NULL,
+    cot        TEXT,
     version    INT          NOT NULL DEFAULT 1,
     is_active  BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -233,6 +236,7 @@ COMMENT ON COLUMN t_annotation.id        IS '主键ID';
 COMMENT ON COLUMN t_annotation.data_id   IS '数据ID（逻辑外键）';
 COMMENT ON COLUMN t_annotation.username  IS '标注人用户名（逻辑外键）';
 COMMENT ON COLUMN t_annotation.label     IS '标注标签';
+COMMENT ON COLUMN t_annotation.cot       IS 'Chain of Thought 标注理由，标注员填写的决策依据';
 COMMENT ON COLUMN t_annotation.version   IS '版本号，同一用户对同一数据多次标注时递增';
 COMMENT ON COLUMN t_annotation.is_active IS '是否为有效版本：TRUE=当前版本，FALSE=历史版本';
 COMMENT ON COLUMN t_annotation.created_at IS '标注时间';
@@ -254,6 +258,7 @@ CREATE TABLE IF NOT EXISTS t_annotation_result (
     label_source    VARCHAR(20)  NOT NULL DEFAULT 'auto',
     annotator_count INT          NOT NULL DEFAULT 0,
     resolver        VARCHAR(100),
+    cot             TEXT,
     updated_at      TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_by      VARCHAR(45)  NOT NULL DEFAULT '',
     CONSTRAINT pk_t_annotation_result        PRIMARY KEY (id),
@@ -268,6 +273,7 @@ COMMENT ON COLUMN t_annotation_result.final_label      IS '最终标注标签；
 COMMENT ON COLUMN t_annotation_result.label_source     IS '标签来源：auto=多数投票自动计算，manual=冲突裁决手动设定';
 COMMENT ON COLUMN t_annotation_result.annotator_count  IS '当前有效标注人数（is_active=TRUE 的行数）';
 COMMENT ON COLUMN t_annotation_result.resolver         IS '冲突裁决人用户名；仅 label_source=manual 时有值';
+COMMENT ON COLUMN t_annotation_result.cot              IS '裁决时的 Chain of Thought 理由（manual 时由裁决人填写，auto 时为 NULL）';
 COMMENT ON COLUMN t_annotation_result.updated_at       IS '最后更新时间';
 COMMENT ON COLUMN t_annotation_result.updated_by       IS '最后更新操作人';
 

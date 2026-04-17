@@ -133,13 +133,14 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
         # 收集本 batch 的预标注记录和 data_id 列表
         pre_records: list[dict] = []
         batch_ids:   list[int]  = []
-        for item, label, score in results:
+        for item, label, score, cot in results:
             data_id = item["id"]
             pre_records.append({
                 "data_id":    data_id,
                 "model_name": model_name,
                 "label":      label,
                 "score":      score,
+                "cot":        cot or None,
                 "created_by": "pipeline",
             })
             batch_ids.append(data_id)
