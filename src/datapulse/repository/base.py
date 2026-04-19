@@ -7,7 +7,10 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import structlog
 from sqlalchemy import create_engine
+
+_log = structlog.get_logger(__name__)
 from sqlalchemy.orm import Session, sessionmaker
 
 from datapulse.model.entities import Base, Dataset, Role, SystemConfig
@@ -134,6 +137,13 @@ class DBManager:
     """PostgreSQL 存储管理器（单例），所有 repository 的统一入口"""
 
     def __init__(self, db_url: str) -> None:
+        # 从 url 中提取 host/db 用于日志（不打印密码）
+        try:
+            from urllib.parse import urlparse
+            _p = urlparse(db_url)
+            _log.info("DB engine created", host=_p.hostname, port=_p.port, db=_p.path.lstrip("/"))
+        except Exception:
+            _log.info("DB engine created")
         self._engine = create_engine(
             db_url,
             pool_pre_ping=True,
@@ -142,6 +152,7 @@ class DBManager:
             echo=False,
         )
         Base.metadata.create_all(self._engine)
+        _log.info("ORM tables synced (CREATE TABLE IF NOT EXISTS)")
         self._Session = sessionmaker(bind=self._engine, expire_on_commit=False)
 
     @contextmanager

@@ -21,7 +21,6 @@ _os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 _os.environ.setdefault("OMP_NUM_THREADS", "1")
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -32,9 +31,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import structlog
+
 from datapulse.api import auth, config, datasets, export, pipeline, templates, users
 from datapulse.config.settings import get_settings
 from datapulse.core.exceptions import register_exception_handlers
+from datapulse.logging import setup_logging, shutdown_logging
 from datapulse.middleware.access_log import AccessLogMiddleware
 from datapulse.middleware.trace import TraceMiddleware
 from datapulse.repository import get_db, init_db
@@ -43,42 +45,25 @@ from datapulse.repository import get_db, init_db
 from datapulse.router import annotation, comment, conflict, data_item, data_state, pre_annotation
 
 
-def _configure_logging() -> None:
-    """配置应用层日志。
-
-    必须在 lifespan 中调用（即 uvicorn 完成自身 logging 初始化之后），原因：
-      1. uvicorn 启动时会调用 logging.config.dictConfig() 配置自己的 logger 层级
-         （uvicorn / uvicorn.error / uvicorn.access），这会覆盖模块加载时的任何设置。
-      2. lifespan 在 uvicorn 的 dictConfig 执行完毕之后才运行，此时修改才能生效。
-
-    做两件事：
-      A. 关闭 uvicorn 内置 access log（格式固定且信息少），由 AccessLogMiddleware 替代。
-      B. 为 datapulse.* logger 添加 StreamHandler，否则 uvicorn 不会为应用层 logger
-         配置任何 handler，导致 INFO 日志被 Python logging 默认静默丢弃。
-    """
-    # ── A. 关闭 uvicorn 内置 access log ──────────────────────────────────────
-    uv_access = logging.getLogger("uvicorn.access")
-    uv_access.handlers.clear()
-    uv_access.propagate = False
-
-    # ── B. 为 datapulse.* 配置 handler ───────────────────────────────────────
-    app_logger = logging.getLogger("datapulse")
-    if not app_logger.handlers:
-        handler = logging.StreamHandler()
-        # 仅输出消息本身，时间/级别已在 AccessLogMiddleware 的 log_message 里拼好
-        handler.setFormatter(logging.Formatter("%(levelname)-8s %(message)s"))
-        app_logger.addHandler(handler)
-    app_logger.setLevel(logging.INFO)
-    app_logger.propagate = False   # 防止日志冒泡到 root logger 造成重复输出
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    _configure_logging()           # ← 必须在 uvicorn logging 初始化之后执行
+    # 必须在 uvicorn 完成自身 logging.config.dictConfig 之后调用，
+    # lifespan 天然满足这一时序要求。
     settings = get_settings()
+    setup_logging(settings)
+
+    _log = structlog.get_logger(__name__)
+    _log.info("datapulse starting", env=settings.app_env, version="2.0.0")
+
     init_db(settings.db_url)
     get_db().seed_defaults()
-    yield
+
+    _log.info("datapulse ready")
+    try:
+        yield
+    finally:
+        _log.info("datapulse shutting down")
+        shutdown_logging()   # 优雅关闭：确保队列内所有日志写入磁盘后再退出
 
 
 app = FastAPI(

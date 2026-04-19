@@ -9,27 +9,34 @@ use_mock=False → 加载本地 SentenceTransformer 模型
 from __future__ import annotations
 
 import hashlib
+import time
 from typing import Any
 
 import numpy as np
+import structlog
 
 # 延迟加载的模型实例
 _model: Any = None
 _model_path: str = ""
+_log = structlog.get_logger(__name__)
 
 
 def _get_model(model_path: str):
     """懒加载本地 embedding 模型"""
     global _model, _model_path
     if _model is None or _model_path != model_path:
+        _log.info("loading embedding model", model_path=model_path)
+        t0 = time.time()
         try:
             from sentence_transformers import SentenceTransformer
 
-            _model = SentenceTransformer(model_path)
+            _model      = SentenceTransformer(model_path)
             _model_path = model_path
+            _log.info("embedding model loaded", model_path=model_path, elapsed_s=round(time.time() - t0, 1))
         except ImportError:
             raise RuntimeError("sentence-transformers 未安装。请运行: uv add sentence-transformers")
         except Exception as e:
+            _log.error("failed to load embedding model", model_path=model_path, error=str(e))
             raise RuntimeError(f"无法加载 embedding 模型: {model_path}\n错误: {e}")
     return _model
 
@@ -93,5 +100,6 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 def reload_model() -> None:
     """配置更新后强制重新加载模型"""
     global _model, _model_path
-    _model = None
+    _log.info("embedding model cache cleared (will reload on next call)", prev_model=_model_path)
+    _model      = None
     _model_path = ""

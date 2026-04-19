@@ -10,11 +10,15 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import numpy as np
+import structlog
 
 from datapulse.repository.embeddings import get_emb
+
+_log = structlog.get_logger(__name__)
 
 try:
     import faiss
@@ -132,9 +136,13 @@ _index_cache: dict[int, VectorIndex] = {}
 def get_index(dataset_id: int) -> VectorIndex:
     """懒加载：命中缓存则直接返回，否则从磁盘加载"""
     if dataset_id not in _index_cache:
-        idx = VectorIndex(dataset_id)
-        idx.load()
+        idx    = VectorIndex(dataset_id)
+        loaded = idx.load()
         _index_cache[dataset_id] = idx
+        if loaded:
+            _log.info("vector index loaded from disk", dataset_id=dataset_id, size=idx.size)
+        else:
+            _log.info("vector index not found on disk (empty)", dataset_id=dataset_id)
     return _index_cache[dataset_id]
 
 
@@ -142,7 +150,9 @@ def rebuild_index(dataset_id: int) -> int:
     """从磁盘向量文件重建指定 dataset 的 FAISS 索引，返回索引向量数"""
     emb        = get_emb()
     id_vec_map = emb.load_all(dataset_id)  # {item_id(int): ndarray}
+    _log.info("rebuilding vector index", dataset_id=dataset_id, vectors=len(id_vec_map))
 
+    t0  = time.time()
     idx = VectorIndex(dataset_id)
     if id_vec_map:
         pairs = list(id_vec_map.items())
@@ -151,6 +161,12 @@ def rebuild_index(dataset_id: int) -> int:
 
     # 更新缓存（无论是否有向量都更新，清除旧缓存）
     _index_cache[dataset_id] = idx
+    _log.info(
+        "vector index rebuilt",
+        dataset_id=dataset_id, size=idx.size,
+        elapsed_s=round(time.time() - t0, 2),
+        backend="faiss" if _FAISS_AVAILABLE else "numpy",
+    )
     return idx.size
 
 

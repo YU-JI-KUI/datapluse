@@ -15,8 +15,12 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
+import structlog
+
 from datapulse.config.settings import get_settings
 from datapulse.repository import get_db
+
+_log = structlog.get_logger(__name__)
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -143,17 +147,22 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
     try:
         user_service = UserService(session)
         # 用户名统一转大写查找
-        user = user_service.get_by_username(form.username.upper())
+        uname = form.username.upper()
+        user  = user_service.get_by_username(uname)
         if user is None:
+            _log.warning("login failed", username=uname, reason="user_not_found")
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户名不存在")
         if not user.get("is_active"):
+            _log.warning("login failed", username=uname, reason="account_disabled")
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "账号已停用，请联系管理员")
         if not user_service.verify_password(form.password, user["password_hash"]):
+            _log.warning("login failed", username=uname, reason="wrong_password")
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "密码错误")
 
         user_service.update_last_login(user["username"])
         session.commit()   # ← 必须 commit，否则 last_login_at 不会持久化
         token = _create_token(user["id"], user["username"], user["roles"])
+        _log.info("login success", username=uname, roles=user["roles"])
         return Token(
             access_token=token,
             token_type="bearer",

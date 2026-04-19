@@ -35,3 +35,4 @@ frontend/vite.config.js.timestamp*.mjs
 .vscode/
 *.swp
 /models/
+/logs/

@@ -14,6 +14,8 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import structlog
+
 from datapulse.modules.conflict import run_conflict_detection
 from datapulse.modules.embedding import embed_text
 from datapulse.modules.model import pre_annotate_batch
@@ -21,6 +23,8 @@ from datapulse.modules.processing import process_item
 from datapulse.modules.vector import rebuild_index
 from datapulse.repository.base import get_db
 from datapulse.repository.embeddings import get_emb
+
+_log = structlog.get_logger(__name__)
 
 STEPS = ["process", "pre_annotate", "embed", "check"]
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -83,7 +87,10 @@ async def step_process(dataset_id: int) -> dict[str, Any]:
     raw_items  = db.list_data_by_status(dataset_id, "raw")
     total      = len(raw_items)
     if total == 0:
+        _log.info("step=process skipped (no raw items)", dataset_id=dataset_id)
         return {"step": "process", "processed": 0, "skipped": 0}
+
+    _log.info("step=process started", dataset_id=dataset_id, total=total)
 
     start_time   = time.time()
     skipped      = 0
@@ -104,7 +111,9 @@ async def step_process(dataset_id: int) -> dict[str, Any]:
     # 一次 bulk UPDATE 代替 N 次逐行 update_stage
     db.bulk_update_stage(processed_ids, "cleaned", updated_by="pipeline")
 
-    return {"step": "process", "processed": total - skipped, "skipped": skipped}
+    result = {"step": "process", "processed": total - skipped, "skipped": skipped}
+    _log.info("step=process done", dataset_id=dataset_id, **result)
+    return result
 
 
 async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
@@ -119,10 +128,17 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
     items      = db.list_data_by_status(dataset_id, "cleaned")
     total      = len(items)
     if total == 0:
+        _log.info("step=pre_annotate skipped (no cleaned items)", dataset_id=dataset_id)
         return {"step": "pre_annotate", "annotated": 0, "skipped": 0}
 
     batch_size = cfg.get("pipeline", {}).get("batch_size", 32)
     model_name = cfg.get("llm", {}).get("model_name", "mock")
+    use_mock   = cfg.get("llm", {}).get("use_mock", True)
+    _log.info(
+        "step=pre_annotate started",
+        dataset_id=dataset_id, total=total,
+        model=model_name, mock=use_mock, batch_size=batch_size,
+    )
     annotated  = 0
     start_time = time.time()
 
@@ -160,7 +176,10 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
                 detail=_make_detail(annotated, total, 0, start_time),
             )
 
-    return {"step": "pre_annotate", "annotated": annotated, "skipped": 0}
+    elapsed = round(time.time() - start_time, 1)
+    result  = {"step": "pre_annotate", "annotated": annotated, "skipped": 0}
+    _log.info("step=pre_annotate done", dataset_id=dataset_id, elapsed_s=elapsed, **result)
+    return result
 
 
 async def step_embed(dataset_id: int) -> dict[str, Any]:
@@ -178,6 +197,8 @@ async def step_embed(dataset_id: int) -> dict[str, Any]:
     if total == 0:
         return {"step": "embed", "embedded": 0, "skipped": 0}
 
+    use_mock   = db.get_dataset_config(dataset_id).get("embedding", {}).get("use_mock", True)
+    _log.info("step=embed started", dataset_id=dataset_id, total=total, mock=use_mock)
     emb        = get_emb()
     embedded   = 0
     skipped    = 0
@@ -200,8 +221,11 @@ async def step_embed(dataset_id: int) -> dict[str, Any]:
                 detail=_make_detail(embedded, total, skipped, start_time),
             )
 
-    count = rebuild_index(dataset_id)
-    return {"step": "embed", "embedded": embedded, "skipped": skipped, "index_size": count}
+    count   = rebuild_index(dataset_id)
+    elapsed = round(time.time() - start_time, 1)
+    result  = {"step": "embed", "embedded": embedded, "skipped": skipped, "index_size": count}
+    _log.info("step=embed done", dataset_id=dataset_id, elapsed_s=elapsed, **result)
+    return result
 
 
 async def step_check(dataset_id: int) -> dict[str, Any]:
@@ -226,15 +250,25 @@ async def step_check(dataset_id: int) -> dict[str, Any]:
 
 
 async def run_all(dataset_id: int) -> None:
+    t0 = time.time()
+    _log.info("pipeline started", dataset_id=dataset_id)
     _set_status(dataset_id, "running", "process", 0, started_at=_now())
     try:
         r1 = await step_process(dataset_id)
         r2 = await step_pre_annotate(dataset_id)
         r3 = await step_embed(dataset_id)
         r4 = await step_check(dataset_id)
+        elapsed = round(time.time() - t0, 1)
+        _log.info(
+            "pipeline completed",
+            dataset_id=dataset_id, elapsed_s=elapsed,
+            process=r1, pre_annotate=r2, embed=r3, check=r4,
+        )
         _set_status(dataset_id, "completed", "", 100,
                     finished_at=_now(), results=[r1, r2, r3, r4])
     except Exception as e:
+        elapsed = round(time.time() - t0, 1)
+        _log.error("pipeline failed", dataset_id=dataset_id, elapsed_s=elapsed, error=str(e))
         _set_status(dataset_id, "error", "", 0, error=str(e), finished_at=_now())
         raise
 
@@ -267,5 +301,6 @@ async def run_step(dataset_id: int, step: str) -> dict[str, Any]:
                     finished_at=_now(), results=result)
         return result
     except Exception as e:
+        _log.error("pipeline step failed", dataset_id=dataset_id, step=step, error=str(e))
         _set_status(dataset_id, "error", step, 0, error=str(e), finished_at=_now())
         raise

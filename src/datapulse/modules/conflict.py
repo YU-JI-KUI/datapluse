@@ -17,14 +17,15 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
+
+import structlog
 
 from datapulse.modules.vector import get_index
 from datapulse.repository.base import get_db
 from datapulse.repository.embeddings import get_emb
 
-logger = logging.getLogger("datapulse.conflict")
+_log = structlog.get_logger(__name__)
 
 
 # ── 标注冲突检测 ───────────────────────────────────────────────────────────────
@@ -90,7 +91,7 @@ def detect_semantic_conflicts(
 
     index = get_index(dataset_id)
     if index.size == 0:
-        logger.warning("dataset=%d FAISS 索引为空，请先运行 embed 步骤或重建索引", dataset_id)
+        _log.warning("FAISS index is empty, run embed step first", dataset_id=dataset_id)
         return {}
 
     emb = get_emb()
@@ -104,15 +105,14 @@ def detect_semantic_conflicts(
     for item in labeled_annotated:
         id_to_item[int(item["id"])] = item
 
-    logger.info(
-        "dataset=%d 语义冲突检测：候选 %d 条，参照池 %d 条（含 checked %d 条），"
-        "threshold=%.2f，topk=%d",
-        dataset_id,
-        len(labeled_annotated),
-        len(id_to_item),
-        len(labeled_checked),
-        threshold,
-        topk,
+    _log.info(
+        "semantic conflict detection started",
+        dataset_id=dataset_id,
+        candidates=len(labeled_annotated),
+        reference_pool=len(id_to_item),
+        checked_in_pool=len(labeled_checked),
+        threshold=threshold,
+        topk=topk,
     )
 
     conflict_pairs: set[tuple[int, int]] = set()
@@ -125,7 +125,7 @@ def detect_semantic_conflicts(
         # 从磁盘加载预计算向量（embed 步骤已写入），向量不存在则跳过
         vec = emb.load(dataset_id, item_id)
         if vec is None:
-            logger.debug("dataset=%d item=%d 无预计算向量，跳过", dataset_id, item_id)
+            _log.debug("no precomputed vector, skipping", dataset_id=dataset_id, item_id=item_id)
             continue
 
         # FAISS search，返回 [(data_id: int, similarity: float), ...]
@@ -151,12 +151,12 @@ def detect_semantic_conflicts(
                 continue
             conflict_pairs.add(pair)
 
-            logger.info(
-                "dataset=%d 语义冲突：item=%d(%s) ↔ item=%d(%s) sim=%.4f",
-                dataset_id,
-                item_id, item_label,
-                neighbor_id, neighbor.get("label"),
-                sim,
+            _log.info(
+                "semantic conflict found",
+                dataset_id=dataset_id,
+                item_a=item_id, label_a=item_label,
+                item_b=neighbor_id, label_b=neighbor.get("label"),
+                similarity=round(sim, 4),
             )
 
             # 双向记录，两条数据都标记为语义冲突
@@ -205,14 +205,13 @@ async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
         semantic_candidates, checked_items, dataset_id, cfg
     )
 
-    logger.info(
-        "dataset=%d 冲突检测：annotated=%d，checked=%d，"
-        "label_conflicts=%d，semantic_conflict_entries=%d",
-        dataset_id,
-        len(annotated_items),
-        len(checked_items),
-        len(label_conflict_map),
-        len(semantic_conflict_map),
+    _log.info(
+        "conflict detection summary",
+        dataset_id=dataset_id,
+        annotated=len(annotated_items),
+        checked=len(checked_items),
+        label_conflicts=len(label_conflict_map),
+        semantic_conflict_entries=len(semantic_conflict_map),
     )
 
     # ── 处理 annotated 数据 ──────────────────────────────────────────────────────
@@ -255,9 +254,9 @@ async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
             )
             db.update_stage(data_id, "annotated")
             reopened_count += 1
-            logger.info(
-                "dataset=%d checked→annotated（语义冲突重开）：item=%d label=%s",
-                dataset_id, data_id, item.get("label"),
+            _log.info(
+                "checked item reopened due to semantic conflict",
+                dataset_id=dataset_id, item_id=data_id, label=item.get("label"),
             )
 
     # 统计 annotated 侧的语义冲突数（不含 checked 侧被重开的）

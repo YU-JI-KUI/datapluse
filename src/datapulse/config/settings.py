@@ -50,6 +50,24 @@ class Settings(BaseSettings):
     # ── 本地存储（向量文件） ──────────────────────────────────────────────────────
     storage_base_path: str = "./nas"
 
+    # ── 日志配置 ──────────────────────────────────────────────────────────────
+    # 运行环境：dev（彩色 console）/ test / prod（JSON console）
+    app_env:          str = "dev"
+    # 日志级别：DEBUG / INFO / WARNING / ERROR / CRITICAL
+    log_level:        str = "INFO"
+    # 日志文件目录，支持 NAS 挂载路径（如 /mnt/nas/logs）
+    log_dir:          str = "./logs"
+    # 日志轮转策略：time（按天，默认）| size（按文件大小）
+    log_rotation:     str = "time"
+    # size 轮转时单个文件上限（字节），默认 100 MB
+    log_max_bytes:    int = 100 * 1024 * 1024
+    # 保留的日志文件/天数（time 轮转保留 N 天，size 轮转保留 N 份）
+    log_backup_count: int = 30
+    # 服务名称，写入每条日志的 service 字段
+    service_name:     str = "datapulse"
+    # 实例 ID，多实例部署时区分节点（为空时自动取 hostname）
+    instance_id:      str = ""
+
     # ── 计算属性 ─────────────────────────────────────────────────────────────────
     @computed_field  # type: ignore[prop-decorator]
     @property
