@@ -286,6 +286,14 @@ export default function ConfigCenter() {
             hint="冲突检测只处理标注人数 ≥ 该值的数据"
           />
         </div>
+        <Field
+          label="强制填写 COT（标注理由）"
+          name="require_cot"
+          type="toggle"
+          value={config.pipeline?.require_cot ?? true}
+          onChange={makeHandler('pipeline')}
+          hint="开启：标注员和裁决人必须填写推理理由才能提交；关闭：COT 字段隐藏，无需填写"
+        />
       </Section>
 
       {/* 3. Embedding 模型 */}

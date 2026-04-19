@@ -53,6 +53,7 @@ DEFAULT_DATASET_CONFIG: dict = {
     "pipeline": {
         "batch_size": 32,
         "min_annotation_count": 2,
+        "require_cot": True,
     },
     "labels": ["寿险意图", "拒识"],
 }

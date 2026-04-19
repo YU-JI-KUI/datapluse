@@ -53,18 +53,38 @@ function ConflictDetail({ conflict }) {
       </div>
     )
   }
+  // 语义相似冲突：文本 + 标注并排展示，清晰对照
   return (
-    <div className="text-xs text-muted-foreground space-y-0.5">
-      <div>相似度: <span className="font-medium text-foreground">{((detail.similarity || 0) * 100).toFixed(1)}%</span></div>
-      {detail.paired_content && (
-        <div className="truncate max-w-xs">对比: {detail.paired_content}</div>
-      )}
+    <div className="text-xs space-y-1.5">
+      <span className="text-muted-foreground">相似度: <span className="font-semibold text-foreground">{((detail.similarity || 0) * 100).toFixed(1)}%</span></span>
+      <div className="space-y-1 mt-1">
+        {/* 本条 */}
+        <div className="flex items-start gap-1.5">
+          <span className="shrink-0 text-muted-foreground w-8 pt-0.5">本条</span>
+          <span className="text-foreground truncate max-w-[160px]" title={conflict.data_content}>
+            {conflict.data_content || '—'}
+          </span>
+          {detail.self_label && (
+            <span className="shrink-0 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold whitespace-nowrap">{detail.self_label}</span>
+          )}
+        </div>
+        {/* 相似条 */}
+        <div className="flex items-start gap-1.5">
+          <span className="shrink-0 text-muted-foreground w-8 pt-0.5">相似</span>
+          <span className="text-foreground truncate max-w-[160px]" title={detail.paired_content}>
+            {detail.paired_content || '—'}
+          </span>
+          {detail.paired_label && (
+            <span className="shrink-0 px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-semibold whitespace-nowrap">{detail.paired_label}</span>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
 
 // ── 解决冲突弹窗 ───────────────────────────────────────────────────────────────
-function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved }) {
+function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved, requireCot = true }) {
   const [selectedLabel, setSelectedLabel] = useState('')
   const [cot, setCot]                      = useState('')
   const [submitting, setSubmitting]        = useState(false)
@@ -76,7 +96,7 @@ function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved }) {
 
   async function handleSubmit() {
     if (!selectedLabel) { toast.error('请选择最终标注标签'); return }
-    if (!cot.trim()) { toast.error('请填写裁决理由（COT）'); return }
+    if (requireCot && !cot.trim()) { toast.error('请填写裁决理由（COT）'); return }
     setSubmitting(true)
     try {
       await conflictApi.resolve(conflict.id, selectedLabel, cot.trim())
@@ -156,33 +176,35 @@ function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved }) {
             )}
           </div>
 
-          {/* 裁决理由（COT，必填）*/}
-          <div>
-            <p className="text-xs font-medium mb-1.5 flex items-center gap-1">
-              裁决理由
-              <span className="text-red-500 font-semibold">*</span>
-              <span className="font-normal text-muted-foreground ml-0.5">（Chain of Thought，必填）</span>
-            </p>
-            <textarea
-              value={cot}
-              onChange={e => setCot(e.target.value)}
-              placeholder="请填写裁决依据和推理过程（必填）"
-              rows={2}
-              className={`w-full text-sm border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 bg-white placeholder:text-muted-foreground/60 transition-colors ${
-                cot.trim() ? 'border-green-300 focus:ring-green-200' : 'border-orange-300 focus:ring-orange-200 bg-orange-50/30'
-              }`}
-            />
-            {!cot.trim() && (
-              <p className="text-xs text-orange-500 mt-1">请填写裁决理由后再提交</p>
-            )}
-          </div>
+          {/* 裁决理由（COT，由配置中心控制是否显示）*/}
+          {requireCot && (
+            <div>
+              <p className="text-xs font-medium mb-1.5 flex items-center gap-1">
+                裁决理由
+                <span className="text-red-500 font-semibold">*</span>
+                <span className="font-normal text-muted-foreground ml-0.5">（Chain of Thought，必填）</span>
+              </p>
+              <textarea
+                value={cot}
+                onChange={e => setCot(e.target.value)}
+                placeholder="请填写裁决依据和推理过程（必填）"
+                rows={2}
+                className={`w-full text-sm border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 bg-white placeholder:text-muted-foreground/60 transition-colors ${
+                  cot.trim() ? 'border-green-300 focus:ring-green-200' : 'border-orange-300 focus:ring-orange-200 bg-orange-50/30'
+                }`}
+              />
+              {!cot.trim() && (
+                <p className="text-xs text-orange-500 mt-1">请填写裁决理由后再提交</p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             取消
           </Button>
-          <Button onClick={handleSubmit} disabled={!selectedLabel || !cot.trim() || submitting}>
+          <Button onClick={handleSubmit} disabled={!selectedLabel || (requireCot && !cot.trim()) || submitting}>
             {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             确认裁决
           </Button>
@@ -221,6 +243,7 @@ export default function ConflictDetection() {
   })
   const configLabels = configData?.data?.data?.labels ?? configData?.data?.labels
   const labels = configLabels || ['寿险意图', '拒识', '健康险意图', '财险意图', '其他意图']
+  const requireCot = configData?.data?.data?.pipeline?.require_cot ?? true
 
   const annotatedResult = annotatedData?.data?.data ?? {}
   const annotatedCount  = annotatedResult.pagination?.total || 0
@@ -325,7 +348,7 @@ export default function ConflictDetection() {
                 <TableHead className="w-28">冲突类型</TableHead>
                 <TableHead>冲突详情</TableHead>
                 <TableHead className="w-40 whitespace-nowrap">检测时间</TableHead>
-                <TableHead className="w-20">状态</TableHead>
+                <TableHead className="w-24 whitespace-nowrap">状态</TableHead>
                 <TableHead className="w-28 text-center">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -349,10 +372,10 @@ export default function ConflictDetection() {
                   <TableCell><ConflictTypeBadge type={c.conflict_type} /></TableCell>
                   <TableCell className="max-w-sm"><ConflictDetail conflict={c} /></TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(c.created_at)}</TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     {c.status === 'resolved'
-                      ? <Badge className="bg-green-100 text-green-700 border-0 text-xs">已解决</Badge>
-                      : <Badge className="bg-red-100 text-red-700 border-0 text-xs">待解决</Badge>
+                      ? <Badge className="bg-green-100 text-green-700 border-0 text-xs whitespace-nowrap">已解决</Badge>
+                      : <Badge className="bg-red-100 text-red-700 border-0 text-xs whitespace-nowrap">待解决</Badge>
                     }
                   </TableCell>
                   <TableCell className="text-center">
@@ -379,6 +402,7 @@ export default function ConflictDetection() {
         labels={labels}
         open={resolveOpen}
         onOpenChange={setResolveOpen}
+        requireCot={requireCot}
         onResolved={() => {
           refetch()
           qc.invalidateQueries(['annotated-count'])

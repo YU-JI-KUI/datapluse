@@ -1,9 +1,11 @@
 """
-Embedding 向量文件存储（最小化 NAS 依赖）
+Embedding 向量文件存储（per-dataset 隔离）
 
-FAISS 索引和 numpy 向量必须以文件形式存储，无法放入数据库。
-本模块仅保留向量相关的文件操作，其余数据全部由 DB 管理。
-目录：nas/embeddings/ 和 nas/vector_index/（可配置）
+目录结构：
+  nas/embeddings/{dataset_id}/{item_id}.npy   — 单条向量文件
+  nas/vector_index/{dataset_id}/faiss.index   — FAISS 索引（IDMap 格式，含 int64 IDs）
+
+不同 dataset 的向量和索引严格分开，互不干扰。
 """
 
 from __future__ import annotations
@@ -16,43 +18,51 @@ from datapulse.config.settings import get_settings
 
 
 class EmbeddingStore:
-    """本地向量文件存储（单例）"""
+    """本地向量文件存储（单例），所有方法均以 dataset_id 隔离"""
 
     def _base(self) -> Path:
         p = get_settings().storage_path
         p.mkdir(parents=True, exist_ok=True)
         return p
 
-    def _emb_dir(self) -> Path:
-        d = self._base() / "embeddings"
-        d.mkdir(exist_ok=True)
+    def _emb_dir(self, dataset_id: int) -> Path:
+        d = self._base() / "embeddings" / str(dataset_id)
+        d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def _idx_dir(self) -> Path:
-        d = self._base() / "vector_index"
-        d.mkdir(exist_ok=True)
+    def _idx_dir(self, dataset_id: int) -> Path:
+        d = self._base() / "vector_index" / str(dataset_id)
+        d.mkdir(parents=True, exist_ok=True)
         return d
 
-    def save(self, item_id: str, vector: np.ndarray) -> None:
-        np.save(str(self._emb_dir() / f"{item_id}.npy"), vector)
+    # ── 单条向量 ──────────────────────────────────────────────────────────────
 
-    def load(self, item_id: str) -> np.ndarray | None:
-        p = self._emb_dir() / f"{item_id}.npy"
+    def save(self, dataset_id: int, item_id: int, vector: np.ndarray) -> None:
+        np.save(str(self._emb_dir(dataset_id) / f"{item_id}.npy"), vector)
+
+    def load(self, dataset_id: int, item_id: int) -> np.ndarray | None:
+        p = self._emb_dir(dataset_id) / f"{item_id}.npy"
         return np.load(str(p)) if p.exists() else None
 
-    def load_all(self) -> dict[str, np.ndarray]:
-        return {p.stem: np.load(str(p)) for p in self._emb_dir().glob("*.npy")}
+    def load_all(self, dataset_id: int) -> dict[int, np.ndarray]:
+        """返回 {item_id(int): vector}，用于重建索引"""
+        result: dict[int, np.ndarray] = {}
+        for p in self._emb_dir(dataset_id).glob("*.npy"):
+            try:
+                result[int(p.stem)] = np.load(str(p))
+            except (ValueError, Exception):
+                pass
+        return result
 
-    def delete(self, item_id: str) -> None:
-        p = self._emb_dir() / f"{item_id}.npy"
+    def delete(self, dataset_id: int, item_id: int) -> None:
+        p = self._emb_dir(dataset_id) / f"{item_id}.npy"
         if p.exists():
             p.unlink()
 
-    def vector_index_path(self) -> Path:
-        return self._idx_dir() / "faiss.index"
+    # ── 索引文件路径 ──────────────────────────────────────────────────────────
 
-    def vector_ids_path(self) -> Path:
-        return self._idx_dir() / "ids.json"
+    def vector_index_path(self, dataset_id: int) -> Path:
+        return self._idx_dir(dataset_id) / "faiss.index"
 
 
 _emb: EmbeddingStore | None = None

@@ -247,7 +247,10 @@ export const configApi = {
     return api.post('/config/update', { config }, { params: { dataset_id: datasetId } })
   },
   reloadModel:  () => api.post('/config/reload-model'),
-  rebuildIndex: () => api.post('/config/rebuild-index'),
+  rebuildIndex: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/config/rebuild-index', {}, { params: { dataset_id: datasetId } })
+  },
 }
 
 // ── Export ─────────────────────────────────────────────────────────────────────

@@ -164,7 +164,7 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
 
 
 async def step_embed(dataset_id: int) -> dict[str, Any]:
-    """为 pre_annotated / annotated / checked 数据生成 embedding
+    """为 pre_annotated / annotated / checked 数据生成 embedding，按 dataset 隔离存储。
 
     优化：_set_status 每 _STATUS_UPDATE_INTERVAL 条更新一次。
     """
@@ -184,12 +184,13 @@ async def step_embed(dataset_id: int) -> dict[str, Any]:
     start_time = time.time()
 
     for i, item in enumerate(items):
-        if emb.load(item["id"]) is not None:
+        item_id = int(item["id"])
+        if emb.load(dataset_id, item_id) is not None:
             skipped  += 1
             embedded += 1
         else:
             vec = embed_text(item["content"], cfg)
-            emb.save(item["id"], vec)
+            emb.save(dataset_id, item_id, vec)
             embedded += 1
 
         if (i + 1) % _STATUS_UPDATE_INTERVAL == 0 or (i + 1) == total:
@@ -199,7 +200,7 @@ async def step_embed(dataset_id: int) -> dict[str, Any]:
                 detail=_make_detail(embedded, total, skipped, start_time),
             )
 
-    count = rebuild_index()
+    count = rebuild_index(dataset_id)
     return {"step": "embed", "embedded": embedded, "skipped": skipped, "index_size": count}
 
 

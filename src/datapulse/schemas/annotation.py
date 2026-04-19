@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class AnnotationCreate(BaseModel):
     data_id: int = Field(..., description="数据ID")
     label:   str = Field(..., min_length=1, description="标注标签")
-    cot:     str = Field(..., min_length=1, description="Chain of Thought 标注理由（必填）")
+    cot:     str | None = Field(None, description="Chain of Thought 标注理由（可选，由配置中心控制是否强制）")
 
 
 class CommentCreate(BaseModel):

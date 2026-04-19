@@ -343,13 +343,14 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
   const [cot,        setCot]        = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // 从配置拿标签列表
+  // 从配置拿标签列表和 requireCot 设置
   const { data: cfgRes } = useQuery({
     queryKey: ['config'],
     queryFn:  () => configApi.get(),
     enabled:  open,
   })
-  const labels = cfgRes?.data?.data?.labels || []
+  const labels     = cfgRes?.data?.data?.labels || []
+  const requireCot = cfgRes?.data?.data?.pipeline?.require_cot ?? true
 
   // 打开时重置
   useEffect(() => {
@@ -357,11 +358,11 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
   }, [open])
 
   async function handleSubmit() {
-    if (!label)       { toast.error('请选择标注标签'); return }
-    if (!cot.trim())  { toast.error('请填写标注理由（COT）'); return }
+    if (!label)                        { toast.error('请选择标注标签'); return }
+    if (requireCot && !cot.trim())     { toast.error('请填写标注理由（COT）'); return }
     setSubmitting(true)
     try {
-      await annotationApi.submit(item.id, label, cot.trim())
+      await annotationApi.submit(item.id, label, cot.trim() || null)
       toast.success(`已更新标注：${label}`)
       onSuccess?.()
       onOpenChange(false)
@@ -403,27 +404,29 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
             </Select>
           </div>
 
-          {/* COT */}
-          <div>
-            <label className="block text-sm font-medium mb-1.5">
-              标注理由（COT）<span className="text-destructive">*</span>
-            </label>
-            <textarea
-              className={`w-full min-h-[100px] rounded-md border px-3 py-2 text-sm bg-background
-                         placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y
-                         ${!cot.trim() ? 'border-orange-300' : 'border-green-400'}`}
-              placeholder="请说明选择该标签的依据，例如：用户询问了保费金额，符合寿险意图的定义…"
-              value={cot}
-              onChange={e => setCot(e.target.value)}
-            />
-          </div>
+          {/* COT（由配置中心控制是否显示）*/}
+          {requireCot && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5">
+                标注理由（COT）<span className="text-destructive">*</span>
+              </label>
+              <textarea
+                className={`w-full min-h-[100px] rounded-md border px-3 py-2 text-sm bg-background
+                           placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y
+                           ${!cot.trim() ? 'border-orange-300' : 'border-green-400'}`}
+                placeholder="请说明选择该标签的依据，例如：用户询问了保费金额，符合寿险意图的定义…"
+                value={cot}
+                onChange={e => setCot(e.target.value)}
+              />
+            </div>
+          )}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
           <Button
             onClick={handleSubmit}
-            disabled={submitting || !label || !cot.trim()}
+            disabled={submitting || !label || (requireCot && !cot.trim())}
           >
             {submitting ? '提交中…' : '确认修改'}
           </Button>

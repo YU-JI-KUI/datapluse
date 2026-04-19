@@ -26,8 +26,8 @@ _SHANGHAI   = ZoneInfo("Asia/Shanghai")
 
 
 class ResolveBody(BaseModel):
-    label: str  # 裁决后的最终标注标签
-    cot:   str  # 裁决理由（Chain of Thought，必填）
+    label: str            # 裁决后的最终标注标签
+    cot:   str | None = None  # 裁决理由（Chain of Thought，由配置中心控制是否强制）
 
 
 @router.get("")

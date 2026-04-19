@@ -9,6 +9,18 @@ API 规范：统一响应结构 {code, message, data, trace_id, timestamp}
 
 from __future__ import annotations
 
+# ── 必须在所有第三方库 import 之前设置（跨平台：macOS / Windows / Linux 均适用）──
+# 背景：faiss 和 torch 各自捆绑一份 OpenMP 运行时；两者同时加载时，第二个初始化
+#       会触发 "OMP Error #15: already initialized" 并 Abort。
+#
+# KMP_DUPLICATE_LIB_OK=TRUE  — 允许多份 OpenMP 共存（Intel/LLVM 官方 workaround）
+# TOKENIZERS_PARALLELISM=false — 禁止 HuggingFace tokenizers 启动 Rust 并行线程
+# OMP_NUM_THREADS=1           — 限制 OpenMP 线程数（意图分类规模下单线程足够）
+import os as _os
+_os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+_os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+_os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager

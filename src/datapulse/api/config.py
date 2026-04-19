@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from datapulse.api.auth import UserInfo, get_current_user
 from datapulse.modules.embedding import reload_model
-from datapulse.modules.vector import rebuild_index
+from datapulse.modules.vector import rebuild_index, invalidate_index
 from datapulse.repository.base import get_db
 
 router = APIRouter()
@@ -64,10 +64,18 @@ async def reload_embedding_model(user: CurrentUser):
 
 
 @router.post("/rebuild-index")
-async def rebuild_vector_index(user: CurrentUser):
-    """从本地向量文件重新构建 FAISS 索引"""
+async def rebuild_vector_index(
+    user:       CurrentUser,
+    dataset_id: int = Query(..., description="数据集 ID"),
+):
+    """从本地向量文件重新构建指定 dataset 的 FAISS 索引"""
+    if not user.has_permission("config:write"):
+        raise HTTPException(403, "无权限执行索引重建")
+    db = get_db()
+    if not db.get_dataset(dataset_id):
+        raise HTTPException(404, f"数据集不存在: {dataset_id}")
     try:
-        count = rebuild_index()
+        count = rebuild_index(dataset_id)
         return {"success": True, "message": f"索引重建完成，共 {count} 条向量"}
     except Exception as e:
         raise HTTPException(500, f"索引重建失败: {e}")
