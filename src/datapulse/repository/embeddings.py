@@ -1,13 +1,11 @@
 """
 Embedding 向量文件存储（per-dataset 隔离）
 
-目录结构（base_path 来自各 dataset 的配置中心 storage.base_path）：
-  {base_path}/embeddings/{dataset_id}/{item_id}.npy   — 单条向量文件
-  {base_path}/vector_index/{dataset_id}/faiss.index   — FAISS 索引（IDMap 格式，含 int64 IDs）
+目录结构（base_path 来自 settings.storage_base_path，所有 dataset 共用同一 NAS 根目录）：
+  {storage_base_path}/embeddings/{dataset_id}/{item_id}.npy   — 单条向量文件
+  {storage_base_path}/vector_index/{dataset_id}/faiss.index   — FAISS 索引（IDMap 格式，含 int64 IDs）
 
-NAS 基础路径不再从环境变量读取，改为每个 dataset 独立配置（配置中心 → 存储路径）。
-默认值：/ark-nav/datapulse
-不同 dataset 的向量和索引严格分开，互不干扰。
+不同 dataset 的向量和索引通过子目录严格隔离，互不干扰。
 """
 
 from __future__ import annotations
@@ -16,49 +14,35 @@ from pathlib import Path
 
 import numpy as np
 
-_DEFAULT_BASE_PATH = "/ark-nav/datapulse"
+from datapulse.config.settings import get_settings
 
 
-def _get_base_path(dataset_id: int) -> Path:
-    """从数据集配置中读取 storage.base_path；配置不存在时用默认值。
-
-    延迟导入 get_db 避免循环依赖（base.py ↔ embeddings.py）。
-    """
-    try:
-        from datapulse.repository.base import get_db
-        db  = get_db()
-        cfg = db.get_dataset_config(dataset_id)
-        raw = cfg.get("storage", {}).get("base_path", _DEFAULT_BASE_PATH)
-        return Path(raw) if raw else Path(_DEFAULT_BASE_PATH)
-    except Exception:
-        # DB 未初始化或配置缺失，回退到默认值
-        return Path(_DEFAULT_BASE_PATH)
+def _get_base_path() -> Path:
+    """从 settings.storage_base_path 读取 NAS 根目录（进程级单例，不查 DB）。"""
+    return Path(get_settings().storage_base_path)
 
 
 class EmbeddingStore:
     """本地向量文件存储（单例），所有方法均以 dataset_id 隔离。
 
-    NAS 基础路径由各 dataset 的配置中心决定（storage.base_path），支持热更新。
+    NAS 基础路径统一从 settings.storage_base_path 读取（env 配置，全局共享）。
+    _base_path 在首次调用时解析并缓存，进程内不变。
 
     性能优化：
-      - _path_cache 缓存各 dataset 的基础路径，避免每次 save/load 都触发 DB 查询。
+      - _base_path 仅解析一次，所有 save/load 操作直接使用缓存路径。
       - get_existing_ids() 一次性扫描目录，供 step_embed 批量跳过已向量化的 item。
     """
 
     def __init__(self) -> None:
-        self._path_cache: dict[int, Path] = {}
+        self._base_path: Path | None = None
 
-    def _base(self, dataset_id: int) -> Path:
-        """获取 dataset 的 NAS 基础路径，结果按 dataset_id 缓存，避免重复 DB 查询。"""
-        if dataset_id not in self._path_cache:
-            p = _get_base_path(dataset_id)
+    def _base(self, dataset_id: int | None = None) -> Path:  # noqa: ARG002
+        """获取 NAS 基础路径，首次调用时解析并缓存。dataset_id 保留以备子类扩展。"""
+        if self._base_path is None:
+            p = _get_base_path()
             p.mkdir(parents=True, exist_ok=True)
-            self._path_cache[dataset_id] = p
-        return self._path_cache[dataset_id]
-
-    def invalidate_path_cache(self, dataset_id: int) -> None:
-        """storage.base_path 配置变更后调用，清除缓存使下次重新读取 DB。"""
-        self._path_cache.pop(dataset_id, None)
+            self._base_path = p
+        return self._base_path
 
     def _emb_dir(self, dataset_id: int) -> Path:
         d = self._base(dataset_id) / "embeddings" / str(dataset_id)

@@ -59,9 +59,6 @@ DEFAULT_DATASET_CONFIG: dict = {
         "min_annotation_count": 2,
         "require_cot":          False,  # 仅控制是否展示 COT 输入框，不强制填写
     },
-    "storage": {
-        "base_path": "/ark-nav/datapulse",  # NAS 基础路径，向量文件和索引均存于此
-    },
     "labels": ["寿险意图", "拒识"],
 }
 

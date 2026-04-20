@@ -152,7 +152,7 @@ def setup_logging(settings: Any) -> None:
     level        = getattr(logging, level_str, logging.INFO)
     service      = getattr(settings, "service_name",     "datapulse")
     instance     = getattr(settings, "instance_id",      "") or socket.gethostname()
-    log_dir      = Path(getattr(settings, "log_dir",     "./logs"))
+    log_dir      = Path(getattr(settings, "effective_log_dir", "./logs"))
     rotation     = getattr(settings, "log_rotation",     "time")
     max_bytes    = getattr(settings, "log_max_bytes",    100 * 1024 * 1024)
     backup_count = getattr(settings, "log_backup_count", 30)

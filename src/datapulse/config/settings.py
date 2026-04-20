@@ -8,9 +8,9 @@
   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 
 可选环境变量（有默认值）：
-  SECRET_KEY  JWT 签名密钥，生产环境务必替换
-
-向量文件 NAS 路径由配置中心管理（storage.base_path），默认 /ark-nav/datapulse。
+  STORAGE_BASE_PATH  NAS 基础路径（向量文件、FAISS 索引、日志均存于此），默认 /ark-nav/datapulse
+  SECRET_KEY         JWT 签名密钥，生产环境务必替换
+  LOG_DIR            日志目录，留空则自动使用 {STORAGE_BASE_PATH}/logs
 
 业务配置（LLM / Embedding / 标签等）存储在 PostgreSQL system_config 表，
 通过配置中心 UI 按 dataset 独立管理，支持热更新，与启动配置无关。
@@ -45,15 +45,20 @@ class Settings(BaseSettings):
     db_password: str
 
     # ── 认证 ────────────────────────────────────────────────────────────────────
-    secret_key: str = "changeme-replace-in-production"
+    secret_key: str = "datapulse"
+
+    # ── NAS 存储 ──────────────────────────────────────────────────────────────
+    # 所有 dataset 共用同一 NAS 根目录，向量文件、FAISS 索引均存于此。
+    # 子目录结构由各模块自行约定，无需额外配置。
+    storage_base_path: str = "./nas"
 
     # ── 日志配置 ──────────────────────────────────────────────────────────────
     # 运行环境：dev（彩色 console）/ test / prod（JSON console）
     app_env:          str = "dev"
     # 日志级别：DEBUG / INFO / WARNING / ERROR / CRITICAL
     log_level:        str = "INFO"
-    # 日志文件目录，支持 NAS 挂载路径（如 /mnt/nas/logs）
-    log_dir:          str = "./logs"
+    # 日志文件目录；留空时自动使用 {storage_base_path}/logs
+    log_dir:          str = ""
     # 日志轮转策略：time（按天，默认）| size（按文件大小）
     log_rotation:     str = "time"
     # size 轮转时单个文件上限（字节），默认 100 MB
@@ -73,6 +78,12 @@ class Settings(BaseSettings):
             f"postgresql://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def effective_log_dir(self) -> str:
+        """日志目录：LOG_DIR 显式设置时优先使用，否则自动落到 {storage_base_path}/logs。"""
+        return self.log_dir.strip() or f"{self.storage_base_path}/logs"
 
 
 @lru_cache

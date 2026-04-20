@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Settings, Save, RefreshCw, Database, Cpu, Sliders, Loader2, Plus, X, Tag } from 'lucide-react'
+import { Settings, Save, RefreshCw, Cpu, Sliders, Loader2, Plus, X, Tag } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -403,18 +403,6 @@ export default function ConfigCenter() {
           value={config.llm?.use_mock}
           onChange={makeHandler('llm')}
           hint="开启后随机分配标签，不调用真实 LLM"
-        />
-      </Section>
-
-      {/* 6. 存储路径 */}
-      <Section icon={Database} title="存储路径" description="NAS 文件系统基础路径">
-        <Field
-          label="NAS 基础路径"
-          name="base_path"
-          value={config.storage?.base_path}
-          onChange={makeHandler('storage')}
-          placeholder="/ark-nav/datapulse"
-          hint="向量文件和 FAISS 索引存储根目录（支持 NAS 挂载绝对路径）"
         />
       </Section>
 
