@@ -270,8 +270,8 @@ export default function Annotation() {
   const configLabels = configData?.data?.data?.labels ?? configData?.data?.labels
   const labels = configLabels || ['寿险意图', '拒识', '健康险意图', '财险意图', '其他意图']
 
-  // COT 是否强制填写（默认 true，与后端 DEFAULT_DATASET_CONFIG 保持一致）
-  const requireCot = configData?.data?.data?.pipeline?.require_cot ?? true
+  // requireCot 仅控制是否显示 COT 输入框，不强制填写
+  const requireCot = configData?.data?.data?.pipeline?.require_cot ?? false
 
   // 自动选中第一条（切换 view / 页 时）
   useEffect(() => {
@@ -348,22 +348,18 @@ export default function Annotation() {
     }
   }, [currentItem, revoking, items, view, datasetId, qc, refetchList, syncCurrentItem])
 
-  // 键盘快捷键（数字键 1-9）：requireCot=true 且 COT 未填时禁用
+  // 键盘快捷键（数字键 1-9）：直接提交，COT 不影响快捷键
   useEffect(() => {
     const handler = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
       const n = parseInt(e.key, 10)
       if (n >= 1 && n <= labels.length) {
-        if (requireCot && !cot.trim()) {
-          toast.error('请先填写标注理由（COT）再提交标注', { duration: 2000 })
-          return
-        }
         handleLabel(labels[n - 1])
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [labels, handleLabel, cot, requireCot])
+  }, [labels, handleLabel])
 
   // 当前 item 的预标注 & 当前用户自己的标注
   const preAnn = currentItem?.pre_annotation ?? null
@@ -583,10 +579,6 @@ export default function Annotation() {
                 preAnn={preAnn}
                 labels={labels}
                 onAccept={(label) => {
-                  if (requireCot && !cot.trim()) {
-                    toast.error('请先填写标注理由（COT）再采纳建议', { duration: 2000 })
-                    return
-                  }
                   handleLabel(label)
                 }}
               />
@@ -626,24 +618,15 @@ export default function Annotation() {
                   <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
                     <Tag className="w-4 h-4 text-primary" />
                     标注理由
-                    <span className="text-xs text-red-500 font-semibold ml-0.5">*</span>
-                    <span className="text-xs text-muted-foreground font-normal ml-1">（Chain of Thought，选标签前必填）</span>
+                    <span className="text-xs text-muted-foreground font-normal ml-1">（Chain of Thought，选填）</span>
                   </p>
                   <textarea
                     value={cot}
                     onChange={e => setCot(e.target.value)}
-                    placeholder="请填写标注理由或推理依据，说明为什么选择该标签（必填）"
+                    placeholder="可填写标注理由或推理依据，说明为什么选择该标签（选填）"
                     rows={3}
-                    className={`w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 bg-white placeholder:text-muted-foreground/60 transition-colors ${
-                      cot.trim() ? 'border-green-300 focus:ring-green-200' : 'border-orange-300 focus:ring-orange-200 bg-orange-50/30'
-                    }`}
+                    className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60 transition-colors"
                   />
-                  {!cot.trim() && (
-                    <p className="text-xs text-orange-500 mt-1 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" />
-                      请先填写标注理由，再点击下方标签完成标注
-                    </p>
-                  )}
                 </div>
               )}
 
@@ -656,30 +639,20 @@ export default function Annotation() {
                 </p>
                 <div className="flex flex-wrap gap-3">
                   {labels.map((label, i) => {
-                    const color      = getLabelColor(i)
-                    const isMyAnn    = myAnn?.label === label
-                    const cotMissing = requireCot && !cot.trim()
-                    const isDisabled = submitting || cotMissing
+                    const color   = getLabelColor(i)
+                    const isMyAnn = myAnn?.label === label
                     return (
                       <button
                         key={label}
-                        onClick={() => {
-                          if (cotMissing) {
-                            toast.error('请先填写标注理由（COT）再提交标注', { duration: 2000 })
-                            return
-                          }
-                          handleLabel(label)
-                        }}
+                        onClick={() => handleLabel(label)}
                         disabled={submitting}
-                        title={cotMissing ? '请先填写上方的标注理由' : `标注为「${label}」`}
+                        title={`标注为「${label}」`}
                         className={`
                           relative flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold
                           transition-all duration-150 active:scale-95
                           ${isMyAnn
                             ? `${color.bg} ${color.text} ring-2 ${color.ring} ring-offset-2 shadow-md`
-                            : isDisabled
-                              ? `${color.bg} ${color.text} opacity-40 cursor-not-allowed`
-                              : `${color.bg} ${color.text} shadow hover:shadow-md cursor-pointer`
+                            : `${color.bg} ${color.text} shadow hover:shadow-md cursor-pointer`
                           }
                         `}
                       >

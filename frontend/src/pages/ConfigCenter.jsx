@@ -287,12 +287,12 @@ export default function ConfigCenter() {
           />
         </div>
         <Field
-          label="强制填写 COT（标注理由）"
+          label="展示 COT 输入框（标注理由）"
           name="require_cot"
           type="toggle"
-          value={config.pipeline?.require_cot ?? true}
+          value={config.pipeline?.require_cot ?? false}
           onChange={makeHandler('pipeline')}
-          hint="开启：标注员和裁决人必须填写推理理由才能提交；关闭：COT 字段隐藏，无需填写"
+          hint="开启：在标注和裁决界面显示「标注理由」输入框（非必填）；关闭：隐藏该字段"
         />
       </Section>
 
@@ -379,13 +379,23 @@ export default function ConfigCenter() {
           onChange={makeHandler('llm')}
           placeholder="internal-llm"
         />
-        <Field
-          label="超时（秒）"
-          name="timeout"
-          type="number"
-          value={config.llm?.timeout}
-          onChange={makeHandler('llm')}
-        />
+        <div className="grid grid-cols-2 gap-4">
+          <Field
+            label="超时（秒）"
+            name="timeout"
+            type="number"
+            value={config.llm?.timeout}
+            onChange={makeHandler('llm')}
+          />
+          <Field
+            label="并发请求数"
+            name="concurrency"
+            type="number"
+            value={config.llm?.concurrency}
+            onChange={makeHandler('llm')}
+            hint="预标注时最大并发 LLM 请求数，过高可能触发平台限流"
+          />
+        </div>
         <Field
           label="Mock 模式"
           name="use_mock"
@@ -403,8 +413,8 @@ export default function ConfigCenter() {
           name="base_path"
           value={config.storage?.base_path}
           onChange={makeHandler('storage')}
-          placeholder="./nas"
-          hint="所有数据文件存储根目录（支持绝对路径，如 /mnt/nas/datapulse）"
+          placeholder="/ark-nav/datapulse"
+          hint="向量文件和 FAISS 索引存储根目录（支持 NAS 挂载绝对路径）"
         />
       </Section>
 

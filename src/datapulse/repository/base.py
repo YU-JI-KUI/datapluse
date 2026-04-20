@@ -38,25 +38,29 @@ def _now() -> datetime:
 
 DEFAULT_DATASET_CONFIG: dict = {
     "llm": {
-        "use_mock": True,
-        "api_url": "",
-        "model_name": "",
-        "timeout": 30,
+        "use_mock":    True,
+        "api_url":     "",
+        "model_name":  "",
+        "timeout":     30,
+        "concurrency": 8,   # 并发 LLM 请求数，过高可能触发平台限流
     },
     "embedding": {
-        "use_mock": True,
-        "model_path": "./models/bge-base-zh",
-        "batch_size": 64,
+        "use_mock":    False,                                    # 默认使用真实模型
+        "model_path":  "/ark-nav/models/xiaobu-embedding-v2",   # 生产模型路径
+        "batch_size":  64,
     },
     "similarity": {
         "threshold_high": 0.9,
-        "threshold_mid": 0.8,
-        "topk": 5,
+        "threshold_mid":  0.8,
+        "topk":           5,
     },
     "pipeline": {
-        "batch_size": 32,
+        "batch_size":           32,
         "min_annotation_count": 2,
-        "require_cot": True,
+        "require_cot":          False,  # 仅控制是否展示 COT 输入框，不强制填写
+    },
+    "storage": {
+        "base_path": "/ark-nav/datapulse",  # NAS 基础路径，向量文件和索引均存于此
     },
     "labels": ["寿险意图", "拒识"],
 }

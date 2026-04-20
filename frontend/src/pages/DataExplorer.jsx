@@ -350,7 +350,8 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
     enabled:  open,
   })
   const labels     = cfgRes?.data?.data?.labels || []
-  const requireCot = cfgRes?.data?.data?.pipeline?.require_cot ?? true
+  // requireCot 仅控制是否显示 COT 输入框，不强制填写
+  const requireCot = cfgRes?.data?.data?.pipeline?.require_cot ?? false
 
   // 打开时重置
   useEffect(() => {
@@ -358,8 +359,7 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
   }, [open])
 
   async function handleSubmit() {
-    if (!label)                        { toast.error('请选择标注标签'); return }
-    if (requireCot && !cot.trim())     { toast.error('请填写标注理由（COT）'); return }
+    if (!label) { toast.error('请选择标注标签'); return }
     setSubmitting(true)
     try {
       await annotationApi.submit(item.id, label, cot.trim() || null)
@@ -408,12 +408,11 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
           {requireCot && (
             <div>
               <label className="block text-sm font-medium mb-1.5">
-                标注理由（COT）<span className="text-destructive">*</span>
+                标注理由（COT）<span className="text-xs text-muted-foreground ml-1">(Chain of Thought，选填)</span>
               </label>
               <textarea
-                className={`w-full min-h-[100px] rounded-md border px-3 py-2 text-sm bg-background
-                           placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y
-                           ${!cot.trim() ? 'border-orange-300' : 'border-green-400'}`}
+                className="w-full min-h-[100px] rounded-md border border-gray-200 px-3 py-2 text-sm bg-background
+                           placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-200 resize-y"
                 placeholder="请说明选择该标签的依据，例如：用户询问了保费金额，符合寿险意图的定义…"
                 value={cot}
                 onChange={e => setCot(e.target.value)}
@@ -426,7 +425,7 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
           <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
           <Button
             onClick={handleSubmit}
-            disabled={submitting || !label || (requireCot && !cot.trim())}
+            disabled={submitting || !label}
           >
             {submitting ? '提交中…' : '确认修改'}
           </Button>

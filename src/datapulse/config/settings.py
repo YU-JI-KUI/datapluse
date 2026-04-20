@@ -8,8 +8,9 @@
   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 
 可选环境变量（有默认值）：
-  SECRET_KEY        JWT 签名密钥，生产环境务必替换
-  STORAGE_BASE_PATH 本地向量文件根目录，默认 ./nas
+  SECRET_KEY  JWT 签名密钥，生产环境务必替换
+
+向量文件 NAS 路径由配置中心管理（storage.base_path），默认 /ark-nav/datapulse。
 
 业务配置（LLM / Embedding / 标签等）存储在 PostgreSQL system_config 表，
 通过配置中心 UI 按 dataset 独立管理，支持热更新，与启动配置无关。
@@ -18,7 +19,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -47,9 +47,6 @@ class Settings(BaseSettings):
     # ── 认证 ────────────────────────────────────────────────────────────────────
     secret_key: str = "changeme-replace-in-production"
 
-    # ── 本地存储（向量文件） ──────────────────────────────────────────────────────
-    storage_base_path: str = "./nas"
-
     # ── 日志配置 ──────────────────────────────────────────────────────────────
     # 运行环境：dev（彩色 console）/ test / prod（JSON console）
     app_env:          str = "dev"
@@ -76,12 +73,6 @@ class Settings(BaseSettings):
             f"postgresql://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def storage_path(self) -> Path:
-        p = Path(self.storage_base_path)
-        return p if p.is_absolute() else Path.cwd() / p
 
 
 @lru_cache

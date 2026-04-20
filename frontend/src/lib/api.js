@@ -210,6 +210,11 @@ export const conflictApi = {
 
   resolve: (conflictId, label, cot = null) =>
     api.patch(`/conflicts/${conflictId}/resolve`, { label, ...(cot ? { cot } : {}) }),
+
+  selfCheck: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/conflicts/self-check', {}, { params: { dataset_id: datasetId } })
+  },
 }
 
 // ── Comments (v2) ─────────────────────────────────────────────────────────────

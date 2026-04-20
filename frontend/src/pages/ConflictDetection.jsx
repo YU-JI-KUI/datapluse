@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   AlertTriangle, Play, RefreshCw, CheckCircle, Loader2,
-  ShieldAlert, GitMerge, Users, Check,
+  ShieldAlert, GitMerge, Users, Check, SearchCheck,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -84,7 +84,7 @@ function ConflictDetail({ conflict }) {
 }
 
 // ── 解决冲突弹窗 ───────────────────────────────────────────────────────────────
-function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved, requireCot = true }) {
+function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved, requireCot = false }) {
   const [selectedLabel, setSelectedLabel] = useState('')
   const [cot, setCot]                      = useState('')
   const [submitting, setSubmitting]        = useState(false)
@@ -96,7 +96,6 @@ function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved, requi
 
   async function handleSubmit() {
     if (!selectedLabel) { toast.error('请选择最终标注标签'); return }
-    if (requireCot && !cot.trim()) { toast.error('请填写裁决理由（COT）'); return }
     setSubmitting(true)
     try {
       await conflictApi.resolve(conflict.id, selectedLabel, cot.trim())
@@ -176,26 +175,20 @@ function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved, requi
             )}
           </div>
 
-          {/* 裁决理由（COT，由配置中心控制是否显示）*/}
+          {/* 裁决理由（COT，由配置中心控制是否显示，不强制填写）*/}
           {requireCot && (
             <div>
               <p className="text-xs font-medium mb-1.5 flex items-center gap-1">
                 裁决理由
-                <span className="text-red-500 font-semibold">*</span>
-                <span className="font-normal text-muted-foreground ml-0.5">（Chain of Thought，必填）</span>
+                <span className="font-normal text-muted-foreground ml-0.5">（Chain of Thought，选填）</span>
               </p>
               <textarea
                 value={cot}
                 onChange={e => setCot(e.target.value)}
-                placeholder="请填写裁决依据和推理过程（必填）"
+                placeholder="可填写裁决依据和推理过程（选填）"
                 rows={2}
-                className={`w-full text-sm border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 bg-white placeholder:text-muted-foreground/60 transition-colors ${
-                  cot.trim() ? 'border-green-300 focus:ring-green-200' : 'border-orange-300 focus:ring-orange-200 bg-orange-50/30'
-                }`}
+                className="w-full text-sm border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60"
               />
-              {!cot.trim() && (
-                <p className="text-xs text-orange-500 mt-1">请填写裁决理由后再提交</p>
-              )}
             </div>
           )}
         </div>
@@ -204,7 +197,7 @@ function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved, requi
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             取消
           </Button>
-          <Button onClick={handleSubmit} disabled={!selectedLabel || (requireCot && !cot.trim()) || submitting}>
+          <Button onClick={handleSubmit} disabled={!selectedLabel || submitting}>
             {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             确认裁决
           </Button>
@@ -218,7 +211,8 @@ function ResolveDialog({ conflict, labels, open, onOpenChange, onResolved, requi
 export default function ConflictDetection() {
   const qc          = useQueryClient()
   const datasetId   = getCurrentDatasetId()
-  const [running, setRunning]         = useState(false)
+  const [running, setRunning]           = useState(false)
+  const [selfChecking, setSelfChecking] = useState(false)
   const [statusFilter, setStatusFilter] = useState('open')
   const [typeFilter, setTypeFilter]   = useState('all')
   const [resolveTarget, setResolveTarget] = useState(null)   // 当前要解决的 conflict
@@ -243,7 +237,8 @@ export default function ConflictDetection() {
   })
   const configLabels = configData?.data?.data?.labels ?? configData?.data?.labels
   const labels = configLabels || ['寿险意图', '拒识', '健康险意图', '财险意图', '其他意图']
-  const requireCot = configData?.data?.data?.pipeline?.require_cot ?? true
+  // requireCot 仅控制是否显示 COT 输入框，不强制填写
+  const requireCot = configData?.data?.data?.pipeline?.require_cot ?? false
 
   const annotatedResult = annotatedData?.data?.data ?? {}
   const annotatedCount  = annotatedResult.pagination?.total || 0
@@ -271,6 +266,19 @@ export default function ConflictDetection() {
     }
   }
 
+  async function handleSelfCheck() {
+    setSelfChecking(true)
+    try {
+      await conflictApi.selfCheck()
+      toast.success('高质量数据自检已启动（异步执行）')
+      setTimeout(() => { refetch(); qc.invalidateQueries(['annotated-count']) }, 3000)
+    } catch (err) {
+      toast.error(err.response?.data?.detail || '自检失败')
+    } finally {
+      setSelfChecking(false)
+    }
+  }
+
   function openResolve(conflict) {
     setResolveTarget(conflict)
     setResolveOpen(true)
@@ -286,6 +294,17 @@ export default function ConflictDetection() {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-4 h-4 mr-2" /> 刷新
+          </Button>
+          <Button
+            variant="outline" size="sm"
+            onClick={handleSelfCheck}
+            disabled={selfChecking || running}
+            title="在所有【通过检查】的数据内部，检测语义相似但标签不同的冲突对"
+          >
+            {selfChecking
+              ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              : <SearchCheck className="w-4 h-4 mr-2" />}
+            高质量数据自检
           </Button>
           <Button size="sm" onClick={handleDetect} disabled={running || annotatedCount === 0}>
             {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}

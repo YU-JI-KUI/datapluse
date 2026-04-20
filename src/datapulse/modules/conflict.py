@@ -278,3 +278,134 @@ async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
 def get_conflict_items(dataset_id: int) -> list[dict[str, Any]]:
     db = get_db()
     return db.list_conflicts_by_dataset(dataset_id, status="open")
+
+
+# ── 高质量数据自检（checked 内部互检）─────────────────────────────────────────
+
+
+async def run_quality_self_check(dataset_id: int) -> dict[str, Any]:
+    """
+    高质量数据自检：在所有 checked 数据内部找语义相似但标签不同的冲突对。
+
+    适用场景：
+      批量初始化为 checked 的数据从未经过冲突检测，需在 checked 内部横向比对。
+
+    算法设计（O(N × topk) FAISS 搜索，效率最优）：
+      1. 加载 dataset 下全部 checked 且有最终 label 的数据
+      2. 直接复用已有 FAISS 索引（embed 步骤已建好），无需重新构建
+      3. 对每条 checked 数据，搜 topk 近邻
+      4. 过滤条件：近邻也是 checked、标签不同、相似度 > threshold_high
+      5. (min_id, max_id) 去重，保证每对只处理一次
+      6. 命中的数据对：写入 semantic_conflict，stage → annotated，等待人工裁决
+
+    返回 {"total_checked", "conflicts_found", "items_reopened"}
+    """
+    db  = get_db()
+    cfg = db.get_dataset_config(dataset_id)
+
+    sim_cfg   = cfg.get("similarity", {})
+    threshold = float(sim_cfg.get("threshold_high", 0.9))
+    topk      = int(sim_cfg.get("topk", 5))
+
+    # 加载所有 checked 且有 final_label 的数据
+    checked_items = db.list_data_by_status(dataset_id, "checked", enrich=True)
+    labeled_checked = [i for i in checked_items if i.get("label") is not None]
+
+    total_checked = len(labeled_checked)
+    _log.info(
+        "quality self-check started",
+        dataset_id=dataset_id,
+        total_checked=total_checked,
+        threshold=threshold,
+        topk=topk,
+    )
+
+    if total_checked == 0:
+        return {"total_checked": 0, "conflicts_found": 0, "items_reopened": 0}
+
+    index = get_index(dataset_id)
+    if index.size == 0:
+        _log.warning("FAISS index is empty, cannot run self-check", dataset_id=dataset_id)
+        return {"total_checked": total_checked, "conflicts_found": 0, "items_reopened": 0}
+
+    emb = get_emb()
+
+    # 构建 checked id → item 映射，仅用于过滤"近邻也是 checked"
+    checked_id_to_item: dict[int, dict[str, Any]] = {
+        int(i["id"]): i for i in labeled_checked
+    }
+
+    conflict_pairs: set[tuple[int, int]] = set()  # 去重
+    conflict_map:   dict[int, dict[str, Any]] = {}  # data_id → conflict_detail
+
+    for item in labeled_checked:
+        item_id    = int(item["id"])
+        item_label = item["label"]
+
+        vec = emb.load(dataset_id, item_id)
+        if vec is None:
+            _log.debug("no precomputed vector, skipping in self-check", item_id=item_id)
+            continue
+
+        neighbors = index.search(vec, topk=topk + 1)
+
+        for neighbor_id, sim in neighbors:
+            if neighbor_id == item_id or sim < threshold:
+                continue
+
+            # 近邻必须也是 checked
+            neighbor = checked_id_to_item.get(neighbor_id)
+            if neighbor is None:
+                continue
+
+            # 标签相同则不冲突
+            if neighbor.get("label") == item_label:
+                continue
+
+            pair = (min(item_id, neighbor_id), max(item_id, neighbor_id))
+            if pair in conflict_pairs:
+                continue
+            conflict_pairs.add(pair)
+
+            _log.info(
+                "self-check conflict found",
+                dataset_id=dataset_id,
+                item_a=item_id, label_a=item_label,
+                item_b=neighbor_id, label_b=neighbor.get("label"),
+                similarity=round(sim, 4),
+            )
+
+            # 双向写入 conflict_map
+            for self_item, other_item in [(item, neighbor), (neighbor, item)]:
+                conflict_map[int(self_item["id"])] = {
+                    "similarity":     round(sim, 4),
+                    "threshold":      threshold,
+                    "paired_id":      int(other_item["id"]),
+                    "paired_content": other_item.get("content", ""),
+                    "paired_label":   other_item.get("label"),
+                    "self_label":     self_item.get("label"),
+                    "check_type":     "quality_self_check",
+                }
+
+    conflicts_found = len(conflict_pairs)
+    items_reopened  = len(conflict_map)
+
+    _log.info(
+        "quality self-check completed",
+        dataset_id=dataset_id,
+        total_checked=total_checked,
+        conflict_pairs=conflicts_found,
+        items_reopened=items_reopened,
+    )
+
+    # 写入冲突记录，将涉及数据推回 annotated
+    for data_id, detail in conflict_map.items():
+        db.clear_conflicts(data_id)
+        db.create_conflict(data_id, "semantic_conflict", detail, created_by="self_check")
+        db.update_stage(data_id, "annotated")
+
+    return {
+        "total_checked":  total_checked,
+        "conflicts_found": conflicts_found,
+        "items_reopened":  items_reopened,
+    }

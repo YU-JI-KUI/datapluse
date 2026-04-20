@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from datapulse.api.auth import UserInfo, get_current_user
 from datapulse.core.exceptions import NotFoundError, PipelineRunningError
 from datapulse.core.response import success
-from datapulse.modules.conflict import run_conflict_detection
+from datapulse.modules.conflict import run_conflict_detection, run_quality_self_check
 from datapulse.repository.base import get_db
 
 router      = APIRouter()
@@ -82,6 +82,47 @@ async def _run_check(dataset_id: int, operator: str) -> None:
         _set_status(dataset_id, "completed", "check", 100, finished_at=_now())
     except Exception as e:
         _set_status(dataset_id, "error", "check", 0, error=str(e), finished_at=_now())
+
+
+@router.post("/self-check")
+async def trigger_quality_self_check(
+    background_tasks: BackgroundTasks,
+    user:             CurrentUser,
+    dataset_id:       int = Query(..., description="数据集 ID"),
+):
+    """
+    高质量数据自检（异步执行）
+
+    在所有 checked 状态数据中，检测语义相似但标签不同的冲突对。
+    适用于批量初始化为 checked 的数据集，补充常规冲突检测的盲区。
+    """
+    db = get_db()
+    ps = db.get_pipeline_status(dataset_id)
+    if ps.get("status") == "running":
+        raise PipelineRunningError()
+
+    from datapulse.pipeline.engine import _set_status, _now
+    _set_status(dataset_id, "running", "self_check", 0, started_at=_now())
+    background_tasks.add_task(_run_self_check, dataset_id, user.username)
+
+    return success({
+        "task_id": str(dataset_id),
+        "status":  "running",
+        "message": "高质量数据自检已启动，可通过 GET /api/pipeline/status?dataset_id=X 查询进度",
+    })
+
+
+async def _run_self_check(dataset_id: int, operator: str) -> None:
+    from datapulse.pipeline.engine import _set_status, _now
+    try:
+        result = await run_quality_self_check(dataset_id)
+        _set_status(
+            dataset_id, "completed", "self_check", 100,
+            detail=result,
+            finished_at=_now(),
+        )
+    except Exception as e:
+        _set_status(dataset_id, "error", "self_check", 0, error=str(e), finished_at=_now())
 
 
 @router.patch("/{conflict_id}/resolve")

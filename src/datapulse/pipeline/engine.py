@@ -17,8 +17,8 @@ from zoneinfo import ZoneInfo
 import structlog
 
 from datapulse.modules.conflict import run_conflict_detection
-from datapulse.modules.embedding import embed_text
-from datapulse.modules.model import pre_annotate_batch
+from datapulse.modules.embedding import embed_batch
+from datapulse.modules.model import pre_annotate
 from datapulse.modules.processing import process_item
 from datapulse.modules.vector import rebuild_index
 from datapulse.repository.base import get_db
@@ -119,10 +119,14 @@ async def step_process(dataset_id: int) -> dict[str, Any]:
 async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
     """预标注 cleaned → pre_annotated（结果写入 t_pre_annotation）
 
-    优化：
-      1. 每个 batch 的预标注和 stage 更新都批量提交（两次 DB 操作代替 2N 次）
-      2. _set_status 按 batch 粒度更新（已经是 batch_size 级别，合理）
+    性能优化：
+      1. asyncio.gather + Semaphore 并发调用 LLM，并发数由 llm.concurrency 控制。
+         相比逐条串行 await，吞吐量提升与 concurrency 倍数正相关。
+      2. 按 chunk_size 分块提交，控制单次 gather 的内存占用。
+      3. 每 chunk 批量写 DB（一次 INSERT + 一次 UPDATE）。
     """
+    import asyncio
+
     db         = get_db()
     cfg        = db.get_dataset_config(dataset_id)
     items      = db.list_data_by_status(dataset_id, "cleaned")
@@ -131,22 +135,31 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
         _log.info("step=pre_annotate skipped (no cleaned items)", dataset_id=dataset_id)
         return {"step": "pre_annotate", "annotated": 0, "skipped": 0}
 
-    batch_size = cfg.get("pipeline", {}).get("batch_size", 32)
-    model_name = cfg.get("llm", {}).get("model_name", "mock")
-    use_mock   = cfg.get("llm", {}).get("use_mock", True)
+    llm_cfg     = cfg.get("llm", {})
+    model_name  = llm_cfg.get("model_name", "mock")
+    use_mock    = llm_cfg.get("use_mock", True)
+    concurrency = llm_cfg.get("concurrency", 8)
+    chunk_size  = cfg.get("pipeline", {}).get("batch_size", 32) * 4  # 每轮 gather 的条数
+
     _log.info(
         "step=pre_annotate started",
         dataset_id=dataset_id, total=total,
-        model=model_name, mock=use_mock, batch_size=batch_size,
+        model=model_name, mock=use_mock, concurrency=concurrency,
     )
+
+    sem        = asyncio.Semaphore(concurrency)
     annotated  = 0
     start_time = time.time()
 
-    for i in range(0, total, batch_size):
-        batch   = items[i : i + batch_size]
-        results = await pre_annotate_batch(batch, cfg)
+    async def _annotate_one(item: dict[str, Any]) -> tuple[dict[str, Any], str, float, str]:
+        async with sem:
+            label, score, cot = await pre_annotate(item, cfg)
+            return item, label, score, cot
 
-        # 收集本 batch 的预标注记录和 data_id 列表
+    for chunk_start in range(0, total, chunk_size):
+        chunk   = items[chunk_start : chunk_start + chunk_size]
+        results = await asyncio.gather(*[_annotate_one(item) for item in chunk])
+
         pre_records: list[dict] = []
         batch_ids:   list[int]  = []
         for item, label, score, cot in results:
@@ -162,19 +175,14 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
             batch_ids.append(data_id)
             annotated += 1
 
-        # 批量写预标注（一次 INSERT）
         db.bulk_create_pre_annotations(pre_records)
-        # 批量更新 stage（一次 UPDATE）
         db.bulk_update_stage(batch_ids, "pre_annotated", updated_by="pipeline")
 
-        # 每隔一定 batch 数更新一次进度，避免过于频繁
-        batches_done = (i // batch_size) + 1
-        if batches_done % max(1, _STATUS_UPDATE_INTERVAL // batch_size) == 0 or annotated == total:
-            _set_status(
-                dataset_id, "running", "pre_annotate",
-                int(annotated / total * 100),
-                detail=_make_detail(annotated, total, 0, start_time),
-            )
+        _set_status(
+            dataset_id, "running", "pre_annotate",
+            int(annotated / total * 100),
+            detail=_make_detail(annotated, total, 0, start_time),
+        )
 
     elapsed = round(time.time() - start_time, 1)
     result  = {"step": "pre_annotate", "annotated": annotated, "skipped": 0}
@@ -185,7 +193,10 @@ async def step_pre_annotate(dataset_id: int) -> dict[str, Any]:
 async def step_embed(dataset_id: int) -> dict[str, Any]:
     """为 pre_annotated / annotated / checked 数据生成 embedding，按 dataset 隔离存储。
 
-    优化：_set_status 每 _STATUS_UPDATE_INTERVAL 条更新一次。
+    性能优化：
+      1. get_existing_ids() 一次性扫描目录，替代逐条 emb.load() 检查（消除 N 次 DB 查询）。
+      2. embed_batch() 批量编码，充分利用 SentenceTransformer 的向量化加速（GPU/CPU）。
+      3. emb_dir 在循环外缓存，路径解析仅做一次 DB 查询。
     """
     db    = get_db()
     cfg   = db.get_dataset_config(dataset_id)
@@ -197,24 +208,34 @@ async def step_embed(dataset_id: int) -> dict[str, Any]:
     if total == 0:
         return {"step": "embed", "embedded": 0, "skipped": 0}
 
-    use_mock   = db.get_dataset_config(dataset_id).get("embedding", {}).get("use_mock", True)
-    _log.info("step=embed started", dataset_id=dataset_id, total=total, mock=use_mock)
     emb        = get_emb()
-    embedded   = 0
-    skipped    = 0
+    use_mock   = cfg.get("embedding", {}).get("use_mock", True)
+    batch_size = cfg.get("embedding", {}).get("batch_size", 64)
+    _log.info("step=embed started", dataset_id=dataset_id, total=total,
+              mock=use_mock, batch_size=batch_size)
+
     start_time = time.time()
 
-    for i, item in enumerate(items):
-        item_id = int(item["id"])
-        if emb.load(dataset_id, item_id) is not None:
-            skipped  += 1
-            embedded += 1
-        else:
-            vec = embed_text(item["content"], cfg)
-            emb.save(dataset_id, item_id, vec)
-            embedded += 1
+    # 一次性扫描已有向量文件，避免逐条 load() 检查（消除 N 次 DB 查询 + N 次文件读取）
+    existing_ids = emb.get_existing_ids(dataset_id)
+    to_embed     = [item for item in items if int(item["id"]) not in existing_ids]
+    skipped      = len(items) - len(to_embed)
 
-        if (i + 1) % _STATUS_UPDATE_INTERVAL == 0 or (i + 1) == total:
+    _log.info("step=embed scan done", dataset_id=dataset_id,
+              to_embed=len(to_embed), already_skipped=skipped)
+
+    # 按 batch_size 批量编码并逐条写入文件
+    embedded = skipped
+    for i in range(0, len(to_embed), batch_size):
+        batch  = to_embed[i : i + batch_size]
+        texts  = [item["content"] for item in batch]
+        vecs   = embed_batch(texts, cfg)          # shape: (len(batch), dim)
+
+        for item, vec in zip(batch, vecs):
+            emb.save(dataset_id, int(item["id"]), vec)
+        embedded += len(batch)
+
+        if embedded % _STATUS_UPDATE_INTERVAL < batch_size or embedded == total:
             _set_status(
                 dataset_id, "running", "embed",
                 int(embedded / total * 100),
