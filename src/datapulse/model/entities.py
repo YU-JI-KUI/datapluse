@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Boolean, Column, Integer, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, Integer, LargeBinary, Numeric, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.orm import declarative_base
 
@@ -225,6 +225,27 @@ class UserDataset(Base):
     dataset_id = Column(BigInteger, nullable=False)
     created_at = Column(_TS, nullable=False)
     created_by = Column(String(45), nullable=False, default="")
+
+
+class Embedding(Base):
+    """t_embedding — 数据向量（per-dataset 隔离，向量以 BYTEA 存储）
+
+    向量序列化：numpy float32 数组经 ndarray.tobytes() 写入，np.frombuffer 还原。
+    UPSERT 时刷新 created_at，记录最近一次向量化时间。
+    """
+
+    __tablename__ = "t_embedding"
+
+    id         = Column(BigInteger, primary_key=True, autoincrement=True)
+    dataset_id = Column(BigInteger, nullable=False, index=True)
+    data_id    = Column(BigInteger, nullable=False)
+    vector     = Column(LargeBinary, nullable=False)
+    dim        = Column(SmallInteger, nullable=False)
+    created_at = Column(_TS, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "data_id", name="uq_t_embedding_dataset_data"),
+    )
 
 
 class AnnotationResult(Base):

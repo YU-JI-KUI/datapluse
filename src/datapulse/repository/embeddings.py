@@ -1,11 +1,18 @@
 """
-Embedding 向量文件存储（per-dataset 隔离）
+Embedding 存储层（per-dataset 隔离）
 
-目录结构（base_path 来自 settings.storage_base_path，所有 dataset 共用同一 NAS 根目录）：
-  {storage_base_path}/embeddings/{dataset_id}/{item_id}.npy   — 单条向量文件
-  {storage_base_path}/vector_index/{dataset_id}/faiss.index   — FAISS 索引（IDMap 格式，含 int64 IDs）
+架构说明
+---------
+向量数据（BYTEA）存于 PostgreSQL t_embedding 表，通过 EmbeddingRepository 操作。
+FAISS 索引文件（faiss.index）仍存于 NAS，仅在 rebuild_index 时写入/读取。
 
-不同 dataset 的向量和索引通过子目录严格隔离，互不干扰。
+目录结构（FAISS 索引）：
+  {storage_base_path}/vector_index/{dataset_id}/faiss.index
+
+性能对比
+---------
+旧方案（NAS .npy）：60k × 50ms/write ≈ 50 min
+新方案（PG UPSERT）：60k ÷ 64 ≈ 1000 次 INSERT，亚分钟完成
 """
 
 from __future__ import annotations
@@ -23,73 +30,48 @@ def _get_base_path() -> Path:
 
 
 class EmbeddingStore:
-    """本地向量文件存储（单例），所有方法均以 dataset_id 隔离。
+    """向量存储门面（单例）。
 
-    NAS 基础路径统一从 settings.storage_base_path 读取（env 配置，全局共享）。
-    _base_path 在首次调用时解析并缓存，进程内不变。
-
-    性能优化：
-      - _base_path 仅解析一次，所有 save/load 操作直接使用缓存路径。
-      - get_existing_ids() 一次性扫描目录，供 step_embed 批量跳过已向量化的 item。
+    向量读写通过 DatabaseClient（PostgreSQL），NAS 仅用于存放 FAISS 索引文件。
+    _base_path 首次调用时缓存，避免重复读取 settings。
     """
 
     def __init__(self) -> None:
         self._base_path: Path | None = None
 
-    def _base(self, dataset_id: int | None = None) -> Path:  # noqa: ARG002
-        """获取 NAS 基础路径，首次调用时解析并缓存。dataset_id 保留以备子类扩展。"""
+    def _base(self) -> Path:
         if self._base_path is None:
             p = _get_base_path()
             p.mkdir(parents=True, exist_ok=True)
             self._base_path = p
         return self._base_path
 
-    def _emb_dir(self, dataset_id: int) -> Path:
-        d = self._base(dataset_id) / "embeddings" / str(dataset_id)
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
     def _idx_dir(self, dataset_id: int) -> Path:
-        d = self._base(dataset_id) / "vector_index" / str(dataset_id)
+        d = self._base() / "vector_index" / str(dataset_id)
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    # ── 单条向量 ──────────────────────────────────────────────────────────────
-
-    def save(self, dataset_id: int, item_id: int, vector: np.ndarray) -> None:
-        np.save(str(self._emb_dir(dataset_id) / f"{item_id}.npy"), vector)
-
-    def load(self, dataset_id: int, item_id: int) -> np.ndarray | None:
-        p = self._emb_dir(dataset_id) / f"{item_id}.npy"
-        return np.load(str(p)) if p.exists() else None
-
-    def load_all(self, dataset_id: int) -> dict[int, np.ndarray]:
-        """返回 {item_id(int): vector}，用于重建索引"""
-        result: dict[int, np.ndarray] = {}
-        for p in self._emb_dir(dataset_id).glob("*.npy"):
-            try:
-                result[int(p.stem)] = np.load(str(p))
-            except (ValueError, Exception):
-                pass
-        return result
-
-    def get_existing_ids(self, dataset_id: int) -> set[int]:
-        """一次性扫描 embedding 目录，返回已向量化的 item_id 集合。
-
-        供 step_embed 在循环外预筛选，避免逐条 load() 检查文件是否存在。
-        """
-        d = self._emb_dir(dataset_id)
-        return {int(p.stem) for p in d.glob("*.npy") if p.stem.isdigit()}
-
-    def delete(self, dataset_id: int, item_id: int) -> None:
-        p = self._emb_dir(dataset_id) / f"{item_id}.npy"
-        if p.exists():
-            p.unlink()
-
-    # ── 索引文件路径 ──────────────────────────────────────────────────────────
+    # ── FAISS 索引路径（NAS） ─────────────────────────────────────────────────
 
     def vector_index_path(self, dataset_id: int) -> Path:
         return self._idx_dir(dataset_id) / "faiss.index"
+
+    # ── 向量读取（通过 DB） ───────────────────────────────────────────────────
+
+    def get_existing_ids(self, dataset_id: int) -> set[int]:
+        """返回已存在向量的 data_id 集合（用于 step_embed 跳过已处理项）。"""
+        from datapulse.repository.base import get_db
+        return get_db().get_existing_embedding_ids(dataset_id)
+
+    def load_all(self, dataset_id: int) -> dict[int, np.ndarray]:
+        """加载 dataset 下全部向量 {item_id: vector}（用于重建 FAISS 索引）。"""
+        from datapulse.repository.base import get_db
+        return get_db().load_all_embeddings(dataset_id)
+
+    def load_batch(self, dataset_id: int, item_ids: list[int]) -> dict[int, np.ndarray]:
+        """批量加载指定 item_ids 的向量（供冲突检测使用）。"""
+        from datapulse.repository.base import get_db
+        return get_db().load_embeddings_batch(dataset_id, item_ids)
 
 
 _emb: EmbeddingStore | None = None

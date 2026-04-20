@@ -396,7 +396,32 @@ COMMENT ON COLUMN t_pipeline_status.updated_by   IS '最后更新人';
 
 
 -- =============================================================================
--- 15. 用户-数据集访问权限关联表
+-- 15. 数据向量表
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS t_embedding (
+    id         BIGSERIAL    NOT NULL,
+    dataset_id BIGINT       NOT NULL,
+    data_id    BIGINT       NOT NULL,
+    vector     BYTEA        NOT NULL,
+    dim        SMALLINT     NOT NULL,
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT pk_t_embedding             PRIMARY KEY (id),
+    CONSTRAINT uq_t_embedding_dataset_data UNIQUE (dataset_id, data_id)
+);
+
+COMMENT ON TABLE  t_embedding            IS '数据向量表（embedding），按 dataset 隔离，BYTEA 存储 numpy float32 数组';
+COMMENT ON COLUMN t_embedding.id         IS '主键 ID';
+COMMENT ON COLUMN t_embedding.dataset_id IS '所属数据集 ID（逻辑外键 → t_dataset.id）';
+COMMENT ON COLUMN t_embedding.data_id    IS '数据条目 ID（逻辑外键 → t_data_item.id）';
+COMMENT ON COLUMN t_embedding.vector     IS '向量字节，numpy float32 数组经 ndarray.tobytes() 序列化，np.frombuffer 还原';
+COMMENT ON COLUMN t_embedding.dim        IS '向量维度（float32 元素个数）';
+COMMENT ON COLUMN t_embedding.created_at IS '最近一次向量化时间（UPSERT 时刷新）';
+
+CREATE INDEX IF NOT EXISTS idx_t_embedding_dataset ON t_embedding(dataset_id);
+
+
+-- =============================================================================
+-- 16. 用户-数据集访问权限关联表
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS t_user_dataset (
     id         BIGSERIAL    NOT NULL,

@@ -10,9 +10,12 @@
 
 语义冲突设计要点：
 - 参照池 = annotated（候选）+ checked（已通过历史数据）
-  checked 数据也参与 FAISS 近邻查找，确保历史数据与新数据的跨阶段对比。
+  checked 数据参与 FAISS 近邻查找，为 annotated 数据提供比对基准。
 - min_annotation_count 仅用于 label_conflict 过滤，语义冲突只需有最终 label 即可。
-- 若 checked 数据被新 annotated 数据"撞上"语义冲突，重新推回 annotated 等待裁决。
+- checked 数据永远不会被回退到 annotated，只有 annotated 侧写冲突记录。
+  背景：若一条新 annotated 数据与 100 条 checked 数据语义冲突，
+  不应将 100 条历史数据全部回退，只需标记该 annotated 数据等待人工裁决即可。
+  如需在 checked 内部互检，请使用【高质量数据自检】功能（run_quality_self_check）。
 """
 
 from __future__ import annotations
@@ -72,13 +75,15 @@ def detect_semantic_conflicts(
 
     流程：
       1. 参照池 = annotated + checked（全部有 label 的数据），构建 id_to_item 映射
-      2. 对每条 annotated 候选，从磁盘加载预计算向量，向 FAISS 查 topk 近邻
-      3. 近邻可以来自 annotated 或 checked——两者都在参照池中
-      4. 近邻 label 与当前不同 → 语义冲突，双向写入 conflicts dict
-      5. 向量不存在（未向量化）的条目静默跳过
+      2. 一次 DB 查询批量加载所有候选向量（消除 N 次逐条查询）
+      3. 对每条 annotated 候选，向 FAISS 查 topk 近邻
+      4. 近邻可以来自 annotated 或 checked——两者都在参照池中
+      5. 近邻 label 与当前不同 → 语义冲突，仅在 annotated 侧写冲突记录
+      6. 向量不存在（未向量化）的条目静默跳过
 
-    返回 {data_id: conflict_detail}，包含候选侧（annotated）和被匹配侧（checked）的条目。
-    调用方根据条目原始 stage 决定如何处理（annotated 保持冲突，checked 重新开启）。
+    返回 {data_id: conflict_detail}，仅包含 annotated 侧的条目。
+    checked 侧永远不写入，保持 checked stage 不变（由调用方保证）。
+    如需检测 checked 内部冲突，请使用 run_quality_self_check。
     """
     sim_cfg   = cfg.get("similarity", {})
     threshold = float(sim_cfg.get("threshold_high", 0.9))
@@ -93,8 +98,6 @@ def detect_semantic_conflicts(
     if index.size == 0:
         _log.warning("FAISS index is empty, run embed step first", dataset_id=dataset_id)
         return {}
-
-    emb = get_emb()
 
     # ── 参照池：annotated + checked 的全部有 label 数据 ──────────────────────
     # checked 先入 map，annotated 后入（有重叠时 annotated 优先）
@@ -115,6 +118,10 @@ def detect_semantic_conflicts(
         topk=topk,
     )
 
+    # 一次 DB 查询批量加载所有候选向量，消除 N 次逐条 DB 查询
+    candidate_ids  = [int(i["id"]) for i in labeled_annotated]
+    vec_map        = get_emb().load_batch(dataset_id, candidate_ids)
+
     conflict_pairs: set[tuple[int, int]] = set()
     conflicts: dict[int, dict[str, Any]] = {}
 
@@ -122,8 +129,7 @@ def detect_semantic_conflicts(
         item_id    = int(item["id"])
         item_label = item["label"]
 
-        # 从磁盘加载预计算向量（embed 步骤已写入），向量不存在则跳过
-        vec = emb.load(dataset_id, item_id)
+        vec = vec_map.get(item_id)
         if vec is None:
             _log.debug("no precomputed vector, skipping", dataset_id=dataset_id, item_id=item_id)
             continue
@@ -159,15 +165,17 @@ def detect_semantic_conflicts(
                 similarity=round(sim, 4),
             )
 
-            # 双向记录，两条数据都标记为语义冲突
-            for self_item, other_item in [(item, neighbor), (neighbor, item)]:
-                conflicts[self_item["id"]] = {
+            # 仅记录 annotated 侧（item），checked 侧（neighbor）保持不变
+            # 同一条 annotated 可能与多条 checked 冲突，保留相似度最高的那条作为代表
+            existing = conflicts.get(item_id)
+            if existing is None or round(sim, 4) > existing.get("similarity", 0):
+                conflicts[item_id] = {
                     "similarity":     round(sim, 4),
                     "threshold":      threshold,
-                    "paired_id":      other_item["id"],
-                    "paired_content": other_item.get("content", ""),
-                    "paired_label":   other_item.get("label"),
-                    "self_label":     self_item.get("label"),
+                    "paired_id":      neighbor_id,
+                    "paired_content": neighbor.get("content", ""),
+                    "paired_label":   neighbor.get("label"),
+                    "self_label":     item_label,
                 }
 
     return conflicts
@@ -176,7 +184,7 @@ def detect_semantic_conflicts(
 # ── Pipeline 步骤：check ───────────────────────────────────────────────────────
 
 
-async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
+async def run_conflict_detection(dataset_id: int, operator: str = "pipeline") -> dict[str, Any]:
     db  = get_db()
     cfg = db.get_dataset_config(dataset_id)
 
@@ -224,52 +232,29 @@ async def run_conflict_detection(dataset_id: int) -> dict[str, Any]:
             db.create_conflict(
                 data_id, "label_conflict",
                 label_conflict_map[data_id],
-                created_by="pipeline",
+                created_by=operator,
             )
-            db.update_stage(data_id, "annotated")
+            db.update_stage(data_id, "annotated", updated_by=operator)
         elif data_id in semantic_conflict_map:
             db.create_conflict(
                 data_id, "semantic_conflict",
                 semantic_conflict_map[data_id],
-                created_by="pipeline",
+                created_by=operator,
             )
-            db.update_stage(data_id, "annotated")
+            db.update_stage(data_id, "annotated", updated_by=operator)
         elif data_id in eligible_ids:
             # 满足 min_count 且无冲突 → 推进到 checked
-            db.update_stage(data_id, "checked")
+            db.update_stage(data_id, "checked", updated_by=operator)
             clean_count += 1
         # else: 未达到 min_count，保持 annotated，等待更多标注员参与
 
-    # ── 重新开启 checked 数据（与新 annotated 产生语义冲突）─────────────────────
-    # 历史数据虽已通过审查，但新标注数据与其语义相近且标签不同，需重新裁决
-    reopened_count = 0
-    for item in checked_items:
-        data_id = item["id"]
-        if data_id in semantic_conflict_map:
-            db.clear_conflicts(data_id)
-            db.create_conflict(
-                data_id, "semantic_conflict",
-                semantic_conflict_map[data_id],
-                created_by="pipeline",
-            )
-            db.update_stage(data_id, "annotated")
-            reopened_count += 1
-            _log.info(
-                "checked item reopened due to semantic conflict",
-                dataset_id=dataset_id, item_id=data_id, label=item.get("label"),
-            )
-
-    # 统计 annotated 侧的语义冲突数（不含 checked 侧被重开的）
-    annotated_id_set = {item["id"] for item in annotated_items}
-    annotated_semantic_count = sum(
-        1 for data_id in semantic_conflict_map if data_id in annotated_id_set
-    )
+    # checked 数据不再被回退：semantic_conflict_map 已只包含 annotated 侧，
+    # checked 侧保持 checked stage 不变，无需额外处理。
 
     return {
         "label_conflicts":    len(label_conflict_map),
-        "semantic_conflicts": annotated_semantic_count,
+        "semantic_conflicts": len(semantic_conflict_map),
         "clean":              clean_count,
-        "reopened":           reopened_count,
         "total":              len(annotated_items),
         "skipped_low_count":  skipped_count,
     }
@@ -283,7 +268,7 @@ def get_conflict_items(dataset_id: int) -> list[dict[str, Any]]:
 # ── 高质量数据自检（checked 内部互检）─────────────────────────────────────────
 
 
-async def run_quality_self_check(dataset_id: int) -> dict[str, Any]:
+async def run_quality_self_check(dataset_id: int, operator: str = "pipeline") -> dict[str, Any]:
     """
     高质量数据自检：在所有 checked 数据内部找语义相似但标签不同的冲突对。
 
@@ -328,12 +313,14 @@ async def run_quality_self_check(dataset_id: int) -> dict[str, Any]:
         _log.warning("FAISS index is empty, cannot run self-check", dataset_id=dataset_id)
         return {"total_checked": total_checked, "conflicts_found": 0, "items_reopened": 0}
 
-    emb = get_emb()
-
     # 构建 checked id → item 映射，仅用于过滤"近邻也是 checked"
     checked_id_to_item: dict[int, dict[str, Any]] = {
         int(i["id"]): i for i in labeled_checked
     }
+
+    # 一次 DB 查询批量加载所有 checked 向量，消除 N 次逐条 DB 查询
+    all_checked_ids = [int(i["id"]) for i in labeled_checked]
+    vec_map         = get_emb().load_batch(dataset_id, all_checked_ids)
 
     conflict_pairs: set[tuple[int, int]] = set()  # 去重
     conflict_map:   dict[int, dict[str, Any]] = {}  # data_id → conflict_detail
@@ -342,7 +329,7 @@ async def run_quality_self_check(dataset_id: int) -> dict[str, Any]:
         item_id    = int(item["id"])
         item_label = item["label"]
 
-        vec = emb.load(dataset_id, item_id)
+        vec = vec_map.get(item_id)
         if vec is None:
             _log.debug("no precomputed vector, skipping in self-check", item_id=item_id)
             continue
@@ -401,8 +388,8 @@ async def run_quality_self_check(dataset_id: int) -> dict[str, Any]:
     # 写入冲突记录，将涉及数据推回 annotated
     for data_id, detail in conflict_map.items():
         db.clear_conflicts(data_id)
-        db.create_conflict(data_id, "semantic_conflict", detail, created_by="self_check")
-        db.update_stage(data_id, "annotated")
+        db.create_conflict(data_id, "semantic_conflict", detail, created_by=operator)
+        db.update_stage(data_id, "annotated", updated_by=operator)
 
     return {
         "total_checked":  total_checked,

@@ -591,6 +591,41 @@ class DBManager:
         with self._session() as s:
             return TemplateRepository(s).delete(template_id)
 
+    # ── Embedding ─────────────────────────────────────────────────────────────
+
+    def bulk_save_embeddings(
+        self,
+        dataset_id: int,
+        id_vec_pairs: list[tuple[int, "np.ndarray"]],
+        created_by: str = "pipeline",
+    ) -> int:
+        """批量 UPSERT 向量到 t_embedding，返回写入行数。"""
+        from datapulse.repository.embedding_repository import EmbeddingRepository
+        with self._session() as s:
+            return EmbeddingRepository(s).bulk_save(dataset_id, id_vec_pairs, created_by)
+
+    def get_existing_embedding_ids(self, dataset_id: int) -> set[int]:
+        """返回已存在向量的 data_id 集合。"""
+        from datapulse.repository.embedding_repository import EmbeddingRepository
+        with self._session() as s:
+            return EmbeddingRepository(s).get_existing_ids(dataset_id)
+
+    def load_all_embeddings(self, dataset_id: int) -> "dict[int, np.ndarray]":
+        """加载 dataset 下全部向量，返回 {item_id: vector}。"""
+        from datapulse.repository.embedding_repository import EmbeddingRepository
+        with self._session() as s:
+            return EmbeddingRepository(s).load_all(dataset_id)
+
+    def load_embeddings_batch(
+        self,
+        dataset_id: int,
+        item_ids: list[int],
+    ) -> "dict[int, np.ndarray]":
+        """按 item_id 列表批量加载向量，返回 {item_id: vector}。"""
+        from datapulse.repository.embedding_repository import EmbeddingRepository
+        with self._session() as s:
+            return EmbeddingRepository(s).load_batch(dataset_id, item_ids)
+
 
 # ── 单例 ──────────────────────────────────────────────────────────────────────
 

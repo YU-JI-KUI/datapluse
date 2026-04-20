@@ -65,7 +65,7 @@ async def trigger_conflict_detection(
 
     # 利用已有的 pipeline_status 记录进度
     from datapulse.pipeline.engine import _set_status, _now
-    _set_status(dataset_id, "running", "check", 0, started_at=_now())
+    _set_status(dataset_id, "running", "check", 0, started_at=_now(), operator=user.username)
     background_tasks.add_task(_run_check, dataset_id, user.username)
 
     return success({
@@ -78,10 +78,10 @@ async def trigger_conflict_detection(
 async def _run_check(dataset_id: int, operator: str) -> None:
     from datapulse.pipeline.engine import step_check, _set_status, _now
     try:
-        await step_check(dataset_id)
-        _set_status(dataset_id, "completed", "check", 100, finished_at=_now())
+        await step_check(dataset_id, operator=operator)
+        _set_status(dataset_id, "completed", "check", 100, finished_at=_now(), operator=operator)
     except Exception as e:
-        _set_status(dataset_id, "error", "check", 0, error=str(e), finished_at=_now())
+        _set_status(dataset_id, "error", "check", 0, error=str(e), finished_at=_now(), operator=operator)
 
 
 @router.post("/self-check")
@@ -102,7 +102,7 @@ async def trigger_quality_self_check(
         raise PipelineRunningError()
 
     from datapulse.pipeline.engine import _set_status, _now
-    _set_status(dataset_id, "running", "self_check", 0, started_at=_now())
+    _set_status(dataset_id, "running", "self_check", 0, started_at=_now(), operator=user.username)
     background_tasks.add_task(_run_self_check, dataset_id, user.username)
 
     return success({
@@ -115,14 +115,15 @@ async def trigger_quality_self_check(
 async def _run_self_check(dataset_id: int, operator: str) -> None:
     from datapulse.pipeline.engine import _set_status, _now
     try:
-        result = await run_quality_self_check(dataset_id)
+        result = await run_quality_self_check(dataset_id, operator=operator)
         _set_status(
             dataset_id, "completed", "self_check", 100,
             detail=result,
             finished_at=_now(),
+            operator=operator,
         )
     except Exception as e:
-        _set_status(dataset_id, "error", "self_check", 0, error=str(e), finished_at=_now())
+        _set_status(dataset_id, "error", "self_check", 0, error=str(e), finished_at=_now(), operator=operator)
 
 
 @router.patch("/{conflict_id}/resolve")

@@ -147,9 +147,9 @@ def get_index(dataset_id: int) -> VectorIndex:
 
 
 def rebuild_index(dataset_id: int) -> int:
-    """从磁盘向量文件重建指定 dataset 的 FAISS 索引，返回索引向量数"""
-    emb        = get_emb()
-    id_vec_map = emb.load_all(dataset_id)  # {item_id(int): ndarray}
+    """从 PostgreSQL 加载全量向量，重建指定 dataset 的 FAISS 索引，返回索引向量数"""
+    from datapulse.repository.base import get_db
+    id_vec_map = get_db().load_all_embeddings(dataset_id)  # {item_id(int): ndarray}
     _log.info("rebuilding vector index", dataset_id=dataset_id, vectors=len(id_vec_map))
 
     t0  = time.time()

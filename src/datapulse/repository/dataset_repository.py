@@ -105,6 +105,7 @@ class DatasetRepository:
             DataComment,
             DataItem,
             DataState,
+            Embedding,
             ExportTemplate,
             PipelineStatus,
             PreAnnotation,
@@ -141,6 +142,11 @@ class DatasetRepository:
             self.session.query(DataItem).filter(
                 DataItem.dataset_id == dataset_id
             ).delete(synchronize_session=False)
+
+        # t_embedding 按 dataset_id 直接删除，无需先查 data_ids
+        self.session.query(Embedding).filter(
+            Embedding.dataset_id == dataset_id
+        ).delete(synchronize_session=False)
 
         self.session.query(ExportTemplate).filter(
             ExportTemplate.dataset_id == dataset_id

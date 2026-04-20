@@ -39,7 +39,7 @@ async def run_pipeline(
         raise HTTPException(409, "Pipeline 正在运行，请勿重复触发")
     # run_all_sync 是 sync 函数，BackgroundTasks 会自动放到线程池执行，
     # 不会阻塞主 asyncio 事件循环（async 函数会直接在事件循环内 await，会卡住）
-    background_tasks.add_task(run_all_sync, dataset_id)
+    background_tasks.add_task(run_all_sync, dataset_id, user.username)
     return {"success": True, "message": "Pipeline 已启动，在后台运行"}
 
 
@@ -49,7 +49,7 @@ async def run_single_step(body: RunStepRequest, user: CurrentUser):
     if not user.has_permission("pipeline:run"):
         raise HTTPException(403, "无权限触发 Pipeline")
     try:
-        result = await run_step(body.dataset_id, body.step)
+        result = await run_step(body.dataset_id, body.step, operator=user.username)
         return {"success": True, "data": result}
     except ValueError as e:
         raise HTTPException(400, str(e))
