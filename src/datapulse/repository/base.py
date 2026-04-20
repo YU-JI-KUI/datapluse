@@ -518,6 +518,20 @@ class DBManager:
         with self._session() as s:
             return ConflictRepository(s).list_by_dataset(dataset_id, status)
 
+    def list_conflicts_by_dataset_paged(
+        self,
+        dataset_id: int,
+        status: str | None = None,
+        conflict_type: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict], int]:
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).list_by_dataset_paged(
+                dataset_id, status, conflict_type, page, page_size
+            )
+
     def get_conflict_by_id(self, conflict_id: int) -> dict | None:
         from datapulse.repository.conflict_repository import ConflictRepository
         with self._session() as s:
@@ -527,6 +541,17 @@ class DBManager:
         from datapulse.repository.conflict_repository import ConflictRepository
         with self._session() as s:
             return ConflictRepository(s).resolve(conflict_id)
+
+    def batch_resolve_conflicts(self, conflict_ids: list[int]) -> list[int]:
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).batch_resolve(conflict_ids)
+
+    def batch_revoke_conflicts(self, conflict_ids: list[int]) -> list[int]:
+        """撤销冲突并返回受影响的 data_id 列表（供调用方恢复 stage）。"""
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).batch_revoke(conflict_ids)
 
     # ── Comment ───────────────────────────────────────────────────────────────
 

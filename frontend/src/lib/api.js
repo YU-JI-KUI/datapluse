@@ -195,13 +195,13 @@ export const annotationApi = {
 
 export const conflictApi = {
   list: (params = {}, datasetId = getCurrentDatasetId()) => {
-    if (!datasetId) return _empty([])
+    if (!datasetId) return _empty({ list: [], pagination: { page: 1, page_size: 10, total: 0 } })
     return api.get('/conflicts', {
       params: { dataset_id: datasetId, ...params },
     })
   },
   listByDataId: (data_id) =>
-    api.get('/conflicts', { params: { data_id } }),
+    api.get('/conflicts/by-data', { params: { data_id } }),
 
   detect: (datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty()
@@ -210,6 +210,16 @@ export const conflictApi = {
 
   resolve: (conflictId, label, cot = null) =>
     api.patch(`/conflicts/${conflictId}/resolve`, { label, ...(cot ? { cot } : {}) }),
+
+  batchResolve: (conflictIds, label, cot = null) =>
+    api.post('/conflicts/batch-resolve', {
+      conflict_ids: conflictIds,
+      label,
+      ...(cot ? { cot } : {}),
+    }),
+
+  batchRevoke: (conflictIds) =>
+    api.post('/conflicts/batch-revoke', { conflict_ids: conflictIds }),
 
   selfCheck: (datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty()

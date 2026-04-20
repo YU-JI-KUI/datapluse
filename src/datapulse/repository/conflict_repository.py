@@ -124,3 +124,58 @@ class ConflictRepository:
             .filter(Conflict.data_id == data_id, Conflict.status == "open")
             .first()
         ) is not None
+
+    def batch_resolve(self, conflict_ids: list[int]) -> list[int]:
+        """批量关闭冲突（设为 resolved），返回实际更新的 conflict_id 列表。
+        调用方负责写 annotation_result + update_stage + 评论。"""
+        rows = (
+            self.session.query(Conflict)
+            .filter(Conflict.id.in_(conflict_ids), Conflict.status == "open")
+            .all()
+        )
+        for row in rows:
+            row.status = "resolved"
+        return [r.id for r in rows]
+
+    def batch_revoke(self, conflict_ids: list[int]) -> list[int]:
+        """批量撤销自检冲突（设为 revoked），返回对应的 data_id 列表。
+        调用方负责将 data item 恢复到 checked stage。"""
+        rows = (
+            self.session.query(Conflict)
+            .filter(Conflict.id.in_(conflict_ids), Conflict.status == "open")
+            .all()
+        )
+        data_ids = []
+        for row in rows:
+            row.status = "revoked"
+            data_ids.append(row.data_id)
+        return data_ids
+
+    def list_by_dataset_paged(
+        self,
+        dataset_id: int,
+        status: str | None = None,
+        conflict_type: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """分页查询某 dataset 下的冲突，返回 (records, total)。"""
+        q = (
+            self.session.query(Conflict, DataItem.content)
+            .join(DataItem, DataItem.id == Conflict.data_id)
+            .filter(DataItem.dataset_id == dataset_id)
+        )
+        if status:
+            q = q.filter(Conflict.status == status)
+        if conflict_type:
+            q = q.filter(Conflict.conflict_type == conflict_type)
+
+        total = q.count()
+        rows = (
+            q.order_by(Conflict.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        records = [_conflict_to_dict(c, data_content=content) for c, content in rows]
+        return records, total

@@ -293,8 +293,13 @@ async def run_quality_self_check(dataset_id: int, operator: str = "pipeline") ->
     topk      = int(sim_cfg.get("topk", 5))
 
     # 加载所有 checked 且有 final_label 的数据
-    checked_items = db.list_data_by_status(dataset_id, "checked", enrich=True)
-    labeled_checked = [i for i in checked_items if i.get("label") is not None]
+    # 排除 label_source == 'manual' 的条目：这类数据已经过人工冲突裁决，
+    # 裁决结果本身就是权威标签，不应再被纳入语义互检范围。
+    checked_items   = db.list_data_by_status(dataset_id, "checked", enrich=True)
+    labeled_checked = [
+        i for i in checked_items
+        if i.get("label") is not None and i.get("label_source") != "manual"
+    ]
 
     total_checked = len(labeled_checked)
     _log.info(
