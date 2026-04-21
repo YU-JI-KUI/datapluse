@@ -45,7 +45,9 @@ class Settings(BaseSettings):
     db_password: str
 
     # ── 认证 ────────────────────────────────────────────────────────────────────
-    secret_key: str = "datapulse"
+    # JWT 签名密钥，必须通过环境变量注入，禁止 hardcode。
+    # 生成：python -c "import secrets; print(secrets.token_hex(32))"
+    secret_key: str
 
     # ── NAS 存储 ──────────────────────────────────────────────────────────────
     # 所有 dataset 共用同一 NAS 根目录，向量文件、FAISS 索引均存于此。
