@@ -110,17 +110,19 @@ async def get_my_annotation_items(
     page:       int           = Query(1, ge=1),
     page_size:  int           = Query(50, ge=1, le=200),
     keyword:    str | None    = Query(None, description="文本关键词过滤"),
+    label:      str | None    = Query(None, description="标签过滤（仅 my_annotated 视图生效）"),
 ):
     """标注工作台统一接口：返回当前用户可操作的所有条目，含 my_annotation 字段。
 
     view=all          — 全部条目（待标注 + 已标注）
     view=unannotated  — 当前用户尚未标注的条目
-    view=my_annotated — 当前用户已标注的条目
+    view=my_annotated — 当前用户已标注的条目（按标注时间倒序）
+    label             — 按标注标签过滤，仅对 my_annotated 视图有效
     """
     db     = get_db()
     result = db.list_annotatable_for_user(
         dataset_id, user.username, view=view,
-        page=page, page_size=page_size, keyword=keyword,
+        page=page, page_size=page_size, keyword=keyword, label=label,
     )
     from datapulse.core.response import page_data
     return success(page_data(result["list"], page, page_size, result["total"]))

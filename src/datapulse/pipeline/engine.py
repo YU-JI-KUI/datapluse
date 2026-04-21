@@ -228,16 +228,41 @@ async def step_embed(dataset_id: int, operator: str = "pipeline") -> dict[str, A
               to_embed=len(to_embed), already_skipped=skipped)
 
     # 按 batch_size 批量编码，然后整批 UPSERT 到 PostgreSQL
-    embedded = skipped
+    embedded      = skipped
+    total_infer_s = 0.0
+    total_db_s    = 0.0
+    batch_count   = 0
+
     for i in range(0, len(to_embed), batch_size):
         batch  = to_embed[i : i + batch_size]
         texts  = [item["content"] for item in batch]
-        vecs   = embed_batch(texts, cfg)   # shape: (len(batch), dim)
 
-        # 收集本批 (item_id, vector) 对，一次 bulk UPSERT（约 1 次 DB round-trip）
-        pairs = [(int(item["id"]), vec) for item, vec in zip(batch, vecs)]
+        # ── 推理计时 ──────────────────────────────────────────────────────────
+        t_infer_start = time.time()
+        vecs          = embed_batch(texts, cfg)   # shape: (len(batch), dim)
+        t_infer       = time.time() - t_infer_start
+        total_infer_s += t_infer
+
+        # ── DB 写入计时 ───────────────────────────────────────────────────────
+        pairs      = [(int(item["id"]), vec) for item, vec in zip(batch, vecs)]
+        t_db_start = time.time()
         db.bulk_save_embeddings(dataset_id, pairs, created_by=operator)
-        embedded += len(batch)
+        t_db       = time.time() - t_db_start
+        total_db_s += t_db
+
+        embedded    += len(batch)
+        batch_count += 1
+
+        _log.debug(
+            "step=embed batch",
+            dataset_id=dataset_id,
+            batch_idx=batch_count,
+            batch_size=len(batch),
+            infer_ms=round(t_infer * 1000, 1),
+            db_ms=round(t_db * 1000, 1),
+            throughput_per_sec=round(len(batch) / (t_infer + t_db) if (t_infer + t_db) > 0 else 0, 1),
+            embedded_so_far=embedded,
+        )
 
         if embedded % _STATUS_UPDATE_INTERVAL < batch_size or embedded == total:
             _set_status(
@@ -247,10 +272,23 @@ async def step_embed(dataset_id: int, operator: str = "pipeline") -> dict[str, A
                 operator=operator,
             )
 
-    count   = rebuild_index(dataset_id)
+    t_index_start = time.time()
+    count         = rebuild_index(dataset_id)
+    t_index       = round(time.time() - t_index_start, 1)
+
     elapsed = round(time.time() - start_time, 1)
     result  = {"step": "embed", "embedded": embedded, "skipped": skipped, "index_size": count}
-    _log.info("step=embed done", dataset_id=dataset_id, elapsed_s=elapsed, **result)
+    _log.info(
+        "step=embed done",
+        dataset_id=dataset_id,
+        elapsed_s=elapsed,
+        infer_total_s=round(total_infer_s, 1),
+        db_write_total_s=round(total_db_s, 1),
+        index_rebuild_s=t_index,
+        avg_infer_ms_per_item=round(total_infer_s / max(embedded - skipped, 1) * 1000, 2),
+        avg_db_ms_per_item=round(total_db_s / max(embedded - skipped, 1) * 1000, 2),
+        **result,
+    )
     return result
 
 

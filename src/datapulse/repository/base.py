@@ -416,14 +416,16 @@ class DBManager:
         page: int = 1,
         page_size: int = 50,
         keyword: str | None = None,
+        label: str | None = None,
     ) -> dict:
         """标注工作台：返回 pre_annotated/annotated 条目，含当前用户的标注。
         view: all | unannotated | my_annotated
+        label: 按标注标签过滤，仅对 my_annotated 视图有效
         """
         from datapulse.repository.data_repository import DataRepository
         with self._session() as s:
             return DataRepository(s).list_annotatable_for_user(
-                dataset_id, username, view, page, page_size, keyword
+                dataset_id, username, view, page, page_size, keyword, label
             )
 
     def stats(self, dataset_id: int) -> dict:
@@ -479,10 +481,13 @@ class DBManager:
             return AnnotationRepository(s).get_annotation_history(data_id, username)
 
     def create_pre_annotation(self, data_id: int, model_name: str, label: str,
-                               score: float | None = None, created_by: str = "") -> dict:
+                               score: float | None = None, cot: str | None = None,
+                               created_by: str = "") -> dict:
         from datapulse.repository.annotation_repository import AnnotationRepository
         with self._session() as s:
-            return AnnotationRepository(s).create_pre_annotation(data_id, model_name, label, score, created_by)
+            return AnnotationRepository(s).create_pre_annotation(
+                data_id, model_name, label, score=score, cot=cot, created_by=created_by
+            )
 
     def bulk_create_pre_annotations(self, records: list[dict]) -> int:
         """批量写入预标注（pipeline 专用）"""
@@ -523,13 +528,15 @@ class DBManager:
         dataset_id: int,
         status: str | None = None,
         conflict_type: str | None = None,
+        keyword: str | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> tuple[list[dict], int]:
         from datapulse.repository.conflict_repository import ConflictRepository
         with self._session() as s:
             return ConflictRepository(s).list_by_dataset_paged(
-                dataset_id, status, conflict_type, page, page_size
+                dataset_id, status=status, conflict_type=conflict_type,
+                keyword=keyword, page=page, page_size=page_size,
             )
 
     def get_conflict_by_id(self, conflict_id: int) -> dict | None:

@@ -3,11 +3,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   AlertTriangle, Play, RefreshCw, CheckCircle, Loader2,
-  ShieldAlert, GitMerge, Users, Check, SearchCheck, Undo2,
+  ShieldAlert, GitMerge, Users, Check, SearchCheck, Undo2, Search, X,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import {
@@ -196,6 +197,8 @@ export default function ConflictDetection() {
   // ── 过滤 + 分页 ────────────────────────────────────────────────────────────
   const [statusFilter, setStatusFilter]   = useState('open')
   const [typeFilter, setTypeFilter]       = useState('all')
+  const [keyword, setKeyword]             = useState('')
+  const [keywordInput, setKeywordInput]   = useState('')
   const [page, setPage]                   = useState(1)
   const [pageSize, setPageSize]           = useState(10)
 
@@ -214,10 +217,11 @@ export default function ConflictDetection() {
   })
 
   const { data: conflictRes, isLoading, refetch } = useQuery({
-    queryKey: ['conflicts', datasetId, statusFilter, typeFilter, page, pageSize],
+    queryKey: ['conflicts', datasetId, statusFilter, typeFilter, keyword, page, pageSize],
     queryFn:  () => conflictApi.list({
       status:        statusFilter === 'all' ? undefined : statusFilter,
       conflict_type: typeFilter   === 'all' ? undefined : typeFilter,
+      keyword:       keyword || undefined,
       page,
       page_size: pageSize,
     }),
@@ -264,6 +268,20 @@ export default function ConflictDetection() {
   function clearSelection() { setSelected(new Set()) }
 
   function resetPage() { setPage(1); clearSelection() }
+
+  function handleSearch(e) {
+    e.preventDefault()
+    setKeyword(keywordInput)
+    setPage(1)
+    clearSelection()
+  }
+
+  function clearSearch() {
+    setKeywordInput('')
+    setKeyword('')
+    setPage(1)
+    clearSelection()
+  }
 
   // ── 操作函数 ───────────────────────────────────────────────────────────────
   async function handleDetect() {
@@ -432,6 +450,31 @@ export default function ConflictDetection() {
               </div>
             )}
 
+            {/* 搜索框 */}
+            <form onSubmit={handleSearch} className="flex items-center gap-1">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  value={keywordInput}
+                  onChange={e => setKeywordInput(e.target.value)}
+                  placeholder="搜索文本内容..."
+                  className="h-8 pl-8 pr-7 w-52 text-sm"
+                />
+                {keywordInput && (
+                  <button
+                    type="button"
+                    onClick={clearSearch}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <Button type="submit" size="sm" variant="outline" className="h-8 px-2.5">
+                搜索
+              </Button>
+            </form>
+
             {/* 过滤器 */}
             <Select value={typeFilter} onValueChange={v => { setTypeFilter(v); resetPage() }}>
               <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -450,6 +493,16 @@ export default function ConflictDetection() {
                 <SelectItem value="revoked">已撤销</SelectItem>
               </SelectContent>
             </Select>
+
+            {/* 当前搜索词提示 */}
+            {keyword && (
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                搜索：<span className="font-medium text-foreground">"{keyword}"</span>
+                <button onClick={clearSearch} className="ml-1 text-muted-foreground hover:text-foreground">
+                  <X className="w-3 h-3 inline" />
+                </button>
+              </span>
+            )}
           </div>
         </CardHeader>
         <CardContent className="p-0">

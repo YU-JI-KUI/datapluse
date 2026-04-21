@@ -33,9 +33,9 @@ class UserService:
         """Create a new user."""
         return self.repo.create(username, password, email, role_names)
 
-    def update(self, user_id: int, data: dict[str, Any]) -> dict[str, Any] | None:
+    def update(self, user_id: int, data: dict[str, Any], updated_by: str = "system") -> dict[str, Any] | None:
         """Update a user."""
-        return self.repo.update(user_id, data)
+        return self.repo.update(user_id, data, updated_by=updated_by)
 
     def update_last_login(self, username: str) -> None:
         """Update last login timestamp."""

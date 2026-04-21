@@ -52,6 +52,7 @@ async def list_conflicts(
     dataset_id:    int        = Query(...,  description="数据集 ID"),
     status:        str | None = Query(None, description="open / resolved / revoked"),
     conflict_type: str | None = Query(None, description="label_conflict / semantic_conflict"),
+    keyword:       str | None = Query(None, description="文本内容关键词过滤（模糊匹配）"),
     page:          int        = Query(1,    ge=1),
     page_size:     int        = Query(10,   ge=1, le=100),
 ):
@@ -61,6 +62,7 @@ async def list_conflicts(
         dataset_id,
         status=status,
         conflict_type=conflict_type,
+        keyword=keyword,
         page=page,
         page_size=page_size,
     )

@@ -200,6 +200,7 @@ export default function Annotation() {
   const [view, setView]               = useState('unannotated')
   const [keyword, setKeyword]         = useState('')
   const [keywordInput, setKeywordInput] = useState('')
+  const [labelFilter, setLabelFilter] = useState('all')
   const [page, setPage]               = useState(1)
   const [pageSize, setPageSize]       = useState(10)
 
@@ -216,19 +217,26 @@ export default function Annotation() {
     return () => window.removeEventListener('datasetChanged', handler)
   }, [])
 
-  // 切换 view 时回到第一页，清空当前选中
+  // 切换 view 时回到第一页，清空当前选中，重置标签过滤
   const handleViewChange = (v) => {
     setView(v)
     setPage(1)
+    setLabelFilter('all')
     setCurrentItem(null)
     setCot('')
   }
 
   // ── 主列表查询 ────────────────────────────────────────────────────────────
-  const listKey = ['annotation-items', datasetId, view, page, pageSize, keyword]
+  const listKey = ['annotation-items', datasetId, view, page, pageSize, keyword, labelFilter]
   const { data: itemsData, isLoading: listLoading, refetch: refetchList } = useQuery({
     queryKey: listKey,
-    queryFn: () => annotationApi.myItems({ view, page, page_size: pageSize, keyword: keyword || undefined }),
+    queryFn: () => annotationApi.myItems({
+      view,
+      page,
+      page_size: pageSize,
+      keyword: keyword || undefined,
+      label: (view === 'my_annotated' && labelFilter !== 'all') ? labelFilter : undefined,
+    }),
     enabled: !!datasetId,
     refetchInterval: 20000,
   })
@@ -435,6 +443,26 @@ export default function Annotation() {
               </Button>
             </form>
           </div>
+
+          {/* 我的标注：按标签过滤 */}
+          {view === 'my_annotated' && (
+            <div className="px-3 py-2 border-b">
+              <Select
+                value={labelFilter}
+                onValueChange={v => { setLabelFilter(v); setPage(1); setCurrentItem(null) }}
+              >
+                <SelectTrigger className="h-7 text-xs">
+                  <SelectValue placeholder="按标签筛选" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">全部标签</SelectItem>
+                  {labels.map(l => (
+                    <SelectItem key={l} value={l} className="text-xs">{l}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* 数据列表 */}
           {listLoading ? (

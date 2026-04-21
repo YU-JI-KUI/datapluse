@@ -650,15 +650,20 @@ class DataRepository:
         page: int = 1,
         page_size: int = 50,
         keyword: str | None = None,
+        label: str | None = None,
     ) -> dict[str, Any]:
         """标注工作台统一查询：返回 pre_annotated / annotated 的条目，含当前用户的标注。
 
         view:
           "all"          — 全部条目（含已标注和未标注）
           "unannotated"  — 当前用户尚未标注的条目
-          "my_annotated" — 当前用户已标注的条目
+          "my_annotated" — 当前用户已标注的条目（按自己的标注时间倒序）
         每条记录附加 my_annotation 字段（当前用户的有效标注，或 None）。
+        label: 仅对 my_annotated 生效，按用户自己的标注标签过滤。
         """
+        from sqlalchemy import and_
+        from sqlalchemy.orm import aliased
+
         q = self.session.query(DataItem).filter(
             DataItem.dataset_id == dataset_id,
             DataItem.status.in_(["pre_annotated", "annotated"]),
@@ -666,7 +671,7 @@ class DataRepository:
         if keyword:
             q = q.filter(DataItem.content.ilike(f"%{keyword}%"))
 
-        if view in ("unannotated", "my_annotated"):
+        if view == "unannotated":
             user_ann_subq = (
                 self.session.query(Annotation.data_id)
                 .filter(
@@ -675,22 +680,45 @@ class DataRepository:
                 )
                 .subquery()
             )
-            if view == "unannotated":
-                q = q.filter(
-                    DataItem.id.notin_(self.session.query(user_ann_subq.c.data_id))
-                )
-            else:  # my_annotated
-                q = q.filter(
-                    DataItem.id.in_(self.session.query(user_ann_subq.c.data_id))
-                )
+            q = q.filter(DataItem.id.notin_(self.session.query(user_ann_subq.c.data_id)))
+            total = q.count()
+            rows  = (
+                q.order_by(DataItem.created_at.asc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
 
-        total = q.count()
-        rows = (
-            q.order_by(DataItem.created_at.asc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-            .all()
-        )
+        elif view == "my_annotated":
+            # JOIN Annotation 以便按标注时间排序和按标签过滤
+            ann_alias = aliased(Annotation)
+            q = q.join(
+                ann_alias,
+                and_(
+                    ann_alias.data_id    == DataItem.id,
+                    ann_alias.username   == username,
+                    ann_alias.is_active.is_(True),
+                ),
+            )
+            if label:
+                q = q.filter(ann_alias.label == label)
+            total = q.count()
+            rows  = (
+                q.order_by(ann_alias.created_at.desc())   # 最近标注的排在最前面
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+
+        else:  # "all"
+            total = q.count()
+            rows  = (
+                q.order_by(DataItem.created_at.asc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+
         items = []
         for row in rows:
             state = self.session.get(DataState, row.id)

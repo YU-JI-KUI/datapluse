@@ -156,6 +156,7 @@ class ConflictRepository:
         dataset_id: int,
         status: str | None = None,
         conflict_type: str | None = None,
+        keyword: str | None = None,
         page: int = 1,
         page_size: int = 10,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -169,6 +170,8 @@ class ConflictRepository:
             q = q.filter(Conflict.status == status)
         if conflict_type:
             q = q.filter(Conflict.conflict_type == conflict_type)
+        if keyword:
+            q = q.filter(DataItem.content.ilike(f"%{keyword}%"))
 
         total = q.count()
         rows = (

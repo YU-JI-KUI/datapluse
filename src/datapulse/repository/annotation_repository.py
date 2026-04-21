@@ -2,7 +2,7 @@
 
 写入流程：
   create_annotation / revoke_annotation
-      → _recompute_result()      ← 自动维护 t_annotation_result（多数投票）
+      → _recompute_result()      ← 自动维护 t_annotation_result（取最新标注 label）
 
 冲突裁决流程：
   set_manual_result()            ← 直接写入 t_annotation_result（来源 manual）
@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -69,24 +68,22 @@ def _pre_to_dict(p: PreAnnotation) -> dict[str, Any]:
 
 
 def _recompute_result(session: Session, data_id: int, updated_by: str = "") -> None:
-    """annotation insert / revoke 后触发聚合：
-    • 统计有效标注，多数投票得出 final_label
-    • 仅当来源为 auto 时覆盖最终标签；若已是 manual（冲突裁决），只更新人数
+    """annotation insert / revoke 后同步更新 t_annotation_result：
+    • 只要有有效标注，就取 created_at 最新的那条标注的 label 作为 final_label
+    • 无论之前 label_source 是 auto 还是 manual，都强制覆盖为当前最新状态
+    • 这样 DataExplorer 始终展示最后一次标注更新的 label，而不是过期的人工裁决结果
     """
+    # 取所有有效标注，按提交时间降序排列——第一条即为最新
     ann_rows = (
         session.query(Annotation)
         .filter(Annotation.data_id == data_id, Annotation.is_active.is_(True))
+        .order_by(Annotation.created_at.desc())
         .all()
     )
     count = len(ann_rows)
 
-    if count == 0:
-        final_label = None
-    elif count == 1:
-        final_label = ann_rows[0].label
-    else:
-        label_counts = Counter(a.label for a in ann_rows)
-        final_label = label_counts.most_common(1)[0][0]
+    # final_label = 最近一次提交/更新的标注 label；无有效标注时置 None
+    final_label = ann_rows[0].label if ann_rows else None
 
     item = session.get(DataItem, data_id)
     dataset_id = item.dataset_id if item else 0
@@ -110,12 +107,12 @@ def _recompute_result(session: Session, data_id: int, updated_by: str = "") -> N
         )
         session.add(result)
     else:
-        # 若已被手动裁决（manual），不覆盖最终标签，仅更新人数
+        # 任何标注变动都强制更新 final_label，不再因 label_source='manual' 而跳过
+        result.final_label     = final_label
+        result.label_source    = "auto"
         result.annotator_count = count
-        result.updated_at = ts
-        result.updated_by = updated_by
-        if result.label_source == "auto":
-            result.final_label = final_label
+        result.updated_at      = ts
+        result.updated_by      = updated_by
 
 
 class AnnotationRepository:
