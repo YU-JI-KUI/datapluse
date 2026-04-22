@@ -137,6 +137,35 @@ class ConflictRepository:
             row.status = "resolved"
         return [r.id for r in rows]
 
+    def batch_clear(self, data_ids: list[int]) -> int:
+        """批量删除一批 data_id 的 open 冲突（1 次 DELETE IN），返回删除行数。
+        用于冲突检测重跑前的清理，替代逐条 clear_conflicts。
+        """
+        if not data_ids:
+            return 0
+        return (
+            self.session.query(Conflict)
+            .filter(Conflict.data_id.in_(data_ids), Conflict.status == "open")
+            .delete(synchronize_session=False)
+        )
+
+    def batch_create(self, records: list[dict]) -> None:
+        """批量插入冲突记录（1 次 INSERT），调用方须先执行 batch_clear。"""
+        if not records:
+            return
+        ts = _now()
+        self.session.bulk_insert_mappings(Conflict, [
+            {
+                "data_id":       r["data_id"],
+                "conflict_type": r["conflict_type"],
+                "detail":        r["detail"],
+                "status":        "open",
+                "created_at":    ts,
+                "created_by":    r.get("created_by", ""),
+            }
+            for r in records
+        ])
+
     def batch_revoke(self, conflict_ids: list[int]) -> list[int]:
         """批量撤销自检冲突（设为 revoked），返回对应的 data_id 列表。
         调用方负责将 data item 恢复到 checked stage。"""

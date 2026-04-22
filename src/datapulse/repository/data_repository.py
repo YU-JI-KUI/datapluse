@@ -574,6 +574,50 @@ class DataRepository:
             synchronize_session=False,
         )
 
+    def enrich_for_conflict(self, items: list[dict[str, Any]]) -> None:
+        """为冲突检测批量填充 annotations 和 label 字段（就地修改）。
+
+        仅需 2 次 DB 查询（IN 查询），彻底消除逐条 enrich 的 N×4 查询开销。
+        冲突检测只需要：
+          - annotations[]：用于 label_conflict（多人标注分歧）
+          - label：final_label，用于 semantic_conflict（语义相似但标签不同）
+          - label_source：用于自检排除 manual 裁决数据
+        不需要：PreAnnotation、Conflict、annotator、my_annotation 等字段。
+        """
+        if not items:
+            return
+        ids = [item["id"] for item in items]
+
+        # 批量加载有效标注（annotations 字段）
+        ann_rows = (
+            self.session.query(Annotation)
+            .filter(Annotation.data_id.in_(ids), Annotation.is_active.is_(True))
+            .all()
+        )
+        anns_map: dict[int, list[dict[str, Any]]] = {}
+        for a in ann_rows:
+            anns_map.setdefault(a.data_id, []).append({
+                "id":       a.id,
+                "username": a.username,
+                "label":    a.label,
+                "is_active": True,
+            })
+
+        # 批量加载最终标注结果（label / label_source 字段）
+        result_rows = (
+            self.session.query(AnnotationResult)
+            .filter(AnnotationResult.data_id.in_(ids))
+            .all()
+        )
+        result_map = {r.data_id: r for r in result_rows}
+
+        for item in items:
+            data_id    = item["id"]
+            ann_result = result_map.get(data_id)
+            item["annotations"] = anns_map.get(data_id, [])
+            item["label"]       = ann_result.final_label  if ann_result else None
+            item["label_source"] = ann_result.label_source if ann_result else None
+
     # ── Read ─────────────────────────────────────────────────────────────────
 
     def get(self, item_id: int, enrich: bool = True) -> dict[str, Any] | None:

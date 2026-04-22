@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 import structlog
 
@@ -201,7 +201,7 @@ def detect_semantic_conflicts(
     """
     sim_cfg   = cfg.get("similarity", {})
     threshold = float(sim_cfg.get("threshold_high", 0.9))
-    topk      = int(sim_cfg.get("topk", 5))
+    topk      = int(sim_cfg.get("topk", 3))
 
     # 候选：有最终 label 的 annotated 数据
     labeled_annotated = [i for i in annotated_items if i.get("label") is not None]
@@ -251,18 +251,44 @@ def detect_semantic_conflicts(
 # ── Pipeline 步骤：check ───────────────────────────────────────────────────────
 
 
-async def run_conflict_detection(dataset_id: int, operator: str = "pipeline") -> dict[str, Any]:
+async def run_conflict_detection(
+    dataset_id: int,
+    operator: str = "pipeline",
+    on_progress: Callable[[int, str], None] | None = None,
+) -> dict[str, Any]:
+    """冲突检测主流程。
+
+    on_progress(pct, msg) 在各阶段完成后回调，供调用方更新进度条。
+
+    性能设计：
+      - enrich=False 加载原始数据（1 次 SELECT）
+      - enrich_for_conflict 批量填充 annotations + label（2 次 IN 查询）
+      - 写回阶段全部批量操作（batch_clear + batch_create + bulk_update_stage × 2）
+      总 DB 查询数 = O(1)，不再随数据量线性增长。
+    """
+    def _progress(pct: int, msg: str = "") -> None:
+        if on_progress:
+            on_progress(pct, msg)
+
     db  = get_db()
     cfg = db.get_dataset_config(dataset_id)
 
-    # ── 获取候选数据（annotated 待审查）和参照数据（checked 已通过）──────────────
-    annotated_items = db.list_data_by_status(dataset_id, "annotated", enrich=True)
-    checked_items   = db.list_data_by_status(dataset_id, "checked",   enrich=True)
+    # ── Step 1: 加载原始数据（不 enrich，避免 N×4 查询）────────────────────────
+    _progress(10, "加载数据")
+    annotated_items = db.list_data_by_status(dataset_id, "annotated", enrich=False)
+    checked_items   = db.list_data_by_status(dataset_id, "checked",   enrich=False)
 
     if not annotated_items:
+        _progress(100, "无待检测数据")
         return {"label_conflicts": 0, "semantic_conflicts": 0, "clean": 0, "total": 0}
 
-    # ── label_conflict：需满足 min_annotation_count（需要多人标注才能判断分歧）──
+    # ── Step 2: 批量填充冲突检测所需字段（2+2 次 IN 查询，替代 N×4 全量 enrich）──
+    _progress(20, "加载标注数据")
+    db.enrich_for_conflict(annotated_items)
+    db.enrich_for_conflict(checked_items)
+
+    # ── Step 3: 标注冲突检测（纯内存，极快）────────────────────────────────────
+    _progress(30, "检测标注冲突")
     min_count = cfg.get("pipeline", {}).get("min_annotation_count", 1)
     eligible_ids: set[int] = {
         item["id"]
@@ -271,11 +297,11 @@ async def run_conflict_detection(dataset_id: int, operator: str = "pipeline") ->
     }
     eligible_items = [item for item in annotated_items if item["id"] in eligible_ids]
     skipped_count  = len(annotated_items) - len(eligible_items)
+    label_conflict_map = detect_label_conflicts(eligible_items)
 
-    # ── semantic_conflict：只需有最终 label，不要求 min_annotation_count 个标注员 ──
+    # ── Step 4: 语义冲突检测（FAISS，内存操作）──────────────────────────────────
+    _progress(45, "语义相似度搜索")
     semantic_candidates = [item for item in annotated_items if item.get("label") is not None]
-
-    label_conflict_map    = detect_label_conflicts(eligible_items)
     semantic_conflict_map = detect_semantic_conflicts(
         semantic_candidates, checked_items, dataset_id, cfg
     )
@@ -289,39 +315,52 @@ async def run_conflict_detection(dataset_id: int, operator: str = "pipeline") ->
         semantic_conflict_entries=len(semantic_conflict_map),
     )
 
-    # ── 处理 annotated 数据 ──────────────────────────────────────────────────────
-    clean_count = 0
+    # ── Step 5: 批量写回（共 4~5 次 DB 操作，替代 N×3 逐条写入）────────────────
+    _progress(70, "写入冲突记录")
+
+    # 一次 DELETE IN 清除全部旧冲突
+    all_annotated_ids = [item["id"] for item in annotated_items]
+    db.batch_clear_conflicts(all_annotated_ids)
+
+    conflict_records:   list[dict[str, Any]] = []
+    conflict_item_ids:  list[int]            = []
+    clean_ids:          list[int]            = []
+
     for item in annotated_items:
         data_id = item["id"]
-        db.clear_conflicts(data_id)
-
         if data_id in label_conflict_map:
-            db.create_conflict(
-                data_id, "label_conflict",
-                label_conflict_map[data_id],
-                created_by=operator,
-            )
-            db.update_stage(data_id, "annotated", updated_by=operator)
+            conflict_records.append({
+                "data_id":       data_id,
+                "conflict_type": "label_conflict",
+                "detail":        label_conflict_map[data_id],
+                "created_by":    operator,
+            })
+            conflict_item_ids.append(data_id)
         elif data_id in semantic_conflict_map:
-            db.create_conflict(
-                data_id, "semantic_conflict",
-                semantic_conflict_map[data_id],
-                created_by=operator,
-            )
-            db.update_stage(data_id, "annotated", updated_by=operator)
+            conflict_records.append({
+                "data_id":       data_id,
+                "conflict_type": "semantic_conflict",
+                "detail":        semantic_conflict_map[data_id],
+                "created_by":    operator,
+            })
+            conflict_item_ids.append(data_id)
         elif data_id in eligible_ids:
-            # 满足 min_count 且无冲突 → 推进到 checked
-            db.update_stage(data_id, "checked", updated_by=operator)
-            clean_count += 1
+            clean_ids.append(data_id)
         # else: 未达到 min_count，保持 annotated，等待更多标注员参与
 
-    # checked 数据不再被回退：semantic_conflict_map 已只包含 annotated 侧，
-    # checked 侧保持 checked stage 不变，无需额外处理。
+    # 批量写入（各 1~2 次 DB 操作）
+    db.batch_create_conflicts(conflict_records)
+    if conflict_item_ids:
+        db.bulk_update_stage(conflict_item_ids, "annotated", updated_by=operator)
+    if clean_ids:
+        db.bulk_update_stage(clean_ids, "checked", updated_by=operator)
+
+    _progress(95, "完成")
 
     return {
         "label_conflicts":    len(label_conflict_map),
         "semantic_conflicts": len(semantic_conflict_map),
-        "clean":              clean_count,
+        "clean":              len(clean_ids),
         "total":              len(annotated_items),
         "skipped_low_count":  skipped_count,
     }
@@ -357,7 +396,7 @@ async def run_quality_self_check(dataset_id: int, operator: str = "pipeline") ->
 
     sim_cfg   = cfg.get("similarity", {})
     threshold = float(sim_cfg.get("threshold_high", 0.9))
-    topk      = int(sim_cfg.get("topk", 5))
+    topk      = int(sim_cfg.get("topk", 3))
 
     # 加载所有 checked 且有 final_label 的数据
     # 排除 label_source == 'manual' 的条目：这类数据已经过人工冲突裁决，

@@ -294,9 +294,16 @@ async def step_embed(dataset_id: int, operator: str = "pipeline") -> dict[str, A
 
 async def step_check(dataset_id: int, operator: str = "pipeline") -> dict[str, Any]:
     """冲突检测 annotated → checked（干净）或保持 annotated（有冲突）"""
-    _set_status(dataset_id, "running", "check", 10,
-                detail={"pct": "10%", "total": 0}, operator=operator)
-    result = await run_conflict_detection(dataset_id, operator=operator)
+
+    def _progress(pct: int, msg: str = "") -> None:
+        _set_status(
+            dataset_id, "running", "check", pct,
+            detail={"pct": f"{pct}%", "msg": msg},
+            operator=operator,
+        )
+
+    _progress(5, "初始化")
+    result = await run_conflict_detection(dataset_id, operator=operator, on_progress=_progress)
     total  = result.get("total", 0)
     _set_status(
         dataset_id, "running", "check", 100,

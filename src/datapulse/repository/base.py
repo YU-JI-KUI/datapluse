@@ -560,6 +560,24 @@ class DBManager:
         with self._session() as s:
             return ConflictRepository(s).batch_revoke(conflict_ids)
 
+    def batch_clear_conflicts(self, data_ids: list[int]) -> int:
+        """批量删除一批 data_id 的 open 冲突（1 次 DELETE IN）。"""
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).batch_clear(data_ids)
+
+    def batch_create_conflicts(self, records: list[dict]) -> None:
+        """批量插入冲突记录（1 次 INSERT）。"""
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            ConflictRepository(s).batch_create(records)
+
+    def enrich_for_conflict(self, items: list[dict]) -> None:
+        """批量填充 annotations + label 字段，供冲突检测使用（2 次查询，不做完整 enrich）。"""
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            DataRepository(s).enrich_for_conflict(items)
+
     # ── Comment ───────────────────────────────────────────────────────────────
 
     def create_comment(self, data_id: int, username: str, comment: str) -> dict:
