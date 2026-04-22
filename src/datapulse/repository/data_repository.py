@@ -27,6 +27,17 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _fetch_state_map(session: Session, ids: list[int]) -> dict[int, DataState]:
+    """一次 IN 查询批量拉取 DataState，消除 N+1。
+    DataItem.status 与 DataState.stage 始终同步（update_stage 双写），
+    两者等价——此函数仅在需要完整 DataState 对象时使用。
+    """
+    if not ids:
+        return {}
+    rows = session.query(DataState).filter(DataState.data_id.in_(ids)).all()
+    return {s.data_id: s for s in rows}
+
+
 def _item_to_dict(item: DataItem, state: DataState | None = None) -> dict[str, Any]:
     stage = state.stage if state else item.status
     return {
@@ -606,10 +617,10 @@ class DataRepository:
             .limit(page_size)
             .all()
         )
+        state_map = _fetch_state_map(self.session, [r.id for r in rows])
         items = []
         for row in rows:
-            state = self.session.get(DataState, row.id)
-            base = _item_to_dict(row, state)
+            base = _item_to_dict(row, state_map.get(row.id))
             items.append(_enrich(self.session, base) if enrich else base)
         return {"total": total, "page": page, "page_size": page_size, "list": items}
 
@@ -663,10 +674,10 @@ class DataRepository:
             .limit(page_size)
             .all()
         )
+        state_map = _fetch_state_map(self.session, [r.id for r in rows])
         items = []
         for row in rows:
-            state = self.session.get(DataState, row.id)
-            base = _item_to_dict(row, state)
+            base = _item_to_dict(row, state_map.get(row.id))
             items.append(_enrich(self.session, base) if enrich else base)
         return {"total": total, "page": page, "page_size": page_size, "list": items}
 
@@ -747,29 +758,36 @@ class DataRepository:
                 .all()
             )
 
+        state_map = _fetch_state_map(self.session, [r.id for r in rows])
         items = []
         for row in rows:
-            state = self.session.get(DataState, row.id)
-            base  = _item_to_dict(row, state)
-            enriched = _enrich(self.session, base, my_username=username)
-            items.append(enriched)
+            base = _item_to_dict(row, state_map.get(row.id))
+            items.append(_enrich(self.session, base, my_username=username))
         return {"total": total, "page": page, "page_size": page_size, "list": items}
 
     def list_by_status(
         self, dataset_id: int, stage: str, enrich: bool = False
     ) -> list[dict[str, Any]]:
-        """按阶段批量查询（pipeline 内部使用，默认不 enrich 以提升性能）"""
+        """按阶段批量查询（pipeline 内部使用，默认不 enrich 以提升性能）。
+
+        DataItem.status 与 DataState.stage 始终双写保持同步，
+        _item_to_dict 传 None 时自动回退到 item.status，无需逐行查 DataState。
+        """
         rows = (
             self.session.query(DataItem)
             .filter(DataItem.dataset_id == dataset_id, DataItem.status == stage)
             .all()
         )
-        result = []
-        for row in rows:
-            state = self.session.get(DataState, row.id)
-            base = _item_to_dict(row, state)
-            result.append(_enrich(self.session, base) if enrich else base)
-        return result
+        if not enrich:
+            # 高性能路径：仅 1 次 DB 查询，100k 行也不会 N+1
+            return [_item_to_dict(row) for row in rows]
+
+        # enrich=True 时仍需批量拉 DataState（_item_to_dict 需要精确 stage 字段）
+        state_map = _fetch_state_map(self.session, [r.id for r in rows])
+        return [
+            _enrich(self.session, _item_to_dict(row, state_map.get(row.id)))
+            for row in rows
+        ]
 
     def stats(self, dataset_id: int) -> dict[str, int]:
         rows = (
