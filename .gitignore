@@ -28,6 +28,7 @@ frontend/node_modules/
 frontend/.vite/
 # Vite 开发服务器内部缓存，非配置文件
 frontend/vite.config.js.timestamp*.mjs
+frontend/package-lock.json
 
 # ── 编辑器 / 系统 ─────────────────────────────────────────────────────────────
 .DS_Store
