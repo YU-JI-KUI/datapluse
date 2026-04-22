@@ -57,6 +57,120 @@ def detect_label_conflicts(items: list[dict[str, Any]]) -> dict[int, dict[str, A
     return conflicts
 
 
+# ── 语义冲突内部辅助函数 ────────────────────────────────────────────────────────
+
+
+def _find_conflicting_neighbor(
+    item_id: int,
+    item_label: str,
+    neighbor_id: int,
+    sim: float,
+    threshold: float,
+    id_to_item: dict[int, dict[str, Any]],
+    conflict_pairs: set[tuple[int, int]],
+) -> tuple[tuple[int, int], dict[str, Any]] | None:
+    """返回 (pair, neighbor)，若该邻居构成新的语义冲突；否则返回 None。"""
+    if neighbor_id == item_id or sim < threshold:
+        return None
+    neighbor = id_to_item.get(neighbor_id)
+    if neighbor is None or neighbor.get("label") == item_label:
+        return None
+    pair = (min(item_id, neighbor_id), max(item_id, neighbor_id))
+    if pair in conflict_pairs:
+        return None
+    return pair, neighbor
+
+
+def _process_semantic_candidate(
+    item: dict[str, Any],
+    vec_map: dict[int, Any],
+    index: Any,
+    topk: int,
+    threshold: float,
+    id_to_item: dict[int, dict[str, Any]],
+    conflict_pairs: set[tuple[int, int]],
+    conflicts: dict[int, dict[str, Any]],
+    dataset_id: int,
+) -> None:
+    """处理单条候选数据，就地更新 conflict_pairs 和 conflicts。"""
+    item_id    = int(item["id"])
+    item_label = item["label"]
+    vec = vec_map.get(item_id)
+    if vec is None:
+        _log.debug("no precomputed vector, skipping", dataset_id=dataset_id, item_id=item_id)
+        return
+    for neighbor_id, sim in index.search(vec, topk=topk + 1):
+        result = _find_conflicting_neighbor(
+            item_id, item_label, neighbor_id, sim, threshold, id_to_item, conflict_pairs
+        )
+        if result is None:
+            continue
+        pair, neighbor = result
+        conflict_pairs.add(pair)
+        _log.info(
+            "semantic conflict found",
+            dataset_id=dataset_id,
+            item_a=item_id, label_a=item_label,
+            item_b=neighbor_id, label_b=neighbor.get("label"),
+            similarity=round(sim, 4),
+        )
+        existing = conflicts.get(item_id)
+        if existing is None or round(sim, 4) > existing.get("similarity", 0):
+            conflicts[item_id] = {
+                "similarity":     round(sim, 4),
+                "threshold":      threshold,
+                "paired_id":      neighbor_id,
+                "paired_content": neighbor.get("content", ""),
+                "paired_label":   neighbor.get("label"),
+                "self_label":     item_label,
+            }
+
+
+def _process_self_check_candidate(
+    item: dict[str, Any],
+    vec_map: dict[int, Any],
+    index: Any,
+    topk: int,
+    threshold: float,
+    checked_id_to_item: dict[int, dict[str, Any]],
+    conflict_pairs: set[tuple[int, int]],
+    conflict_map: dict[int, dict[str, Any]],
+    dataset_id: int,
+) -> None:
+    """处理单条自检数据，双向写入 conflict_map。"""
+    item_id    = int(item["id"])
+    item_label = item["label"]
+    vec = vec_map.get(item_id)
+    if vec is None:
+        _log.debug("no precomputed vector, skipping in self-check", item_id=item_id)
+        return
+    for neighbor_id, sim in index.search(vec, topk=topk + 1):
+        result = _find_conflicting_neighbor(
+            item_id, item_label, neighbor_id, sim, threshold, checked_id_to_item, conflict_pairs
+        )
+        if result is None:
+            continue
+        pair, neighbor = result
+        conflict_pairs.add(pair)
+        _log.info(
+            "self-check conflict found",
+            dataset_id=dataset_id,
+            item_a=item_id, label_a=item_label,
+            item_b=neighbor_id, label_b=neighbor.get("label"),
+            similarity=round(sim, 4),
+        )
+        for self_item, other_item in [(item, neighbor), (neighbor, item)]:
+            conflict_map[int(self_item["id"])] = {
+                "similarity":     round(sim, 4),
+                "threshold":      threshold,
+                "paired_id":      int(other_item["id"]),
+                "paired_content": other_item.get("content", ""),
+                "paired_label":   other_item.get("label"),
+                "self_label":     self_item.get("label"),
+                "check_type":     "quality_self_check",
+            }
+
+
 # ── 语义冲突检测 ───────────────────────────────────────────────────────────────
 
 
@@ -119,64 +233,17 @@ def detect_semantic_conflicts(
     )
 
     # 一次 DB 查询批量加载所有候选向量，消除 N 次逐条 DB 查询
-    candidate_ids  = [int(i["id"]) for i in labeled_annotated]
-    vec_map        = get_emb().load_batch(dataset_id, candidate_ids)
+    candidate_ids = [int(i["id"]) for i in labeled_annotated]
+    vec_map       = get_emb().load_batch(dataset_id, candidate_ids)
 
     conflict_pairs: set[tuple[int, int]] = set()
     conflicts: dict[int, dict[str, Any]] = {}
 
     for item in labeled_annotated:
-        item_id    = int(item["id"])
-        item_label = item["label"]
-
-        vec = vec_map.get(item_id)
-        if vec is None:
-            _log.debug("no precomputed vector, skipping", dataset_id=dataset_id, item_id=item_id)
-            continue
-
-        # FAISS search，返回 [(data_id: int, similarity: float), ...]
-        neighbors = index.search(vec, topk=topk + 1)
-
-        for neighbor_id, sim in neighbors:
-            # 排除自身 & 低于阈值
-            if neighbor_id == item_id or sim < threshold:
-                continue
-
-            # 参照池包含 annotated + checked，checked 邻居现在可以被找到
-            neighbor = id_to_item.get(neighbor_id)
-            if neighbor is None:
-                # 向量索引有该 ID 但参照池没有（向量索引比 DB 新/旧，正常现象），跳过
-                continue
-            if neighbor.get("label") == item_label:
-                # 标签相同，不冲突
-                continue
-
-            # 去重：同一对只记录一次（但双向都写入 conflict）
-            pair = (min(item_id, neighbor_id), max(item_id, neighbor_id))
-            if pair in conflict_pairs:
-                continue
-            conflict_pairs.add(pair)
-
-            _log.info(
-                "semantic conflict found",
-                dataset_id=dataset_id,
-                item_a=item_id, label_a=item_label,
-                item_b=neighbor_id, label_b=neighbor.get("label"),
-                similarity=round(sim, 4),
-            )
-
-            # 仅记录 annotated 侧（item），checked 侧（neighbor）保持不变
-            # 同一条 annotated 可能与多条 checked 冲突，保留相似度最高的那条作为代表
-            existing = conflicts.get(item_id)
-            if existing is None or round(sim, 4) > existing.get("similarity", 0):
-                conflicts[item_id] = {
-                    "similarity":     round(sim, 4),
-                    "threshold":      threshold,
-                    "paired_id":      neighbor_id,
-                    "paired_content": neighbor.get("content", ""),
-                    "paired_label":   neighbor.get("label"),
-                    "self_label":     item_label,
-                }
+        _process_semantic_candidate(
+            item, vec_map, index, topk, threshold,
+            id_to_item, conflict_pairs, conflicts, dataset_id,
+        )
 
     return conflicts
 
@@ -331,53 +398,10 @@ async def run_quality_self_check(dataset_id: int, operator: str = "pipeline") ->
     conflict_map:   dict[int, dict[str, Any]] = {}  # data_id → conflict_detail
 
     for item in labeled_checked:
-        item_id    = int(item["id"])
-        item_label = item["label"]
-
-        vec = vec_map.get(item_id)
-        if vec is None:
-            _log.debug("no precomputed vector, skipping in self-check", item_id=item_id)
-            continue
-
-        neighbors = index.search(vec, topk=topk + 1)
-
-        for neighbor_id, sim in neighbors:
-            if neighbor_id == item_id or sim < threshold:
-                continue
-
-            # 近邻必须也是 checked
-            neighbor = checked_id_to_item.get(neighbor_id)
-            if neighbor is None:
-                continue
-
-            # 标签相同则不冲突
-            if neighbor.get("label") == item_label:
-                continue
-
-            pair = (min(item_id, neighbor_id), max(item_id, neighbor_id))
-            if pair in conflict_pairs:
-                continue
-            conflict_pairs.add(pair)
-
-            _log.info(
-                "self-check conflict found",
-                dataset_id=dataset_id,
-                item_a=item_id, label_a=item_label,
-                item_b=neighbor_id, label_b=neighbor.get("label"),
-                similarity=round(sim, 4),
-            )
-
-            # 双向写入 conflict_map
-            for self_item, other_item in [(item, neighbor), (neighbor, item)]:
-                conflict_map[int(self_item["id"])] = {
-                    "similarity":     round(sim, 4),
-                    "threshold":      threshold,
-                    "paired_id":      int(other_item["id"]),
-                    "paired_content": other_item.get("content", ""),
-                    "paired_label":   other_item.get("label"),
-                    "self_label":     self_item.get("label"),
-                    "check_type":     "quality_self_check",
-                }
+        _process_self_check_candidate(
+            item, vec_map, index, topk, threshold,
+            checked_id_to_item, conflict_pairs, conflict_map, dataset_id,
+        )
 
     conflicts_found = len(conflict_pairs)
     items_reopened  = len(conflict_map)

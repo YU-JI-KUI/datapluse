@@ -154,11 +154,11 @@ class DBManager:
         )
         Base.metadata.create_all(self._engine)
         _log.info("ORM tables synced (CREATE TABLE IF NOT EXISTS)")
-        self._Session = sessionmaker(bind=self._engine, expire_on_commit=False)
+        self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
 
     @contextmanager
     def _session(self) -> Session:
-        s = self._Session()
+        s = self._session_factory()
         try:
             yield s
             s.commit()

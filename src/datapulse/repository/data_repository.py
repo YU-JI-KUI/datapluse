@@ -45,13 +45,8 @@ def _item_to_dict(item: DataItem, state: DataState | None = None) -> dict[str, A
     }
 
 
-def _enrich(session: Session, base: dict[str, Any], my_username: str | None = None) -> dict[str, Any]:
-    """追加最新预标注、有效标注列表、汇总结果、冲突信息。
-    my_username: 若提供，则在返回值中附加该用户的标注（my_annotation 字段）。
-    """
-    data_id = base["id"]
-
-    # ── 最新预标注 ────────────────────────────────────────────────────────────
+def _enrich_pre_annotation(session: Session, data_id: int, base: dict[str, Any]) -> None:
+    """填充最新预标注字段（model_pred / model_score / model_name / pre_annotation）。"""
     pre = (
         session.query(PreAnnotation)
         .filter(PreAnnotation.data_id == data_id)
@@ -71,14 +66,113 @@ def _enrich(session: Session, base: dict[str, Any], my_username: str | None = No
         if pre else None
     )
 
-    # ── 所有有效标注（多人，事实层）──────────────────────────────────────────
+
+def _resolve_annotator_info(
+    ann_result: AnnotationResult | None,
+    label_source: str | None,
+    resolver: str | None,
+    annotations: list[dict[str, Any]],
+    base: dict[str, Any],
+) -> None:
+    """填充 annotator / annotated_at 字段，优先使用汇总结果，否则回退到第一条标注。"""
+    if ann_result:
+        is_manual = label_source == "manual" and resolver
+        base["annotator"]    = resolver if is_manual else base["annotators"]
+        base["annotated_at"] = base["result_updated_at"]
+    elif annotations:
+        base["annotator"]    = annotations[0]["username"]
+        base["annotated_at"] = annotations[0]["created_at"]
+    else:
+        base["annotator"]    = None
+        base["annotated_at"] = None
+
+
+def _enrich_annotation_result(
+    session: Session,
+    data_id: int,
+    base: dict[str, Any],
+    annotations: list[dict[str, Any]],
+) -> None:
+    """填充汇总标注结果字段（label / label_source / annotator / annotated_at 等）。"""
+    ann_result = (
+        session.query(AnnotationResult)
+        .filter(AnnotationResult.data_id == data_id)
+        .first()
+    )
+
+    final_label = label_source = resolver = None
+    annotator_count = 0
+    result_cot = result_updated_at = None
+
+    if ann_result:
+        final_label       = ann_result.final_label
+        label_source      = ann_result.label_source
+        annotator_count   = ann_result.annotator_count or 0
+        resolver          = ann_result.resolver
+        result_cot        = ann_result.cot
+        result_updated_at = (
+            ann_result.updated_at.isoformat() if ann_result.updated_at else None
+        )
+
+    base["label"]             = final_label
+    base["label_source"]      = label_source        # "auto" | "manual" | None
+    base["annotator_count"]   = annotator_count
+    base["resolver"]          = resolver
+    base["result_cot"]        = result_cot
+    base["result_updated_at"] = result_updated_at
+    base["annotators"]        = ", ".join(a["username"] for a in annotations) if annotations else None
+
+    _resolve_annotator_info(ann_result, label_source, resolver, annotations, base)
+
+
+def _enrich_my_annotation(
+    ann_rows: list[Annotation],
+    my_username: str,
+    base: dict[str, Any],
+) -> None:
+    """填充 my_annotation 字段（标注工作台专用）。"""
+    my_ann_row = next((a for a in ann_rows if a.username == my_username), None)
+    base["my_annotation"] = (
+        {
+            "id":         my_ann_row.id,
+            "username":   my_ann_row.username,
+            "label":      my_ann_row.label,
+            "cot":        my_ann_row.cot,
+            "version":    my_ann_row.version,
+            "is_active":  True,
+            "created_at": my_ann_row.created_at.isoformat() if my_ann_row.created_at else None,
+        }
+        if my_ann_row else None
+    )
+
+
+def _enrich_conflict(session: Session, data_id: int, base: dict[str, Any]) -> None:
+    """填充冲突信息字段（conflict_flag / conflict_type / conflict_detail）。"""
+    open_conflict = (
+        session.query(Conflict)
+        .filter(Conflict.data_id == data_id, Conflict.status == "open")
+        .first()
+    )
+    base["conflict_flag"]   = open_conflict is not None
+    base["conflict_type"]   = open_conflict.conflict_type if open_conflict else None
+    base["conflict_detail"] = open_conflict.detail        if open_conflict else None
+
+
+def _enrich(session: Session, base: dict[str, Any], my_username: str | None = None) -> dict[str, Any]:
+    """追加最新预标注、有效标注列表、汇总结果、冲突信息。
+    my_username: 若提供，则在返回值中附加该用户的标注（my_annotation 字段）。
+    """
+    data_id = base["id"]
+
+    _enrich_pre_annotation(session, data_id, base)
+
     ann_rows = (
         session.query(Annotation)
         .filter(Annotation.data_id == data_id, Annotation.is_active.is_(True))
         .order_by(Annotation.created_at.asc())
         .all()
     )
-    annotations = [
+    base["annotations"] = [
         {
             "id":         a.id,
             "username":   a.username,
@@ -90,81 +184,15 @@ def _enrich(session: Session, base: dict[str, Any], my_username: str | None = No
         }
         for a in ann_rows
     ]
-    base["annotations"] = annotations
 
-    # ── 汇总结果（t_annotation_result，用于 DataExplorer / 导出）──────────────
-    ann_result = (
-        session.query(AnnotationResult)
-        .filter(AnnotationResult.data_id == data_id)
-        .first()
-    )
-    final_label     = ann_result.final_label     if ann_result else None
-    label_source    = ann_result.label_source    if ann_result else None
-    annotator_count = ann_result.annotator_count if ann_result else 0
-    resolver        = ann_result.resolver        if ann_result else None
+    _enrich_annotation_result(session, data_id, base, base["annotations"])
 
-    # label / annotator 字段：优先使用 final_label（来自 t_annotation_result）
-    base["label"]           = final_label
-    base["label_source"]    = label_source        # "auto" | "manual" | None
-    base["annotator_count"] = annotator_count
-    base["resolver"]        = resolver
-    base["result_cot"]      = ann_result.cot if ann_result else None  # 裁决时的 COT
-
-    # annotators：所有有效标注者，逗号分隔（导出/展示多人标注明细用）
-    base["annotators"] = ", ".join(a["username"] for a in annotations) if annotations else None
-
-    # result_updated_at：最终标注结果确定的时间（投票或裁决时写入）
-    base["result_updated_at"] = (
-        ann_result.updated_at.isoformat() if ann_result and ann_result.updated_at else None
-    )
-
-    # annotator / annotated_at：表示"谁在什么时候确定了最终标签"
-    #   manual 裁决 → resolver 是决策者，时间取 annotation_result.updated_at
-    #   auto  投票  → 全部标注者（同 annotators），时间取 annotation_result.updated_at
-    #   无结果       → 回退到第一个有效标注者信息
-    if ann_result:
-        if label_source == "manual" and resolver:
-            base["annotator"] = resolver
-        else:
-            base["annotator"] = base["annotators"]  # 逗号分隔多人
-        base["annotated_at"] = base["result_updated_at"]
-    elif annotations:
-        base["annotator"]    = annotations[0]["username"]
-        base["annotated_at"] = annotations[0]["created_at"]
-    else:
-        base["annotator"]    = None
-        base["annotated_at"] = None
-
-    # ── 当前用户自己的标注（可选，标注工作台使用）────────────────────────────
     if my_username:
-        my_ann_row = next(
-            (a for a in ann_rows if a.username == my_username), None
-        )
-        base["my_annotation"] = (
-            {
-                "id":         my_ann_row.id,
-                "username":   my_ann_row.username,
-                "label":      my_ann_row.label,
-                "cot":        my_ann_row.cot,
-                "version":    my_ann_row.version,
-                "is_active":  True,
-                "created_at": my_ann_row.created_at.isoformat() if my_ann_row.created_at else None,
-            }
-            if my_ann_row else None
-        )
+        _enrich_my_annotation(ann_rows, my_username, base)
     else:
         base["my_annotation"] = None
 
-    # ── 冲突信息 ──────────────────────────────────────────────────────────────
-    open_conflict = (
-        session.query(Conflict)
-        .filter(Conflict.data_id == data_id, Conflict.status == "open")
-        .first()
-    )
-    base["conflict_flag"]   = open_conflict is not None
-    base["conflict_type"]   = open_conflict.conflict_type if open_conflict else None
-    base["conflict_detail"] = open_conflict.detail        if open_conflict else None
-
+    _enrich_conflict(session, data_id, base)
     return base
 
 

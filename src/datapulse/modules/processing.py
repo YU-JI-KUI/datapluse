@@ -48,22 +48,34 @@ def parse_excel(content: bytes, text_column: str = "text") -> list[str]:
     return [clean_text(t) for t in df[col].dropna().astype(str).tolist()]
 
 
+def _parse_json_list(data: list) -> list[str]:
+    """将 JSON list 解析为纯文本列表（支持 list[str] 和 list[dict]）。"""
+    if not data:
+        return []
+    if isinstance(data[0], str):
+        return [clean_text(t) for t in data]
+    if isinstance(data[0], dict):
+        return [
+            clean_text(str(item.get("content") or item.get("text") or item.get("query") or ""))
+            for item in data
+        ]
+    return []
+
+
+def _parse_json_dict(data: dict) -> list[str]:
+    """从 JSON dict 中找到已知列表键并解析。"""
+    for key in ["data", "items", "records", "texts"]:
+        if key in data and isinstance(data[key], list):
+            return _parse_json_list(data[key])
+    raise ValueError("无法识别的 JSON 格式，请确保为 list[str] 或 list[{content:...}]")
+
+
 def parse_json(content: bytes) -> list[str]:
     data = json.loads(content.decode("utf-8"))
     if isinstance(data, list):
-        if not data:
-            return []
-        if isinstance(data[0], str):
-            return [clean_text(t) for t in data]
-        if isinstance(data[0], dict):
-            return [
-                clean_text(str(item.get("content") or item.get("text") or item.get("query") or ""))
-                for item in data
-            ]
+        return _parse_json_list(data)
     if isinstance(data, dict):
-        for key in ["data", "items", "records", "texts"]:
-            if key in data and isinstance(data[key], list):
-                return parse_json(json.dumps(data[key]).encode())
+        return _parse_json_dict(data)
     raise ValueError("无法识别的 JSON 格式，请确保为 list[str] 或 list[{content:...}]")
 
 
