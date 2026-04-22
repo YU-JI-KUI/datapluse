@@ -186,18 +186,20 @@ class DatasetRepository:
         return [r.dataset_id for r in rows]
 
     def assign_users(self, dataset_id: int, usernames: list[str], by: str = "system") -> None:
-        """将数据集分配给一批用户（覆盖式：先删除旧记录再写入新记录）"""
+        """将数据集分配给一批用户（覆盖式：先删除旧记录再 bulk INSERT 新记录）"""
         self.session.query(UserDataset).filter(UserDataset.dataset_id == dataset_id).delete()
+        if not usernames:
+            return
         ts = _now()
-        for username in usernames:
-            self.session.add(
-                UserDataset(
-                    username=username,
-                    dataset_id=dataset_id,
-                    created_at=ts,
-                    created_by=by,
-                )
-            )
+        self.session.bulk_insert_mappings(UserDataset, [
+            {
+                "username":   username,
+                "dataset_id": dataset_id,
+                "created_at": ts,
+                "created_by": by,
+            }
+            for username in usernames
+        ])
 
     def list_datasets_for_user(self, username: str, roles: list[str]) -> list[dict[str, Any]]:
         """普通用户只能看到分配给自己的活跃数据集"""

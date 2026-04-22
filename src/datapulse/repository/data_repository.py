@@ -574,6 +574,20 @@ class DataRepository:
             synchronize_session=False,
         )
 
+    def get_next_pre_annotated(self, dataset_id: int) -> dict[str, Any] | None:
+        """取创建时间最早的 pre_annotated 条目并完整 enrich（1+4 次查询，不扫描全表）。"""
+        row = (
+            self.session.query(DataItem)
+            .filter(DataItem.dataset_id == dataset_id, DataItem.status == "pre_annotated")
+            .order_by(DataItem.created_at.asc())
+            .first()
+        )
+        if row is None:
+            return None
+        state = self.session.get(DataState, row.id)
+        base = _item_to_dict(row, state)
+        return _enrich(self.session, base)
+
     def enrich_for_conflict(self, items: list[dict[str, Any]]) -> None:
         """为冲突检测批量填充 annotations 和 label 字段（就地修改）。
 

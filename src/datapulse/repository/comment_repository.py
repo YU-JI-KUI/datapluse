@@ -47,6 +47,24 @@ class CommentRepository:
         self.session.flush()
         return _comment_to_dict(row)
 
+    def bulk_create(self, records: list[dict[str, Any]]) -> None:
+        """批量插入评论（1 次 INSERT）。
+        records 每项须含 data_id, username, comment；可选 created_by。
+        """
+        if not records:
+            return
+        ts = _now()
+        self.session.bulk_insert_mappings(DataComment, [
+            {
+                "data_id":    r["data_id"],
+                "username":   r["username"],
+                "comment":    r["comment"],
+                "created_at": ts,
+                "created_by": r.get("created_by", r["username"]),
+            }
+            for r in records
+        ])
+
     def list_by_data(self, data_id: int) -> list[dict[str, Any]]:
         rows = (
             self.session.query(DataComment)

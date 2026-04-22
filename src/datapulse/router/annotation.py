@@ -150,11 +150,10 @@ async def get_next_item(
     dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """获取下一条待标注数据（按创建时间最早）"""
-    db    = get_db()
-    items = db.list_data_by_status(dataset_id, "pre_annotated", enrich=True)
-    if not items:
+    db   = get_db()
+    item = db.get_next_pre_annotated(dataset_id)
+    if not item:
         return success(None, message="标注队列已清空")
-    item  = min(items, key=lambda x: x.get("created_at") or "")
     return success(item)
 
 

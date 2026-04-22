@@ -398,10 +398,11 @@ async def run_quality_self_check(dataset_id: int, operator: str = "pipeline") ->
     threshold = float(sim_cfg.get("threshold_high", 0.9))
     topk      = int(sim_cfg.get("topk", 3))
 
-    # 加载所有 checked 且有 final_label 的数据
+    # 加载所有 checked 且有 final_label 的数据（enrich=False + 批量填充，避免 N×4 查询）
     # 排除 label_source == 'manual' 的条目：这类数据已经过人工冲突裁决，
     # 裁决结果本身就是权威标签，不应再被纳入语义互检范围。
-    checked_items   = db.list_data_by_status(dataset_id, "checked", enrich=True)
+    checked_items = db.list_data_by_status(dataset_id, "checked", enrich=False)
+    db.enrich_for_conflict(checked_items)   # 2 次 IN 查询批量填充 annotations + label
     labeled_checked = [
         i for i in checked_items
         if i.get("label") is not None and i.get("label_source") != "manual"
@@ -453,11 +454,20 @@ async def run_quality_self_check(dataset_id: int, operator: str = "pipeline") ->
         items_reopened=items_reopened,
     )
 
-    # 写入冲突记录，将涉及数据推回 annotated
-    for data_id, detail in conflict_map.items():
-        db.clear_conflicts(data_id)
-        db.create_conflict(data_id, "semantic_conflict", detail, created_by=operator)
-        db.update_stage(data_id, "annotated", updated_by=operator)
+    # 写入冲突记录，将涉及数据推回 annotated（批量操作，3 次 DB 代替 3N 次）
+    conflict_data_ids = list(conflict_map.keys())
+    db.batch_clear_conflicts(conflict_data_ids)
+    db.batch_create_conflicts([
+        {
+            "data_id":       data_id,
+            "conflict_type": "semantic_conflict",
+            "detail":        detail,
+            "created_by":    operator,
+        }
+        for data_id, detail in conflict_map.items()
+    ])
+    if conflict_data_ids:
+        db.bulk_update_stage(conflict_data_ids, "annotated", updated_by=operator)
 
     return {
         "total_checked":  total_checked,

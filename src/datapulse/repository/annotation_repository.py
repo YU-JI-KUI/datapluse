@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from datapulse.model.entities import Annotation, AnnotationResult, DataItem, PreAnnotation
@@ -240,6 +241,78 @@ class AnnotationRepository:
 
         self.session.flush()
         return _result_to_dict(result)
+
+    def bulk_set_manual_result(
+        self,
+        data_ids: list[int],
+        final_label: str,
+        resolver: str,
+        cot: str | None = None,
+        updated_by: str = "",
+    ) -> None:
+        """批量冲突裁决：为一组 data_id 设置相同的最终标签（manual 来源）。
+
+        3 次 IN 查询 + 1 次 bulk INSERT（如需新建 AnnotationResult），
+        替代 N × set_manual_result 的 N×3 查询。
+        """
+        if not data_ids:
+            return
+        ts = _now()
+        ub = updated_by or resolver
+
+        # 批量取 dataset_id
+        item_rows = (
+            self.session.query(DataItem.id, DataItem.dataset_id)
+            .filter(DataItem.id.in_(data_ids))
+            .all()
+        )
+        dataset_by_id = {r.id: r.dataset_id for r in item_rows}
+
+        # 批量计算每条 data_id 的有效标注人数
+        count_rows = (
+            self.session.query(Annotation.data_id, func.count(Annotation.id))
+            .filter(Annotation.data_id.in_(data_ids), Annotation.is_active.is_(True))
+            .group_by(Annotation.data_id)
+            .all()
+        )
+        count_by_id = {r[0]: r[1] for r in count_rows}
+
+        # 批量取现有 AnnotationResult（UPDATE 路径）
+        existing_rows = (
+            self.session.query(AnnotationResult)
+            .filter(AnnotationResult.data_id.in_(data_ids))
+            .all()
+        )
+        existing_by_id = {r.data_id: r for r in existing_rows}
+
+        # UPDATE existing rows（SQLAlchemy 变更追踪，flush 时批量 UPDATE）
+        new_records: list[dict] = []
+        for data_id in data_ids:
+            count = count_by_id.get(data_id, 0)
+            if data_id in existing_by_id:
+                r = existing_by_id[data_id]
+                r.final_label     = final_label
+                r.label_source    = "manual"
+                r.annotator_count = count
+                r.resolver        = resolver
+                r.cot             = cot or None
+                r.updated_at      = ts
+                r.updated_by      = ub
+            else:
+                new_records.append({
+                    "data_id":        data_id,
+                    "dataset_id":     dataset_by_id.get(data_id, 0),
+                    "final_label":    final_label,
+                    "label_source":   "manual",
+                    "annotator_count": count,
+                    "resolver":       resolver,
+                    "cot":            cot or None,
+                    "updated_at":     ts,
+                    "updated_by":     ub,
+                })
+
+        if new_records:
+            self.session.bulk_insert_mappings(AnnotationResult, new_records)
 
     def get_annotation_result(self, data_id: int) -> dict[str, Any] | None:
         """获取某条数据的汇总结果"""

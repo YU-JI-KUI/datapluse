@@ -185,35 +185,45 @@ async def batch_resolve_conflicts(body: BatchResolveBody, user: CurrentUser):
     """批量裁决冲突：对所有选中的 open 冲突统一写入同一标签，批量推进 stage。
 
     适用场景：多条冲突确认正确标签相同时，一键全部解决，无需逐条操作。
+    性能：batch_load_open_conflicts(1 IN) + bulk_set_annotation_result_manual(3 IN + 1 bulk INSERT)
+          + bulk_update_stage(1 UPDATE IN) + batch_resolve_conflicts(1 UPDATE IN)
+          + bulk_create_comments(1 bulk INSERT) = 8 次查询，与冲突数量无关。
     """
     if not body.conflict_ids:
         return success({"resolved": 0, "data_ids": []})
 
     db = get_db()
 
-    # 取出所有 open 冲突记录，获取对应 data_id
-    resolved_ids = []
-    data_ids     = []
-    for cid in body.conflict_ids:
-        conflict = db.get_conflict_by_id(cid)
-        if not conflict or conflict["status"] != "open":
-            continue
-        data_id = conflict["data_id"]
-        db.set_annotation_result_manual(data_id, body.label, resolver=user.username, cot=body.cot)
-        db.update_stage(data_id, "checked", updated_by=user.username)
-        resolved_ids.append(cid)
-        data_ids.append(data_id)
+    # 1. 批量加载 open 冲突 → {conflict_id: data_id}（1 次 IN 查询）
+    conflict_map = db.batch_load_open_conflicts(body.conflict_ids)
+    if not conflict_map:
+        return success({"resolved": 0, "data_ids": []})
 
-    # 批量更新冲突状态
+    resolved_ids = list(conflict_map.keys())
+    data_ids     = list(conflict_map.values())
+
+    # 2. 批量写入 manual 标注结果（3 IN + 1 bulk INSERT）
+    db.bulk_set_annotation_result_manual(
+        data_ids, body.label, resolver=user.username, cot=body.cot,
+        updated_by=user.username,
+    )
+    # 3. 批量推进 stage → checked（1 UPDATE IN）
+    db.bulk_update_stage(data_ids, "checked", updated_by=user.username)
+
+    # 4. 批量更新冲突状态 → resolved（1 UPDATE IN）
     db.batch_resolve_conflicts(resolved_ids)
 
-    # 批量写评论
+    # 5. 批量写评论（1 bulk INSERT）
     now_str = datetime.now(_SHANGHAI).strftime("%Y-%m-%d %H:%M")
-    for data_id in data_ids:
-        db.create_comment(
-            data_id, user.username,
-            f"[批量裁决] {user.username} 于 {now_str} 批量解决冲突，最终标注为「{body.label}」",
-        )
+    db.bulk_create_comments([
+        {
+            "data_id":    data_id,
+            "username":   user.username,
+            "comment":    f"[批量裁决] {user.username} 于 {now_str} 批量解决冲突，最终标注为「{body.label}」",
+            "created_by": user.username,
+        }
+        for data_id in data_ids
+    ])
 
     return success({
         "resolved":  len(resolved_ids),
@@ -237,12 +247,12 @@ async def batch_revoke_conflicts(body: BatchRevokeBody, user: CurrentUser):
         return success({"revoked": 0, "data_ids": []})
 
     db       = get_db()
-    # batch_revoke_conflicts 返回受影响的 data_id 列表
+    # batch_revoke_conflicts 返回受影响的 data_id 列表（1 UPDATE IN）
     data_ids = db.batch_revoke_conflicts(body.conflict_ids)
 
-    # 将对应数据恢复到 checked
-    for data_id in data_ids:
-        db.update_stage(data_id, "checked", updated_by=user.username)
+    # 批量将对应数据恢复到 checked（1 UPDATE IN，替代 N 次 update_stage）
+    if data_ids:
+        db.bulk_update_stage(data_ids, "checked", updated_by=user.username)
 
     return success({
         "revoked":  len(data_ids),

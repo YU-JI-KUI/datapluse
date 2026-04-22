@@ -76,8 +76,20 @@ class UserRepository:
             q = q.filter(User.updated_at <= end_date + " 23:59:59")
         total = q.count()
         users = q.order_by(User.id).offset((page - 1) * page_size).limit(page_size).all()
+
+        # 批量加载角色（1 次 IN 查询），消除逐用户 _get_user_roles N+1
+        usernames = [u.username for u in users]
+        role_rows = (
+            self.session.query(UserRole.username, UserRole.role_name)
+            .filter(UserRole.username.in_(usernames))
+            .all()
+        ) if usernames else []
+        roles_map: dict[str, list[str]] = {}
+        for row in role_rows:
+            roles_map.setdefault(row.username, []).append(row.role_name)
+
         return {
-            "list": [_user_to_dict(u, self._get_user_roles(u.username)) for u in users],
+            "list": [_user_to_dict(u, roles_map.get(u.username, [])) for u in users],
             "total": total,
         }
 
@@ -117,11 +129,15 @@ class UserRepository:
         self.session.add(user)
         self.session.flush()
 
+        # 批量校验角色是否存在（1 次 IN 查询，替代逐角色 first()）
+        target_roles  = role_names or ["annotator"]
+        valid_names   = {
+            r.name for r in
+            self.session.query(Role.name).filter(Role.name.in_(target_roles)).all()
+        }
         roles: list[str] = []
-        for rname in role_names or ["annotator"]:
-            # 校验角色是否存在
-            exists = self.session.query(Role).filter(Role.name == rname).first()
-            if exists:
+        for rname in target_roles:
+            if rname in valid_names:
                 self.session.add(
                     UserRole(username=username, role_name=rname, created_at=ts, created_by=created_by)
                 )
@@ -139,12 +155,16 @@ class UserRepository:
         if "password" in data and data["password"]:
             u.password_hash = _hash_password(data["password"])
         if "role_names" in data:
-            # 删除旧绑定，重新写入
+            # 删除旧绑定，重新写入（批量校验，1 次 IN 查询）
             self.session.query(UserRole).filter(UserRole.username == u.username).delete()
             ts = _now()
-            for rname in data["role_names"]:
-                exists = self.session.query(Role).filter(Role.name == rname).first()
-                if exists:
+            new_roles = data["role_names"] or []
+            valid_names = {
+                r.name for r in
+                self.session.query(Role.name).filter(Role.name.in_(new_roles)).all()
+            } if new_roles else set()
+            for rname in new_roles:
+                if rname in valid_names:
                     self.session.add(
                         UserRole(username=u.username, role_name=rname, created_at=ts, created_by=updated_by)
                     )

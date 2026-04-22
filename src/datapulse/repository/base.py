@@ -315,6 +315,12 @@ class DBManager:
         with self._session() as s:
             return DataRepository(s).create(dataset_id, content, source, source_ref, created_by)
 
+    def get_next_pre_annotated(self, dataset_id: int) -> dict | None:
+        """取创建时间最早的 pre_annotated 条目并完整 enrich（不全表扫描）。"""
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).get_next_pre_annotated(dataset_id)
+
     def bulk_create_data(
         self,
         dataset_id: int,
@@ -446,6 +452,17 @@ class DBManager:
         with self._session() as s:
             return AnnotationRepository(s).get_active_annotations(data_id)
 
+    def bulk_set_annotation_result_manual(
+        self, data_ids: list[int], final_label: str, resolver: str,
+        cot: str | None = None, updated_by: str = ""
+    ) -> None:
+        """批量冲突裁决：为一组 data_id 写入相同 final_label（3 次查询 + 1 次 INSERT）。"""
+        from datapulse.repository.annotation_repository import AnnotationRepository
+        with self._session() as s:
+            AnnotationRepository(s).bulk_set_manual_result(
+                data_ids, final_label, resolver, cot=cot, updated_by=updated_by or resolver
+            )
+
     def set_annotation_result_manual(
         self, data_id: int, final_label: str, resolver: str,
         cot: str | None = None, updated_by: str = ""
@@ -560,6 +577,12 @@ class DBManager:
         with self._session() as s:
             return ConflictRepository(s).batch_revoke(conflict_ids)
 
+    def batch_load_open_conflicts(self, conflict_ids: list[int]) -> dict[int, int]:
+        """返回 {conflict_id: data_id}，仅含 status='open' 的记录（1 次查询）。"""
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).batch_load_open_conflicts(conflict_ids)
+
     def batch_clear_conflicts(self, data_ids: list[int]) -> int:
         """批量删除一批 data_id 的 open 冲突（1 次 DELETE IN）。"""
         from datapulse.repository.conflict_repository import ConflictRepository
@@ -579,6 +602,12 @@ class DBManager:
             DataRepository(s).enrich_for_conflict(items)
 
     # ── Comment ───────────────────────────────────────────────────────────────
+
+    def bulk_create_comments(self, records: list[dict]) -> None:
+        """批量插入评论（1 次 INSERT）。records 每项须含 data_id, username, comment。"""
+        from datapulse.repository.comment_repository import CommentRepository
+        with self._session() as s:
+            CommentRepository(s).bulk_create(records)
 
     def create_comment(self, data_id: int, username: str, comment: str) -> dict:
         from datapulse.repository.comment_repository import CommentRepository
