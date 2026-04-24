@@ -45,13 +45,12 @@ DEFAULT_DATASET_CONFIG: dict = {
         "concurrency": 8,   # 并发 LLM 请求数，过高可能触发平台限流
     },
     "embedding": {
-        "use_mock":    False,                                    # 默认使用真实模型
-        "model_path":  "/ark-nav/models/xiaobu-embedding-v2",   # 生产模型路径
-        "batch_size":  64,
+        # model_path 已迁移到 env 变量 EMBEDDING_MODEL_PATH（settings.py 统一管理）
+        # 所有 dataset 共用同一模型路径，不再存储于 dataset 级配置
+        "batch_size": 64,
     },
     "similarity": {
-        "threshold_high": 0.9,
-        "threshold_mid":  0.8,
+        "threshold_high": 0.9,   # cosine ≥ 此值 → 语义冲突
         "topk":           5,
     },
     "pipeline": {
@@ -320,6 +319,12 @@ class DBManager:
         from datapulse.repository.data_repository import DataRepository
         with self._session() as s:
             return DataRepository(s).get_next_pre_annotated(dataset_id)
+
+    def list_data_for_export(self, dataset_id: int, status_filter: str = "checked") -> list[dict]:
+        """为导出设计的批量加载：5 次固定查询，无论数据量多少，不走 enrich 逐行路径。"""
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).list_data_for_export(dataset_id, status_filter)
 
     def bulk_create_data(
         self,

@@ -85,7 +85,7 @@ async def prepare_export(body: ExportRequest, user: CurrentUser):
         raise HTTPException(403, "无权限导出数据")
     db = get_db()
 
-    items = db.list_data_by_status(body.dataset_id, body.status_filter, enrich=True)
+    items = db.list_data_for_export(body.dataset_id, body.status_filter)
     if not body.include_conflicts:
         items = [i for i in items if not i.get("conflict_flag")]
     if not items:

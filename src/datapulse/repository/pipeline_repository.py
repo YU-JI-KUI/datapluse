@@ -47,8 +47,11 @@ class PipelineRepository:
         row.current_step = data.get("current_step", "")
         row.progress     = data.get("progress", 0)
         row.detail       = data.get("detail")
-        row.started_at   = data.get("started_at")
-        row.finished_at  = data.get("finished_at")
+        # started_at / finished_at 仅在显式传入时才覆盖，防止进度更新时将其清空
+        if "started_at" in data and data["started_at"] is not None:
+            row.started_at = data["started_at"]
+        if "finished_at" in data:
+            row.finished_at = data["finished_at"]
         row.error        = data.get("error")
         row.updated_at   = data.get("updated_at") or _now()
         row.updated_by   = data.get("updated_by", "")

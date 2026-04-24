@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from datapulse.model.entities import Conflict, DataItem
+from datapulse.model.entities import AnnotationResult, Conflict, DataItem
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -17,16 +17,24 @@ def _now() -> datetime:
     return datetime.now(_SHANGHAI)
 
 
-def _conflict_to_dict(c: Conflict, data_content: str | None = None) -> dict[str, Any]:
+def _conflict_to_dict(
+    c: Conflict,
+    data_content: str | None = None,
+    final_label: str | None = None,
+    resolver: str | None = None,
+) -> dict[str, Any]:
     return {
-        "id": c.id,
-        "data_id": c.data_id,
+        "id":           c.id,
+        "data_id":      c.data_id,
         "data_content": data_content,   # 关联的文本内容，由调用方传入
         "conflict_type": c.conflict_type,
-        "detail": c.detail,
-        "status": c.status,
-        "created_at": c.created_at.isoformat() if c.created_at else None,
-        "created_by": c.created_by,
+        "detail":       c.detail,
+        "status":       c.status,
+        "created_at":   c.created_at.isoformat() if c.created_at else None,
+        "created_by":   c.created_by,
+        # 裁决结果（resolved 状态时有值）
+        "final_label":  final_label,
+        "resolver":     resolver,
     }
 
 
@@ -220,5 +228,25 @@ class ConflictRepository:
             .limit(page_size)
             .all()
         )
-        records = [_conflict_to_dict(c, data_content=content) for c, content in rows]
+
+        # 批量加载已解决冲突的 AnnotationResult（1 次 IN 查询，替代逐行 JOIN）
+        resolved_data_ids = [c.data_id for c, _ in rows if c.status == "resolved"]
+        ar_map: dict[int, AnnotationResult] = {}
+        if resolved_data_ids:
+            for ar in (
+                self.session.query(AnnotationResult)
+                .filter(AnnotationResult.data_id.in_(resolved_data_ids))
+                .all()
+            ):
+                ar_map[ar.data_id] = ar
+
+        records = [
+            _conflict_to_dict(
+                c,
+                data_content=content,
+                final_label=ar_map[c.data_id].final_label if c.data_id in ar_map else None,
+                resolver=ar_map[c.data_id].resolver if c.data_id in ar_map else None,
+            )
+            for c, content in rows
+        ]
         return records, total

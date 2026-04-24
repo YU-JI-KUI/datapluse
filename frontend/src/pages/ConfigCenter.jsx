@@ -297,15 +297,7 @@ export default function ConfigCenter() {
       </Section>
 
       {/* 3. Embedding 模型 */}
-      <Section icon={Cpu} title="Embedding 模型" description="本地向量模型配置，用于语义冲突检测">
-        <Field
-          label="模型路径"
-          name="model_path"
-          value={config.embedding?.model_path}
-          onChange={makeHandler('embedding')}
-          placeholder="./models/bge-base-zh"
-          hint="本地模型目录路径（支持绝对/相对路径）"
-        />
+      <Section icon={Cpu} title="Embedding 模型" description="本地向量模型配置，用于语义冲突检测（模型路径通过环境变量 EMBEDDING_MODEL_PATH 统一配置）">
         <Field
           label="批处理大小"
           name="batch_size"
@@ -314,28 +306,20 @@ export default function ConfigCenter() {
           onChange={makeHandler('embedding')}
           hint="每批编码的文本数量，内存不足时调小"
         />
-        <Field
-          label="Mock 模式"
-          name="use_mock"
-          type="toggle"
-          value={config.embedding?.use_mock}
-          onChange={makeHandler('embedding')}
-          hint="开启后使用随机向量，无需加载真实模型（开发用）"
-        />
         <div className="flex gap-2 pt-1">
           <Button variant="outline" size="sm" onClick={handleReloadModel} disabled={reloading}>
             {reloading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            重载模型
+            重载模型缓存
           </Button>
           <Button variant="outline" size="sm" onClick={handleRebuildIndex}>
-            重建向量索引
+            后台重建向量索引
           </Button>
         </div>
       </Section>
 
       {/* 4. 相似度阈值 */}
       <Section icon={Sliders} title="相似度阈值" description="语义冲突检测的判断标准">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           <Field
             label="高风险阈值"
             name="threshold_high"
@@ -343,14 +327,6 @@ export default function ConfigCenter() {
             value={config.similarity?.threshold_high}
             onChange={makeHandler('similarity')}
             hint="cosine ≥ 此值 → 语义冲突"
-          />
-          <Field
-            label="中风险阈值"
-            name="threshold_mid"
-            type="number"
-            value={config.similarity?.threshold_mid}
-            onChange={makeHandler('similarity')}
-            hint="cosine ≥ 此值 → 需关注"
           />
           <Field
             label="检索 Top-K"

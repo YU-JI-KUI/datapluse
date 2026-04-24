@@ -525,16 +525,17 @@ export default function ConflictDetection() {
                 <TableHead>冲突详情</TableHead>
                 <TableHead className="w-40 whitespace-nowrap">检测时间</TableHead>
                 <TableHead className="w-24 whitespace-nowrap">状态</TableHead>
+                <TableHead className="w-36 whitespace-nowrap">裁决结果</TableHead>
                 <TableHead className="w-36 text-center">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                <TableRow><TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
+                <TableRow><TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
                   <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />加载中...
                 </TableCell></TableRow>
               ) : conflicts.length === 0 ? (
-                <TableRow><TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
+                <TableRow><TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
                   {annotatedCount === 0 ? '请先完成人工标注，再运行冲突检测' : '暂无冲突记录 ✓'}
                 </TableCell></TableRow>
               ) : conflicts.map(c => (
@@ -562,6 +563,20 @@ export default function ConflictDetection() {
                   <TableCell className="max-w-sm"><ConflictDetail conflict={c} /></TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(c.created_at)}</TableCell>
                   <TableCell className="whitespace-nowrap"><ConflictStatusBadge status={c.status} /></TableCell>
+                  <TableCell>
+                    {c.status === 'resolved' && c.final_label ? (
+                      <div className="space-y-0.5">
+                        <span className="inline-block px-2 py-0.5 rounded bg-green-100 text-green-800 text-xs font-semibold">
+                          {c.final_label}
+                        </span>
+                        {c.resolver && (
+                          <p className="text-xs text-muted-foreground">by {c.resolver}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-center">
                     {c.status === 'open' && (
                       <div className="flex gap-1.5 justify-center">

@@ -185,11 +185,12 @@ def setup_logging(settings: Any) -> None:
 
     # ── 3. 两种 Formatter ──────────────────────────────────────────────────────
     # JSON：用于文件，始终输出结构化 JSON
+    # ensure_ascii=False：直接写入 UTF-8 中文字符，避免 \uXXXX 乱码
     _json_post: list[Any] = [
         structlog.stdlib.ProcessorFormatter.remove_processors_meta,
         structlog.processors.ExceptionRenderer(),
         _rename_event_to_message,
-        structlog.processors.JSONRenderer(sort_keys=False),
+        structlog.processors.JSONRenderer(sort_keys=False, ensure_ascii=False),
     ]
     json_fmt = structlog.stdlib.ProcessorFormatter(
         processors=_json_post,

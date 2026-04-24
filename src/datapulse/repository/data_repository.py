@@ -727,7 +727,7 @@ class DataRepository:
         )
         total = q.count()
         rows = (
-            q.order_by(DataItem.created_at.asc())
+            q.order_by(DataItem.created_at.asc(), DataItem.id.asc())  # id 作二级排序，保证分页稳定
             .offset((page - 1) * page_size)
             .limit(page_size)
             .all()
@@ -780,7 +780,7 @@ class DataRepository:
             q = q.filter(DataItem.id.notin_(self.session.query(user_ann_subq.c.data_id)))
             total = q.count()
             rows  = (
-                q.order_by(DataItem.created_at.asc())
+                q.order_by(DataItem.created_at.asc(), DataItem.id.asc())  # id 作二级排序，保证分页稳定
                 .offset((page - 1) * page_size)
                 .limit(page_size)
                 .all()
@@ -801,7 +801,7 @@ class DataRepository:
                 q = q.filter(ann_alias.label == label)
             total = q.count()
             rows  = (
-                q.order_by(ann_alias.created_at.desc())   # 最近标注的排在最前面
+                q.order_by(ann_alias.created_at.desc(), DataItem.id.asc())  # id 作二级排序，保证分页稳定
                 .offset((page - 1) * page_size)
                 .limit(page_size)
                 .all()
@@ -810,7 +810,7 @@ class DataRepository:
         else:  # "all"
             total = q.count()
             rows  = (
-                q.order_by(DataItem.created_at.asc())
+                q.order_by(DataItem.created_at.asc(), DataItem.id.asc())  # id 作二级排序，保证分页稳定
                 .offset((page - 1) * page_size)
                 .limit(page_size)
                 .all()
@@ -846,6 +846,127 @@ class DataRepository:
             _enrich(self.session, _item_to_dict(row, state_map.get(row.id)))
             for row in rows
         ]
+
+    def list_data_for_export(
+        self,
+        dataset_id: int,
+        status_filter: str = "checked",
+    ) -> list[dict[str, Any]]:
+        """为导出设计的高性能批量加载：5 次固定 DB 查询，无论数据量多少。
+
+        对比 list_by_status(enrich=True)：
+          旧方案：1 + N×4 次查询（60k 行 → 24 万次查询，必然卡死）
+          新方案：5 次查询（DataItem + AnnotationResult + Annotation + PreAnnotation + Conflict）
+        """
+        # 1. 加载所有符合状态的 DataItem
+        rows = (
+            self.session.query(DataItem)
+            .filter(DataItem.dataset_id == dataset_id, DataItem.status == status_filter)
+            .order_by(DataItem.id.asc())
+            .all()
+        )
+        if not rows:
+            return []
+
+        data_ids = [r.id for r in rows]
+
+        # 2. 批量加载 AnnotationResult（最终标注汇总，每条数据最多 1 行）
+        ann_results = (
+            self.session.query(AnnotationResult)
+            .filter(AnnotationResult.data_id.in_(data_ids))
+            .all()
+        )
+        ar_map: dict[int, AnnotationResult] = {ar.data_id: ar for ar in ann_results}
+
+        # 3. 批量加载有效 Annotation（按 data_id 分组）
+        active_anns = (
+            self.session.query(Annotation)
+            .filter(Annotation.data_id.in_(data_ids), Annotation.is_active.is_(True))
+            .order_by(Annotation.created_at.asc())
+            .all()
+        )
+        ann_by_data: dict[int, list[Annotation]] = {}
+        for ann in active_anns:
+            ann_by_data.setdefault(ann.data_id, []).append(ann)
+
+        # 4. 批量加载 PreAnnotation（取最新版本，按 version 降序后 data_id 去重）
+        pre_anns = (
+            self.session.query(PreAnnotation)
+            .filter(PreAnnotation.data_id.in_(data_ids))
+            .order_by(PreAnnotation.data_id, PreAnnotation.version.desc())
+            .all()
+        )
+        pre_map: dict[int, PreAnnotation] = {}
+        for pa in pre_anns:
+            if pa.data_id not in pre_map:   # 每个 data_id 只取最新版本
+                pre_map[pa.data_id] = pa
+
+        # 5. 批量加载 open Conflict（每个 data_id 取一条）
+        conflicts = (
+            self.session.query(Conflict)
+            .filter(Conflict.data_id.in_(data_ids), Conflict.status == "open")
+            .all()
+        )
+        conflict_map: dict[int, Conflict] = {}
+        for c in conflicts:
+            conflict_map[c.data_id] = c
+
+        # 内存组装，无任何额外 DB 查询
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            item = _item_to_dict(row)
+
+            # 预标注
+            pre = pre_map.get(row.id)
+            item["model_pred"]     = pre.label if pre else None
+            item["model_score"]    = float(pre.score) if pre and pre.score is not None else None
+            item["model_name"]     = pre.model_name if pre else None
+            item["pre_annotation"] = (
+                {"label": pre.label,
+                 "score": float(pre.score) if pre.score is not None else None,
+                 "model_name": pre.model_name,
+                 "cot": pre.cot}
+                if pre else None
+            )
+
+            # 有效标注列表
+            anns = ann_by_data.get(row.id, [])
+            item["annotations"] = [
+                {"id": a.id, "username": a.username, "label": a.label,
+                 "cot": a.cot, "version": a.version, "is_active": True,
+                 "created_at": a.created_at.isoformat() if a.created_at else None}
+                for a in anns
+            ]
+
+            # 汇总标注结果
+            ar = ar_map.get(row.id)
+            if ar:
+                item["label"]             = ar.final_label
+                item["label_source"]      = ar.label_source
+                item["annotator_count"]   = ar.annotator_count or len(anns)
+                item["resolver"]          = ar.resolver
+                item["result_cot"]        = ar.cot
+                item["result_updated_at"] = ar.updated_at.isoformat() if ar.updated_at else None
+                item["annotated_at"]      = ar.updated_at.isoformat() if ar.updated_at else None
+                item["annotators"]        = ", ".join(a.username for a in anns) if anns else None
+                is_manual = ar.label_source == "manual" and ar.resolver
+                item["annotator"] = ar.resolver if is_manual else item["annotators"]
+            else:
+                for f in ("label", "label_source", "annotator_count", "resolver",
+                          "result_cot", "result_updated_at", "annotated_at",
+                          "annotators", "annotator"):
+                    item[f] = None if f != "annotator_count" else 0
+
+            # 冲突信息
+            c = conflict_map.get(row.id)
+            item["conflict_flag"]   = c is not None
+            item["conflict_type"]   = c.conflict_type if c else None
+            item["conflict_detail"] = c.detail if c else None
+            item["my_annotation"]   = None   # 导出场景不需要
+
+            results.append(item)
+
+        return results
 
     def stats(self, dataset_id: int) -> dict[str, int]:
         rows = (

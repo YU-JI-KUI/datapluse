@@ -272,8 +272,11 @@ async def step_embed(dataset_id: int, operator: str = "pipeline") -> dict[str, A
                 operator=operator,
             )
 
+    # rebuild_index 是 CPU 密集型操作，放到线程池执行，不阻塞 asyncio 事件循环
+    import asyncio as _asyncio
     t_index_start = time.time()
-    count         = rebuild_index(dataset_id)
+    loop  = _asyncio.get_event_loop()
+    count = await loop.run_in_executor(None, rebuild_index, dataset_id)
     t_index       = round(time.time() - t_index_start, 1)
 
     elapsed = round(time.time() - start_time, 1)

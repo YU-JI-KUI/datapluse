@@ -1,38 +1,44 @@
 """
-Embedding 模块
-use_mock=True  → 基于文本 hash 的确定性随机向量（开发用）
-use_mock=False → 加载本地 SentenceTransformer 模型
+Embedding 模块 — 加载本地 SentenceTransformer 模型，为文本生成向量。
 
-配置通过 cfg dict 传入（来自 DB system_config.embedding 节点），支持热更新。
+模型路径通过环境变量 EMBEDDING_MODEL_PATH 统一配置（settings.py），
+所有 dataset 共用同一模型，不再存储于 dataset 级配置。
+batch_size 仍可通过 cfg["embedding"]["batch_size"] 按 dataset 调整。
 """
 
 from __future__ import annotations
 
-import hashlib
 import time
 from typing import Any
 
 import numpy as np
 import structlog
 
-# 延迟加载的模型实例
+# 延迟加载的模型实例（进程内单例）
 _model: Any = None
 _model_path: str = ""
 _log = structlog.get_logger(__name__)
 
 
-def _get_model(model_path: str):
-    """懒加载本地 embedding 模型"""
+def _get_model_path() -> str:
+    """从 settings 读取模型路径（所有 dataset 共用，通过 env 统一配置）。"""
+    from datapulse.config.settings import get_settings
+    return get_settings().embedding_model_path
+
+
+def _get_model():
+    """懒加载本地 embedding 模型（路径变化时自动重载）。"""
     global _model, _model_path
+    model_path = _get_model_path()
     if _model is None or _model_path != model_path:
         _log.info("loading embedding model", model_path=model_path)
         t0 = time.time()
         try:
             from sentence_transformers import SentenceTransformer
-
             _model      = SentenceTransformer(model_path)
             _model_path = model_path
-            _log.info("embedding model loaded", model_path=model_path, elapsed_s=round(time.time() - t0, 1))
+            _log.info("embedding model loaded", model_path=model_path,
+                      elapsed_s=round(time.time() - t0, 1))
         except ImportError:
             raise RuntimeError("sentence-transformers 未安装。请运行: uv add sentence-transformers")
         except Exception as e:
@@ -41,44 +47,22 @@ def _get_model(model_path: str):
     return _model
 
 
-def _mock_embed(text: str, dim: int = 768) -> np.ndarray:
-    """
-    基于文本 hash 生成确定性随机向量（相同文本 → 相同向量）。
-    已单位化，可用于 cosine 相似度计算。
-    """
-    seed = int(hashlib.md5(text.encode("utf-8")).hexdigest(), 16) % (2**31)
-    rng = np.random.RandomState(seed)
-    vec = rng.randn(dim).astype(np.float32)
-    norm = np.linalg.norm(vec)
-    return vec / (norm + 1e-8)
-
-
 # ── 公共接口 ───────────────────────────────────────────────────────────────
 
 
 def embed_text(text: str, cfg: dict[str, Any] | None = None) -> np.ndarray:
-    """对单条文本生成 embedding 向量"""
-    emb_cfg = (cfg or {}).get("embedding", {})
-    use_mock = emb_cfg.get("use_mock", True)
-    model_path = emb_cfg.get("model_path", "./models/bge-base-zh")
-
-    if use_mock:
-        return _mock_embed(text)
-    model = _get_model(model_path)
+    """对单条文本生成 embedding 向量。"""
+    model = _get_model()
     vec = model.encode(text, normalize_embeddings=True)
     return vec.astype(np.float32)
 
 
 def embed_batch(texts: list[str], cfg: dict[str, Any] | None = None) -> np.ndarray:
-    """批量 embedding，返回 shape=(N, dim) 的 ndarray"""
-    emb_cfg = (cfg or {}).get("embedding", {})
-    use_mock = emb_cfg.get("use_mock", True)
-    model_path = emb_cfg.get("model_path", "./models/bge-base-zh")
-    batch_size = emb_cfg.get("batch_size", 64)
-
-    if use_mock:
-        return np.stack([_mock_embed(t) for t in texts])
-    model = _get_model(model_path)
+    """批量 embedding，返回 shape=(N, dim) 的 ndarray。
+    batch_size 从 cfg["embedding"]["batch_size"] 读取，默认 64。
+    """
+    batch_size = (cfg or {}).get("embedding", {}).get("batch_size", 64)
+    model = _get_model()
     vecs = model.encode(
         texts,
         batch_size=batch_size,
@@ -98,8 +82,8 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def reload_model() -> None:
-    """配置更新后强制重新加载模型"""
+    """强制清除模型缓存，下次调用 embed_* 时自动重新加载（EMBEDDING_MODEL_PATH 变更后调用）。"""
     global _model, _model_path
-    _log.info("embedding model cache cleared (will reload on next call)", prev_model=_model_path)
+    _log.info("embedding model cache cleared (will reload on next call)", prev_path=_model_path)
     _model      = None
     _model_path = ""

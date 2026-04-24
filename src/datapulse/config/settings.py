@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # 子目录结构由各模块自行约定，无需额外配置。
     storage_base_path: str = "./nas"
 
+    # ── Embedding 模型 ────────────────────────────────────────────────────────
+    # 所有 dataset 共用同一本地 embedding 模型路径，通过环境变量统一配置。
+    # 示例（.env）：EMBEDDING_MODEL_PATH=/ark-nav/models/xiaobu-embedding-v2
+    embedding_model_path: str = "/ark-nav/models/xiaobu-embedding-v2"
+
     # ── 日志配置 ──────────────────────────────────────────────────────────────
     # 运行环境：dev（彩色 console）/ test / prod（JSON console）
     app_env:          str = "dev"
