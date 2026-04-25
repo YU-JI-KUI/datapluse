@@ -4,7 +4,6 @@
 Dockerfile   export-ignore
 start.sh     export-ignore
 build.sh     export-ignore
-pyproject.toml     export-ignore
 .gitignore export-ignore
 frontend/package-lock.json export-ignore
 README.md export-ignore
