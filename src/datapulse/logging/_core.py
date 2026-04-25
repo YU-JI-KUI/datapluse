@@ -15,7 +15,7 @@ uvicorn.*          ───── console_handler (WARNING+) + app_queue_handle
 sqlalchemy.engine  ───── app_queue_handler (WARNING+)
 root               ───── app_queue_handler (WARNING+)
 
-所有 JSON 文件均包含字段：timestamp / level / logger / service / env / instance / trace_id / message
+所有 JSON 文件均包含字段：timestamp / level / logger / env / instance / trace_id / message
 trace_id 由 structlog.contextvars 注入（TraceMiddleware 在每次请求开头 bind）。
 
 环境策略
@@ -82,17 +82,14 @@ _access_listener: logging.handlers.QueueListener | None = None
 _initialized:     bool = False
 
 
-# ── 自定义处理器（service / env / instance 注入）──────────────────────────────
+# ── 自定义处理器（env / instance 注入）───────────────────────────────────────
 
-def _make_add_service(
-    service: str, env: str, instance: str
-):
-    """工厂：返回给 structlog 注入服务元信息的处理器闭包。"""
+def _make_add_context(env: str, instance: str):
+    """工厂：返回给 structlog 注入运行环境元信息（env / instance）的处理器闭包。"""
     def _processor(
         _logger: WrappedLogger, _method: str, event_dict: EventDict
     ) -> EventDict:
-        event_dict.setdefault("service", service)
-        event_dict.setdefault("env",     env)
+        event_dict.setdefault("env",      env)
         event_dict.setdefault("instance", instance)
         return event_dict
     return _processor
@@ -150,7 +147,6 @@ def setup_logging(settings: Any) -> None:
     env          = getattr(settings, "app_env",          "dev")
     level_str    = getattr(settings, "log_level",        "INFO").upper()
     level        = getattr(logging, level_str, logging.INFO)
-    service      = getattr(settings, "service_name",     "datapulse")
     instance     = getattr(settings, "instance_id",      "") or socket.gethostname()
     log_dir      = Path(getattr(settings, "effective_log_dir", "./logs"))
     rotation     = getattr(settings, "log_rotation",     "time")
@@ -168,7 +164,7 @@ def setup_logging(settings: Any) -> None:
         structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),  # timestamp 本地时间
         structlog.stdlib.PositionalArgumentsFormatter(),   # %s 位置参数插值
         structlog.processors.StackInfoRenderer(),          # stack_info 渲染
-        _make_add_service(service, env, instance),         # service / env / instance
+        _make_add_context(env, instance),                  # env / instance
         masking_processor,                                 # 敏感信息脱敏
     ]
 
