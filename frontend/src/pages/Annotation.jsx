@@ -45,7 +45,14 @@ const LABEL_PALETTE = [
   { bg: 'bg-teal-500 hover:bg-teal-600',     ring: 'ring-teal-400',   text: 'text-white', light: 'bg-teal-50 text-teal-700 border-teal-200' },
 ]
 
+// 默认色：当 label 不在当前 labels 列表里（indexOf 返回 -1）时使用，防止 undefined 崩溃
+const LABEL_COLOR_FALLBACK = {
+  bg: 'bg-gray-400 hover:bg-gray-500', ring: 'ring-gray-400',
+  text: 'text-white', light: 'bg-gray-50 text-gray-700 border-gray-200',
+}
+
 function getLabelColor(index) {
+  if (index < 0) return LABEL_COLOR_FALLBACK
   return LABEL_PALETTE[index % LABEL_PALETTE.length]
 }
 
