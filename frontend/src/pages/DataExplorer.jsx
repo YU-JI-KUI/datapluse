@@ -21,7 +21,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   MessageSquare, RefreshCw,
-  X, Send, Eye, Clock, User, Tag, Cpu, Trash2, GitBranch, Pencil,
+  X, Send, Eye, Clock, User, Tag, Cpu, Trash2, GitBranch, Pencil, Tags,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -435,6 +435,94 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
   )
 }
 
+// ── 批量修改标签对话框 ──────────────────────────────────────────────────────────
+
+function BatchEditDialog({ open, onOpenChange, selectedCount, onConfirm, submitting }) {
+  const [label, setLabel] = useState('')
+  const [cot,   setCot]   = useState('')
+
+  // 从配置拿标签列表和 requireCot 设置
+  const { data: cfgRes } = useQuery({
+    queryKey: ['config'],
+    queryFn:  () => configApi.get(),
+    enabled:  open,
+  })
+  const labels     = cfgRes?.data?.data?.labels || []
+  const requireCot = cfgRes?.data?.data?.pipeline?.require_cot ?? false
+
+  // 打开时重置
+  useEffect(() => {
+    if (open) { setLabel(''); setCot('') }
+  }, [open])
+
+  function handleConfirm() {
+    if (!label) { toast.error('请选择标注标签'); return }
+    onConfirm(label, cot.trim() || null)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Tags className="w-4 h-4 text-primary" />
+            批量修改标签
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="py-2 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            将为已选中的 <span className="font-semibold text-foreground">{selectedCount}</span> 条数据统一设置标注标签。
+            <br />
+            <span className="text-xs">该操作会覆盖这些条目的当前标注结果。</span>
+          </p>
+
+          {/* 标签选择 */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5">
+              目标标签 <span className="text-destructive">*</span>
+            </label>
+            <Select value={label} onValueChange={setLabel}>
+              <SelectTrigger className={`w-full ${!label ? 'border-orange-300' : 'border-green-400'}`}>
+                <SelectValue placeholder="请选择意图标签…" />
+              </SelectTrigger>
+              <SelectContent>
+                {labels.map(l => (
+                  <SelectItem key={l} value={l}>{l}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* COT（由配置中心控制是否显示）*/}
+          {requireCot && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5">
+                标注理由（COT）<span className="text-xs text-muted-foreground ml-1">(Chain of Thought，选填)</span>
+              </label>
+              <textarea
+                className="w-full min-h-[100px] rounded-md border border-gray-200 px-3 py-2 text-sm bg-background
+                           placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-200 resize-y"
+                placeholder="请说明选择该标签的依据，批量操作时所有条目将使用相同的理由…"
+                value={cot}
+                onChange={e => setCot(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>取消</Button>
+          <Button onClick={handleConfirm} disabled={submitting || !label}>
+            {submitting ? '提交中…' : `确认修改 ${selectedCount} 条`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+
 // ── 主页面 ────────────────────────────────────────────────────────────────────
 
 const STATUS_OPTIONS = [
@@ -583,6 +671,33 @@ export default function DataExplorer() {
     }
   }
 
+  // ── 批量修改标签 ──────────────────────────────────────────────────────────────
+  const [batchEditOpen,    setBatchEditOpen]    = useState(false)
+  const [batchEditing,     setBatchEditing]     = useState(false)
+
+  async function handleBatchEdit(label, cot) {
+    const ids = [...selectedIds]
+    setBatchEditing(true)
+    try {
+      const payload = ids.map(id => ({ data_id: id, label, cot: cot || null }))
+      const res = await annotationApi.batchSubmit(payload)
+      const errors = res?.data?.data?.errors || []
+      if (errors.length > 0) {
+        toast.warning(`已修改 ${ids.length - errors.length} 条，${errors.length} 条失败`)
+      } else {
+        toast.success(`已将 ${ids.length} 条数据标注为「${label}」`)
+      }
+      setBatchEditOpen(false)
+      setSelectedIds(new Set())
+      qc.invalidateQueries(['explorer'])
+      if (sideItem && ids.includes(sideItem.id)) closeSide()
+    } catch {
+      toast.error('批量修改失败')
+    } finally {
+      setBatchEditing(false)
+    }
+  }
+
   return (
     <div className="flex h-full">
       {/* ── 主区域 ── */}
@@ -596,15 +711,27 @@ export default function DataExplorer() {
             </div>
             <div className="flex items-center gap-2">
               {selectedIds.size > 0 && (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setBatchConfirmOpen(true)}
-                  disabled={batchDeleting}
-                >
-                  <Trash2 className="w-4 h-4 mr-1.5" />
-                  删除选中 ({selectedIds.size})
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBatchEditOpen(true)}
+                    disabled={batchEditing}
+                    className="border-primary/50 text-primary hover:bg-primary/10"
+                  >
+                    <Tags className="w-4 h-4 mr-1.5" />
+                    改标签 ({selectedIds.size})
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setBatchConfirmOpen(true)}
+                    disabled={batchDeleting}
+                  >
+                    <Trash2 className="w-4 h-4 mr-1.5" />
+                    删除选中 ({selectedIds.size})
+                  </Button>
+                </>
               )}
               <Button variant="outline" size="sm" onClick={() => refetch()}>
                 <RefreshCw className="w-4 h-4 mr-2" />刷新
@@ -851,7 +978,7 @@ export default function DataExplorer() {
         onConfirm={handleBatchDelete}
       />
 
-      {/* 修改标注标签对话框 */}
+      {/* 单条修改标注标签对话框 */}
       {editItem && (
         <EditAnnotationDialog
           open={editOpen}
@@ -860,6 +987,15 @@ export default function DataExplorer() {
           onSuccess={handleEditSuccess}
         />
       )}
+
+      {/* 批量修改标签对话框 */}
+      <BatchEditDialog
+        open={batchEditOpen}
+        onOpenChange={setBatchEditOpen}
+        selectedCount={selectedIds.size}
+        onConfirm={handleBatchEdit}
+        submitting={batchEditing}
+      />
     </div>
   )
 }

@@ -80,7 +80,7 @@ def _mask_form(raw: str) -> dict[str, str]:
     return out
 
 
-async def _parse_body(request: Request) -> dict | str | None:
+async def _parse_body(request: Request) -> dict | list | str | None:
     """
     读取并解析请求体，返回：
       - dict   — JSON body（已 key 级别脱敏）
@@ -101,7 +101,16 @@ async def _parse_body(request: Request) -> dict | str | None:
 
     if "application/json" in ct or "text/json" in ct:
         try:
-            return _mask_sensitive_dict(json.loads(raw))
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return _mask_sensitive_dict(parsed)
+            if isinstance(parsed, list):
+                # JSON array body（如批量提交接口），对每个元素单独脱敏
+                return [
+                    _mask_sensitive_dict(item) if isinstance(item, dict) else item
+                    for item in parsed
+                ]
+            return parsed
         except json.JSONDecodeError:
             pass
 

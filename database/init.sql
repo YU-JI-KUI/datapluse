@@ -1,20 +1,40 @@
 -- =============================================================================
--- Datapulse 数据库初始化脚本 v2.0
--- 执行前请确认数据库已存在：CREATE DATABASE datapulse;
--- 执行方式：psql -h <host> -p <port> -U <user> -d datapulse -f database/init.sql
+-- Datapulse 数据库初始化脚本 v3.0（幂等版）
+--
+-- 执行方式（必须先连到 postgres 维护库，再由脚本自动切换）：
+--   psql -h <host> -p <port> -U <superuser> -d postgres -f database/init.sql
 --
 -- 设计规范：
---   - 表名以 t_ 开头
---   - 禁止物理外键，使用逻辑外键
---   - 所有用户字段统一使用 username（禁止 user_id）
---   - 时间字段统一 TIMESTAMP(6)
---   - 所有表包含完整审计字段
+--   - 自动创建 datapulse 数据库（已存在则跳过），无需手动预建库
+--   - 完全幂等：重复执行不影响已有数据、不报错
+--   - 表名以 t_ 开头；禁止物理外键；所有用户字段统一使用 username
+--   - 时间字段统一 TIMESTAMP(6)；所有表包含完整审计字段
+--   - 管理员账号默认创建，然后修改密码
 -- =============================================================================
 
 
 -- =============================================================================
+-- 步骤 1：自动创建 datapulse 数据库（已存在则跳过）
+-- \gexec 将上一条 SELECT 的每行结果作为 SQL 语句执行
+-- =============================================================================
+SELECT 'CREATE DATABASE datapulse'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'datapulse')
+\gexec
+
+
+-- =============================================================================
+-- 步骤 2：切换到 datapulse 数据库
+-- =============================================================================
+\c datapulse
+
+
+-- =============================================================================
+-- 步骤 3：建表（CREATE TABLE IF NOT EXISTS 保证幂等）
+-- =============================================================================
+
+-- ---------------------------------------------------------------------------
 -- 1. 数据集表
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_dataset (
     id          BIGSERIAL    NOT NULL,
     name        VARCHAR(100) NOT NULL,
@@ -38,9 +58,9 @@ COMMENT ON COLUMN t_dataset.updated_at  IS '更新时间';
 COMMENT ON COLUMN t_dataset.updated_by  IS '最后更新人';
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 2. 系统配置表（每个 dataset 独立一行，config_data 为整块 JSONB）
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_system_config (
     dataset_id  BIGINT       NOT NULL,
     config_data JSONB        NOT NULL DEFAULT '{}',
@@ -51,14 +71,14 @@ CREATE TABLE IF NOT EXISTS t_system_config (
 
 COMMENT ON TABLE  t_system_config             IS '系统配置表：每个 dataset 独立一行，所有参数存于 config_data JSONB';
 COMMENT ON COLUMN t_system_config.dataset_id  IS '数据集ID（逻辑外键）';
-COMMENT ON COLUMN t_system_config.config_data IS 'JSON 配置结构：{llm:{use_mock,api_url,model_name,timeout}, embedding:{use_mock,model_path,batch_size}, similarity:{threshold_high,threshold_mid,topk}, pipeline:{batch_size}, labels:[...]}';
+COMMENT ON COLUMN t_system_config.config_data IS 'JSON 配置结构：{llm:{use_mock,api_url,model_name,timeout}, embedding:{batch_size}, similarity:{threshold_high,topk}, pipeline:{batch_size}, labels:[...]}';
 COMMENT ON COLUMN t_system_config.updated_at  IS '最后保存时间';
 COMMENT ON COLUMN t_system_config.updated_by  IS '最后保存的用户名';
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 3. 角色表
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_role (
     id          BIGSERIAL    NOT NULL,
     name        VARCHAR(50)  NOT NULL,
@@ -83,9 +103,9 @@ COMMENT ON COLUMN t_role.updated_at  IS '更新时间';
 COMMENT ON COLUMN t_role.updated_by  IS '最后更新人';
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 4. 用户表
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_user (
     id            BIGSERIAL    NOT NULL,
     username      VARCHAR(100) NOT NULL,
@@ -114,9 +134,9 @@ COMMENT ON COLUMN t_user.updated_at    IS '更新时间';
 COMMENT ON COLUMN t_user.updated_by    IS '最后更新人';
 
 
--- =============================================================================
--- 5. 用户-角色关联表（使用 username 逻辑外键，不使用 user_id）
--- =============================================================================
+-- ---------------------------------------------------------------------------
+-- 5. 用户-角色关联表（username 逻辑外键，不使用 user_id）
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_user_role (
     username   VARCHAR(100) NOT NULL,
     role_name  VARCHAR(50)  NOT NULL,
@@ -132,9 +152,9 @@ COMMENT ON COLUMN t_user_role.created_at IS '授权时间';
 COMMENT ON COLUMN t_user_role.created_by IS '授权操作人';
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 6. 数据条目表（核心，纯数据层，不含标注信息）
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_data_item (
     id           BIGSERIAL    NOT NULL,
     dataset_id   BIGINT       NOT NULL,
@@ -167,9 +187,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_t_data_item_hash ON t_data_item(dataset_id,
 CREATE INDEX IF NOT EXISTS idx_t_data_item_dataset_status ON t_data_item(dataset_id, status);
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 7. 数据流转状态表（控制流，与 t_data_item 一对一）
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_data_state (
     data_id    BIGINT       NOT NULL,
     stage      VARCHAR(50)  NOT NULL DEFAULT 'raw',
@@ -185,9 +205,9 @@ COMMENT ON COLUMN t_data_state.updated_at IS '状态更新时间';
 COMMENT ON COLUMN t_data_state.updated_by IS '状态更新操作人';
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 8. LLM 预标注表（记录每次预标注结果，支持多版本）
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_pre_annotation (
     id         BIGSERIAL      NOT NULL,
     data_id    BIGINT         NOT NULL,
@@ -215,9 +235,9 @@ COMMENT ON COLUMN t_pre_annotation.created_by IS '触发人（pipeline 操作者
 CREATE INDEX IF NOT EXISTS idx_t_pre_annotation_data ON t_pre_annotation(data_id);
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 9. 人工标注表（核心，支持多人标注 + 多版本历史）
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_annotation (
     id         BIGSERIAL    NOT NULL,
     data_id    BIGINT       NOT NULL,
@@ -242,14 +262,14 @@ COMMENT ON COLUMN t_annotation.is_active IS '是否为有效版本：TRUE=当前
 COMMENT ON COLUMN t_annotation.created_at IS '标注时间';
 COMMENT ON COLUMN t_annotation.created_by IS '操作人（通常与 username 相同）';
 
-CREATE INDEX IF NOT EXISTS idx_t_annotation_data    ON t_annotation(data_id);
-CREATE INDEX IF NOT EXISTS idx_t_annotation_user    ON t_annotation(data_id, username);
-CREATE INDEX IF NOT EXISTS idx_t_annotation_active  ON t_annotation(data_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_t_annotation_data   ON t_annotation(data_id);
+CREATE INDEX IF NOT EXISTS idx_t_annotation_user   ON t_annotation(data_id, username);
+CREATE INDEX IF NOT EXISTS idx_t_annotation_active ON t_annotation(data_id, is_active);
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 10. 标注结果汇总表（每条数据一行，由标注写入自动触发聚合）
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_annotation_result (
     id              BIGSERIAL    NOT NULL,
     data_id         BIGINT       NOT NULL,
@@ -280,9 +300,9 @@ COMMENT ON COLUMN t_annotation_result.updated_by       IS '最后更新操作人
 CREATE INDEX IF NOT EXISTS idx_t_annotation_result_dataset ON t_annotation_result(dataset_id);
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 11. 数据评论表（标注讨论 / 说明原因）
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_data_comment (
     id         BIGSERIAL    NOT NULL,
     data_id    BIGINT       NOT NULL,
@@ -304,9 +324,9 @@ COMMENT ON COLUMN t_data_comment.created_by IS '操作人';
 CREATE INDEX IF NOT EXISTS idx_t_data_comment_data ON t_data_comment(data_id);
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 12. 冲突检测表（标注冲突 + 语义冲突，独立可追溯）
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_conflict (
     id            BIGSERIAL    NOT NULL,
     data_id       BIGINT       NOT NULL,
@@ -331,9 +351,9 @@ CREATE INDEX IF NOT EXISTS idx_t_conflict_data   ON t_conflict(data_id);
 CREATE INDEX IF NOT EXISTS idx_t_conflict_status ON t_conflict(status);
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 13. 导出模板表
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_export_template (
     id          BIGSERIAL    NOT NULL,
     dataset_id  BIGINT       NOT NULL,
@@ -365,9 +385,9 @@ COMMENT ON COLUMN t_export_template.updated_by  IS '最后更新人';
 CREATE INDEX IF NOT EXISTS idx_t_export_template_dataset ON t_export_template(dataset_id);
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 14. Pipeline 运行状态表（每个 dataset 独立一行）
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_pipeline_status (
     dataset_id   BIGINT       NOT NULL,
     status       VARCHAR(20)  NOT NULL DEFAULT 'idle',
@@ -395,9 +415,9 @@ COMMENT ON COLUMN t_pipeline_status.updated_at   IS '最后更新时间';
 COMMENT ON COLUMN t_pipeline_status.updated_by   IS '最后更新人';
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 15. 数据向量表
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_embedding (
     id         BIGSERIAL    NOT NULL,
     dataset_id BIGINT       NOT NULL,
@@ -405,7 +425,7 @@ CREATE TABLE IF NOT EXISTS t_embedding (
     vector     BYTEA        NOT NULL,
     dim        SMALLINT     NOT NULL,
     created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    CONSTRAINT pk_t_embedding             PRIMARY KEY (id),
+    CONSTRAINT pk_t_embedding              PRIMARY KEY (id),
     CONSTRAINT uq_t_embedding_dataset_data UNIQUE (dataset_id, data_id)
 );
 
@@ -420,9 +440,9 @@ COMMENT ON COLUMN t_embedding.created_at IS '最近一次向量化时间（UPSER
 CREATE INDEX IF NOT EXISTS idx_t_embedding_dataset ON t_embedding(dataset_id);
 
 
--- =============================================================================
+-- ---------------------------------------------------------------------------
 -- 16. 用户-数据集访问权限关联表
--- =============================================================================
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS t_user_dataset (
     id         BIGSERIAL    NOT NULL,
     username   VARCHAR(100) NOT NULL,
@@ -440,13 +460,17 @@ COMMENT ON COLUMN t_user_dataset.dataset_id IS '数据集ID（逻辑外键 → t
 COMMENT ON COLUMN t_user_dataset.created_at IS '分配时间';
 COMMENT ON COLUMN t_user_dataset.created_by IS '分配操作人';
 
--- username 单列查询已由 UNIQUE(username, dataset_id) 约束索引覆盖，无需单独创建
 CREATE INDEX IF NOT EXISTS idx_t_user_dataset_dataset_id ON t_user_dataset(dataset_id);
 
 
 -- =============================================================================
--- 初始数据：预置角色
+-- 步骤 4：初始数据（所有 INSERT 均幂等）
 -- =============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 4.1 预置角色
+-- ON CONFLICT (name) DO NOTHING：t_role.name 有 UNIQUE 约束，重复执行安全跳过
+-- ---------------------------------------------------------------------------
 INSERT INTO t_role (name, description, permissions, created_by, updated_by)
 VALUES
     ('admin',
@@ -466,18 +490,19 @@ VALUES
 ON CONFLICT (name) DO NOTHING;
 
 
--- =============================================================================
--- 初始数据：默认数据集 + 配置
--- =============================================================================
+-- ---------------------------------------------------------------------------
+-- 4.2 默认数据集
+-- t_dataset.name 无 UNIQUE 约束，使用 WHERE NOT EXISTS 防止重复插入
+-- ---------------------------------------------------------------------------
 INSERT INTO t_dataset (name, description, status, created_by, updated_by)
-VALUES (
-    '默认数据集',
-    '系统初始化创建的默认数据集',
-    'active',
-    'system', 'system'
-)
-ON CONFLICT DO NOTHING;
+SELECT '默认数据集', '系统初始化创建的默认数据集', 'active', 'system', 'system'
+WHERE NOT EXISTS (SELECT 1 FROM t_dataset WHERE name = '默认数据集');
 
+
+-- ---------------------------------------------------------------------------
+-- 4.3 默认数据集的系统配置
+-- ON CONFLICT (dataset_id) DO NOTHING：t_system_config 以 dataset_id 为主键，幂等
+-- ---------------------------------------------------------------------------
 INSERT INTO t_system_config (dataset_id, config_data, updated_by)
 SELECT
     d.id,
@@ -489,14 +514,11 @@ SELECT
             "timeout": 30
         },
         "embedding": {
-            "use_mock": true,
-            "model_path": "./models/bge-base-zh",
             "batch_size": 64
         },
         "similarity": {
             "threshold_high": 0.9,
-            "threshold_mid": 0.8,
-            "topk": 5
+            "topk": 3
         },
         "pipeline": {
             "batch_size": 32
@@ -509,11 +531,21 @@ WHERE d.name = '默认数据集'
 ON CONFLICT (dataset_id) DO NOTHING;
 
 
--- =============================================================================
--- 管理员账号（交互式创建，见 tools/seed_admin.py）
--- =============================================================================
--- INSERT INTO t_user (username, email, password_hash, is_active, created_by, updated_by)
--- VALUES ('admin', '', '<BCRYPT_HASH>', TRUE, 'system', 'system');
---
--- INSERT INTO t_user_role (username, role_name, created_by)
--- VALUES ('admin', 'admin', 'system');
+-- ---------------------------------------------------------------------------
+-- 4.4 初始管理员账号
+-- ON CONFLICT (username) DO NOTHING：重复执行自动跳过，不覆盖已修改的密码
+-- ---------------------------------------------------------------------------
+INSERT INTO t_user (username, email, password_hash, is_active, created_by, updated_by)
+VALUES (
+    'ADMIN',
+    '',
+    '$2b$12$MZVv1XTKbXGmvK07C3PssON7/c0tey1LQmrtQeGoWj5./gc4KE1gu',
+    TRUE,
+    'system',
+    'system'
+)
+ON CONFLICT (username) DO NOTHING;
+
+INSERT INTO t_user_role (username, role_name, created_by)
+VALUES ('ADMIN', 'admin', 'system')
+ON CONFLICT (username, role_name) DO NOTHING;

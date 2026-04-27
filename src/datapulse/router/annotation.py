@@ -162,10 +162,11 @@ async def batch_submit(
     body: list[AnnotationCreate],
     user: CurrentUser,
 ):
-    """批量提交标注"""
+    """批量提交标注（自动记录标注日志评论，与单条提交行为一致）"""
     db      = get_db()
     results = []
     errors  = []
+    now_str = datetime.now(_SHANGHAI).strftime("%Y-%m-%d %H:%M")
     for req in body:
         item = db.get_data(req.data_id, enrich=False)
         if not item:
@@ -174,5 +175,10 @@ async def batch_submit(
         ann = db.create_annotation(req.data_id, user.username, req.label,
                                     cot=req.cot, created_by=user.username)
         db.update_stage(req.data_id, "annotated", updated_by=user.username)
+        db.create_comment(
+            req.data_id,
+            user.username,
+            f"[批量标注] {user.username} 于 {now_str} 标注为「{req.label}」（v{ann['version']}）",
+        )
         results.append(ann)
     return success({"updated": results, "errors": errors})

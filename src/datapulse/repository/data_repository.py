@@ -670,7 +670,7 @@ class DataRepository:
             ).filter(AnnotationResult.final_label == label)
         total = q.count()
         rows = (
-            q.order_by(DataItem.created_at.desc())
+            q.order_by(DataItem.updated_at.desc(), DataItem.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
             .all()
