@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM 模型（对应 database/init.sql v2.0）
+"""SQLAlchemy ORM 模型
 
 表命名规范：t_ 前缀
 主键策略：所有表使用 BIGSERIAL（BigInteger autoincrement）

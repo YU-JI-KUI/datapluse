@@ -116,21 +116,22 @@ class Settings(BaseSettings):
 
     def _effective_db_password(self) -> str:
         """
-        解析实际生效的数据库密码：
-          - APP_ENV=prod 且已配置 CYBERARK_APPID → 从 CyberArk 获取（进程内缓存）
-          - 其他环境 → 直接返回 DB_PASSWORD（为空时给出明确错误）
+        解析实际生效的数据库密码（优先级：DB_PASSWORD > CyberArk）：
+          - DB_PASSWORD 已配置（非空）→ 直接使用，不走 CyberArk
+          - DB_PASSWORD 未配置且 CYBERARK_APPID 已配置 → 从 CyberArk 获取（进程内缓存）
+          - 两者均未配置 → 启动报错，给出明确提示
         """
-        if self.is_prod and self.cyberark_appid:
+        if self.db_password:
+            return self.db_password
+
+        if self.cyberark_appid:
             from datapulse.config.cyberark import fetch_db_password_from_cyberark
             return fetch_db_password_from_cyberark()
 
-        if not self.db_password:
-            raise ValueError(
-                "DB_PASSWORD 未配置。"
-                "非 PROD 环境请在 .env 中设置 DB_PASSWORD；"
-                "PROD 环境请配置 CYBERARK_* 变量并设置 APP_ENV=prod。"
-            )
-        return self.db_password
+        raise ValueError(
+            "数据库密码未配置：请在 .env 中设置 DB_PASSWORD，"
+            "或配置 CYBERARK_APPID / CYBERARK_URL 等变量通过 CyberArk 获取密码。"
+        )
 
 
 @lru_cache

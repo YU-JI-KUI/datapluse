@@ -3,10 +3,6 @@
 
 用途：在全新数据库中交互式创建第一个管理员账号。
 使用：python tools/seed_admin.py
-
-前提：
-  1. 已执行 database/init.sql 建表
-  2. 已配置 config.yaml（DB 连接信息）
 """
 
 import sys
@@ -38,7 +34,6 @@ def main() -> None:
         db = get_db()
     except Exception as e:
         print(f"数据库连接失败：{e}")
-        print("请检查 config.yaml 中的 database 配置。")
         sys.exit(1)
 
     # ── 写入预置角色和默认数据集 ──────────────────────────────────────────────
