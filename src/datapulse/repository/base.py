@@ -136,17 +136,32 @@ _PRESET_ROLES = [
 class DBManager:
     """PostgreSQL 存储管理器（单例），所有 repository 的统一入口"""
 
-    def __init__(self, db_url: str) -> None:
-        # 从 url 中提取 host/db 用于日志（不打印密码）
+    def __init__(
+        self,
+        db_url:       str,
+        connect_args: dict | None = None,
+        db_url_safe:  str | None  = None,
+    ) -> None:
+        _ca = connect_args or {}
+
+        # ── 启动日志（INFO：脱敏 URL；DEBUG/dev：同时打印 connect_args）──────────
+        _log.info("DB engine initializing", url=db_url_safe or "(url masked)")
         try:
-            from urllib.parse import urlparse
-            _p = urlparse(db_url)
-            _log.info("DB engine created", host=_p.hostname, port=_p.port, db=_p.path.lstrip("/"))
+            from datapulse.config.settings import get_settings as _gs
+            _s = _gs()
+            if _s.log_level.upper() == "DEBUG" or _s.app_env.lower() == "dev":
+                # connect_args 中只有 host/port/target_session_attrs，无密码，可全量打印
+                _log.debug(
+                    "DB connect_args",
+                    connect_args=_ca if _ca else "(embedded in url)",
+                )
         except Exception:
-            _log.info("DB engine created")
+            pass
+
         self._engine = create_engine(
             db_url,
-            pool_pre_ping=True,
+            connect_args=_ca,
+            pool_pre_ping=True,   # 连接前 ping，自动剔除失效连接（故障切换后连接池自愈）
             pool_size=5,
             max_overflow=10,
             echo=False,
@@ -716,9 +731,13 @@ class DBManager:
 _db: DBManager | None = None
 
 
-def init_db(db_url: str) -> None:
+def init_db(
+    db_url:       str,
+    connect_args: dict | None = None,
+    db_url_safe:  str | None  = None,
+) -> None:
     global _db
-    _db = DBManager(db_url)
+    _db = DBManager(db_url, connect_args=connect_args, db_url_safe=db_url_safe)
 
 
 def get_db() -> DBManager:

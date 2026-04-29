@@ -55,7 +55,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _log = structlog.get_logger(__name__)
     _log.info("datapulse starting", env=settings.app_env, version="2.0.0")
 
-    init_db(settings.db_url)
+    init_db(
+        settings.db_url,
+        connect_args=settings.db_connect_args,
+        db_url_safe=settings.db_url_safe,
+    )
     get_db().seed_defaults()
 
     _log.info("datapulse ready")
