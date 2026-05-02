@@ -23,6 +23,7 @@ dependencies = [
     "sentence-transformers>=3.0.0",
     "faiss-cpu>=1.7.4",
     "pycryptodome>=3.20.0",
+    "apscheduler>=3.10.0",
 ]
 
 [build-system]

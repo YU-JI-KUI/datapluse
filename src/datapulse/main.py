@@ -40,6 +40,7 @@ from datapulse.logging import setup_logging, shutdown_logging
 from datapulse.middleware.access_log import AccessLogMiddleware
 from datapulse.middleware.trace import TraceMiddleware
 from datapulse.repository import get_db, init_db
+from datapulse.scheduler import start_scheduler, stop_scheduler
 
 # 新版 router（遵循统一响应规范）
 from datapulse.router import annotation, comment, conflict, data_item, data_state, pre_annotation
@@ -62,11 +63,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     get_db().seed_defaults()
 
+    start_scheduler()   # 启动定时任务（每天 02:00 上海时间全量向量化）
     _log.info("datapulse ready")
     try:
         yield
     finally:
         _log.info("datapulse shutting down")
+        stop_scheduler()
         shutdown_logging()   # 优雅关闭：确保队列内所有日志写入磁盘后再退出
 
 
@@ -119,6 +122,44 @@ async def health():
 
 # ── 前端静态文件托管 ────────────────────────────────────────────────────────────
 _FRONTEND_DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
+_DOCS_DIST     = _FRONTEND_DIST / "docs"
+
+
+def _docs_response(path: str) -> FileResponse:
+    """从 VitePress dist 目录解析并返回对应文件。
+    查找顺序：精确匹配 → 加 .html 后缀 → 目录下 index.html → 404 页面。
+    """
+    target = _DOCS_DIST / path if path else _DOCS_DIST
+    if path:
+        if target.is_file():
+            return FileResponse(str(target))
+        html_target = _DOCS_DIST / (path + ".html")
+        if html_target.is_file():
+            return FileResponse(str(html_target))
+        index_target = target / "index.html"
+        if index_target.is_file():
+            return FileResponse(str(index_target))
+    # 未命中文件一律返回首页（VitePress 客户端路由处理）
+    idx = _DOCS_DIST / "index.html"
+    if idx.is_file():
+        return FileResponse(str(idx))
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404, detail="文档站尚未构建，请先运行 build.sh")
+
+
+# 文档路由：/docs 和 /docs/* — 必须在 SPA catch-all 之前注册
+# 注意：app.mount("/docs", StaticFiles(...)) 与 catch-all route 存在已知冲突，
+#       改为显式路由处理避免 Starlette 路由匹配顺序问题。
+@app.get("/docs", include_in_schema=False)
+@app.get("/docs/", include_in_schema=False)
+async def serve_docs_index():
+    return _docs_response("")
+
+
+@app.get("/docs/{path:path}", include_in_schema=False)
+async def serve_docs(path: str):
+    return _docs_response(path)
+
 
 if _FRONTEND_DIST.exists():
     _assets = _FRONTEND_DIST / "assets"

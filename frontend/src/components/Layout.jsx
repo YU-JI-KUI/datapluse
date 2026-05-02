@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard, Database, Search, Tag, AlertTriangle,
   Settings, Download, LogOut, Cpu, ChevronLeft, ChevronRight,
-  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen,
+  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen, BookOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { datasetApi, authApi, getCurrentDatasetId, setCurrentDatasetId } from '@/lib/api'
@@ -113,6 +113,7 @@ export default function Layout() {
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem('sidebar-collapsed') === 'true'
   )
+
   const [datasets, setDatasets]           = useState([])
   const [currentDataset, setCurrentDataset] = useState(getCurrentDatasetId())
   const [dsOpen, setDsOpen]               = useState(false)
@@ -329,22 +330,37 @@ export default function Layout() {
             )}
           </div>
 
-          {/* Collapse toggle */}
-          <button
-            onClick={toggleSidebar}
-            className={cn(
-              'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-100 transition-colors',
-              collapsed ? 'justify-center' : ''
-            )}
-            title={collapsed ? '展开侧边栏' : '收起侧边栏'}
-          >
-            {collapsed ? <ChevronRight className="w-4 h-4" /> : (
-              <>
-                <ChevronLeft className="w-4 h-4" />
-                <span>收起</span>
-              </>
-            )}
-          </button>
+          {/* 使用文档 + 折叠按钮 */}
+          <div className={cn('flex gap-1', collapsed ? 'flex-col' : '')}>
+            <a
+              href="/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                'flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-100 transition-colors',
+                collapsed ? 'w-full justify-center' : 'flex-1'
+              )}
+              title="使用文档"
+            >
+              <BookOpen className="w-4 h-4 shrink-0" />
+              {!collapsed && <span>使用文档</span>}
+            </a>
+            <button
+              onClick={toggleSidebar}
+              className={cn(
+                'flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-gray-800 hover:text-gray-100 transition-colors',
+                collapsed ? 'w-full justify-center' : 'flex-1'
+              )}
+              title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            >
+              {collapsed ? <ChevronRight className="w-4 h-4" /> : (
+                <>
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>收起</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </aside>
 

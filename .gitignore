@@ -37,3 +37,4 @@ frontend/package-lock.json
 *.swp
 /models/
 /logs/
+/frontend/public/docs/

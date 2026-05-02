@@ -6,7 +6,7 @@ import {
 import {
   Database, CheckCircle, AlertTriangle, Cpu,
   ArrowRight, Play, RefreshCw, Tag, Clock, Zap, Timer,
-  CheckCheck, ChevronRight, XCircle,
+  CheckCheck, ChevronRight, XCircle, BrainCircuit,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -29,7 +29,6 @@ const STATUS_CONFIG = [
 const PIPELINE_STEPS = [
   { key: 'process',      label: '数据清洗',   icon: '🧹' },
   { key: 'pre_annotate', label: '预标注',     icon: '🤖' },
-  { key: 'embed',        label: '向量化',     icon: '🔢' },
   { key: 'check',        label: '冲突检测',   icon: '🔍' },
 ]
 
@@ -188,7 +187,6 @@ function CompletedResults({ pipeline }) {
   const stepLabel = {
     process:      '数据清洗',
     pre_annotate: 'LLM 预标注',
-    embed:        '向量化',
     check:        '冲突检测',
   }
 
@@ -199,13 +197,10 @@ function CompletedResults({ pipeline }) {
       return `${fmtNum(r.processed)} 条清洗完成${r.skipped > 0 ? `，${fmtNum(r.skipped)} 跳过` : ''}`
     if (step === 'pre_annotate')
       return `${fmtNum(r.annotated)} 条已预标注`
-    if (step === 'embed')
-      return `${fmtNum(r.embedded)} 条已向量化（索引 ${fmtNum(r.index_size)}）`
     if (step === 'check') {
       const clean     = r.clean    ?? 0
       const lConflict = r.label_conflicts    ?? 0
       const sConflict = r.semantic_conflicts ?? 0
-      const total     = r.total ?? 0
       return `${fmtNum(clean)} 条通过，${fmtNum(lConflict + sConflict)} 条冲突（标签 ${fmtNum(lConflict)} / 语义 ${fmtNum(sConflict)}）`
     }
     return JSON.stringify(r)
@@ -231,6 +226,75 @@ function CompletedResults({ pipeline }) {
           <Clock className="w-3 h-3" />
           完成于 {new Date(pipeline.finished_at).toLocaleString('zh-CN')}
         </div>
+      )}
+    </div>
+  )
+}
+
+// 向量化离线任务状态卡
+function EmbedJobCard({ embedJob }) {
+  if (!embedJob?.status) return null
+
+  const isRunning   = embedJob.status === 'running'
+  const isCompleted = embedJob.status === 'completed'
+  const isError     = embedJob.status === 'error'
+
+  return (
+    <div className={`rounded-lg border p-3 text-xs space-y-2
+      ${isRunning   ? 'border-blue-200 bg-blue-50' :
+        isCompleted ? 'border-green-200 bg-green-50' :
+        isError     ? 'border-red-200 bg-red-50' :
+                      'border-muted bg-muted/30'}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <BrainCircuit className={`w-3.5 h-3.5
+            ${isRunning   ? 'text-blue-500 animate-pulse' :
+              isCompleted ? 'text-green-600' :
+              isError     ? 'text-red-500' : 'text-muted-foreground'}`}
+          />
+          <span className={`font-medium
+            ${isRunning   ? 'text-blue-700' :
+              isCompleted ? 'text-green-700' :
+              isError     ? 'text-red-700' : 'text-muted-foreground'}`}>
+            {isRunning   ? '向量化进行中…' :
+             isCompleted ? '向量化已完成' :
+             isError     ? '向量化失败' : '向量化空闲'}
+          </span>
+        </div>
+        <span className="text-muted-foreground tabular-nums">
+          {isRunning && `${embedJob.progress || 0}%`}
+          {!isRunning && embedJob.detail?.elapsed_s != null && `耗时 ${embedJob.detail.elapsed_s}s`}
+        </span>
+      </div>
+
+      {isRunning && (
+        <Progress value={embedJob.progress || 0} className="h-1" />
+      )}
+
+      {isCompleted && (
+        <p className="text-green-600">
+          {embedJob.detail?.new_vectors != null && (
+            <>新增 {fmtNum(embedJob.detail.new_vectors)} 条向量</>
+          )}
+          {embedJob.detail?.index_size != null && (
+            <>，索引总量 {fmtNum(embedJob.detail.index_size)}</>
+          )}
+          {embedJob.detail?.skipped > 0 && (
+            <span className="text-muted-foreground ml-1">
+              （{fmtNum(embedJob.detail.skipped)} 条已有向量，跳过）
+            </span>
+          )}
+        </p>
+      )}
+
+      {isError && (
+        <p className="text-red-600">{embedJob.detail?.error || '未知错误'}</p>
+      )}
+
+      {embedJob.updated_at && (
+        <p className="text-muted-foreground">
+          更新于 {embedJob.updated_at.slice(0, 16).replace('T', ' ')}
+        </p>
       )}
     </div>
   )
@@ -267,14 +331,17 @@ export default function Dashboard() {
   })
 
   // Pipeline 轮询：
-  //   running → 每 2s 快速刷新，感知进度变化
-  //   其他状态 → 停止自动轮询（completed / error / idle 不需要持续查询）
+  //   主流程 running → 每 2s 快速刷新
+  //   embed_job running → 每 3s 刷新（离线任务，不需要那么频繁）
+  //   其他状态 → 停止自动轮询
   const { data: pipelineRes, refetch: refetchPipeline } = useQuery({
     queryKey: ['pipeline-status', datasetId],
     queryFn:  () => pipelineApi.status(datasetId),
     refetchInterval: (query) => {
-      const status = query.state.data?.data?.data?.status
-      return status === 'running' ? 2_000 : false
+      const d = query.state.data?.data?.data
+      if (d?.status === 'running') return 2_000
+      if (d?.embed_job?.status === 'running') return 3_000
+      return false
     },
     refetchIntervalInBackground: true,   // 修复 Windows 下后台轮询不工作
     enabled: datasetId !== null,
@@ -282,6 +349,7 @@ export default function Dashboard() {
 
   const stats    = statsRes?.data?.data    || {}
   const pipeline = pipelineRes?.data?.data || {}
+  const embedJob = pipeline.embed_job      || {}
 
   const chartData = STATUS_CONFIG.map(s => ({
     name:  s.label,
@@ -450,6 +518,14 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground">
                 点击「运行 Pipeline」开始全量处理。
               </p>
+            )}
+
+            {/* 向量化离线任务状态（独立于主 Pipeline，始终显示） */}
+            {embedJob.status && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1.5">离线任务</p>
+                <EmbedJobCard embedJob={embedJob} />
+              </div>
             )}
 
             {/* 时间信息（非运行中时展示） */}

@@ -25,7 +25,9 @@ from datapulse.repository.base import get_db
 
 _log = structlog.get_logger(__name__)
 
+# 主流程步骤（不含 embed，embed 是独立的离线 job）
 STEPS = ["process", "pre_annotate", "embed", "check"]
+PIPELINE_STEPS = ["process", "pre_annotate", "check"]
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
@@ -265,22 +267,33 @@ async def step_embed(dataset_id: int, operator: str = "pipeline") -> dict[str, A
         )
 
         if embedded % _STATUS_UPDATE_INTERVAL < batch_size or embedded == total:
-            _set_status(
-                dataset_id, "running", "embed",
+            # 注意：这里用 _set_embed_status（而非 _set_status），
+            # 避免覆盖主流程 pipeline status 中的 embed_job 字段。
+            _set_embed_status(
+                dataset_id, "running",
                 int(embedded / total * 100),
                 detail=_make_detail(embedded, total, skipped, start_time),
                 operator=operator,
             )
 
-    # rebuild_index 是 CPU 密集型操作，放到线程池执行，不阻塞 asyncio 事件循环
+    # embedding 推理完成，进入 FAISS 索引重建阶段。
+    # rebuild_index 是 CPU 密集型操作，放到线程池执行，不阻塞 asyncio 事件循环。
+    # 先更新状态告知前端当前阶段，否则此阶段无任何状态写入，前端长时间无响应。
+    _set_embed_status(
+        dataset_id, "running", 100,
+        {"msg": "重建 FAISS 索引...", "embedded": embedded, "skipped": skipped},
+        operator=operator,
+    )
     import asyncio as _asyncio
     t_index_start = time.time()
     loop  = _asyncio.get_event_loop()
     count = await loop.run_in_executor(None, rebuild_index, dataset_id)
     t_index       = round(time.time() - t_index_start, 1)
 
-    elapsed = round(time.time() - start_time, 1)
-    result  = {"step": "embed", "embedded": embedded, "skipped": skipped, "index_size": count}
+    elapsed     = round(time.time() - start_time, 1)
+    new_vectors = embedded - skipped   # 本次新计算的向量数（不含已有的）
+    result  = {"step": "embed", "embedded": embedded, "skipped": skipped,
+               "new_vectors": new_vectors, "index_size": count}
     _log.info(
         "step=embed done",
         dataset_id=dataset_id,
@@ -322,26 +335,99 @@ async def step_check(dataset_id: int, operator: str = "pipeline") -> dict[str, A
     return {"step": "check", **result}
 
 
+# ── Embed 离线 Job ─────────────────────────────────────────────────────────────
+# embed 不再是主流程的一部分，作为独立的后台任务运行。
+# 状态写在 pipeline status 的 embed_job 字段，与主流程状态互不干扰。
+
+
+def _set_embed_status(
+    dataset_id: int,
+    status: str,
+    progress: int = 0,
+    detail: dict[str, Any] | None = None,
+    operator: str = "embed_job",
+) -> None:
+    """将 embed job 状态合并写入 pipeline status 的 embed_job 字段。"""
+    db      = get_db()
+    current = db.get_pipeline_status(dataset_id) or {}
+    current["embed_job"] = {
+        "status":     status,
+        "progress":   progress,
+        "detail":     detail or {},
+        "updated_at": str(_now()),
+        "updated_by": operator,
+    }
+    db.set_pipeline_status(dataset_id, current)
+
+
+async def run_embed_job(dataset_id: int, operator: str = "embed_job") -> dict[str, Any]:
+    """
+    独立 embed 离线任务：embedding 推理 + FAISS 索引重建。
+    与主 pipeline 解耦，不阻塞 process / pre_annotate / check 三步流程。
+
+    调用方式：
+      - 手动触发：POST /api/pipeline/embed?dataset_id=1
+      - 主流程完成后由 run_all 以 fire-and-forget 方式启动（不等待结果）
+    """
+    t0 = time.time()
+    _log.info("embed_job started", dataset_id=dataset_id, operator=operator)
+    _set_embed_status(dataset_id, "running", 0,
+                      {"msg": "开始 embedding 推理"}, operator=operator)
+    try:
+        result = await step_embed(dataset_id, operator=operator)
+        elapsed = round(time.time() - t0, 1)
+        _log.info("embed_job completed", dataset_id=dataset_id,
+                  elapsed_s=elapsed, **result)
+        _set_embed_status(
+            dataset_id, "completed", 100,
+            {"elapsed_s": elapsed, **result},
+            operator=operator,
+        )
+        return result
+    except Exception as e:
+        elapsed = round(time.time() - t0, 1)
+        _log.error("embed_job failed", dataset_id=dataset_id,
+                   elapsed_s=elapsed, error=str(e))
+        _set_embed_status(
+            dataset_id, "error", 0,
+            {"error": str(e), "elapsed_s": elapsed},
+            operator=operator,
+        )
+        raise
+
+
+def run_embed_job_sync(dataset_id: int, operator: str = "embed_job") -> None:
+    """同步包装器，供 FastAPI BackgroundTasks 使用。"""
+    import asyncio as _asyncio
+    _asyncio.run(run_embed_job(dataset_id, operator=operator))
+
+
 # ── 全量 Pipeline ──────────────────────────────────────────────────────────────
 
 
 async def run_all(dataset_id: int, operator: str = "pipeline") -> None:
+    """
+    主流程：process → pre_annotate → check
+    embed 已从主流程移除，作为独立离线 job 运行（见 run_embed_job）。
+
+    step_check 在没有 embedding 向量时会跳过语义冲突检测，只做标签冲突检测，
+    待 embed job 完成后可手动触发 check 重跑以补充语义冲突结果。
+    """
     t0 = time.time()
     _log.info("pipeline started", dataset_id=dataset_id, operator=operator)
     _set_status(dataset_id, "running", "process", 0, started_at=_now(), operator=operator)
     try:
         r1 = await step_process(dataset_id, operator=operator)
         r2 = await step_pre_annotate(dataset_id, operator=operator)
-        r3 = await step_embed(dataset_id, operator=operator)
-        r4 = await step_check(dataset_id, operator=operator)
+        r3 = await step_check(dataset_id, operator=operator)
         elapsed = round(time.time() - t0, 1)
         _log.info(
             "pipeline completed",
             dataset_id=dataset_id, elapsed_s=elapsed,
-            process=r1, pre_annotate=r2, embed=r3, check=r4,
+            process=r1, pre_annotate=r2, check=r3,
         )
         _set_status(dataset_id, "completed", "", 100,
-                    finished_at=_now(), results=[r1, r2, r3, r4], operator=operator)
+                    finished_at=_now(), results=[r1, r2, r3], operator=operator)
     except Exception as e:
         elapsed = round(time.time() - t0, 1)
         _log.error("pipeline failed", dataset_id=dataset_id, elapsed_s=elapsed, error=str(e))

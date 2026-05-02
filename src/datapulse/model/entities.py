@@ -204,6 +204,7 @@ class PipelineStatus(Base):
     current_step = Column(String(50), nullable=False, default="")
     progress     = Column(Integer, nullable=False, default=0)
     detail       = Column(JSONB)
+    embed_job    = Column(JSONB)       # 向量化离线任务状态（与主流程解耦）
     started_at   = Column(_TS)
     finished_at  = Column(_TS)
     error        = Column(Text)

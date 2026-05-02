@@ -28,14 +28,15 @@ class PipelineRepository:
         if row is None:
             return {"status": "idle", "current_step": "", "progress": 0, "detail": {}}
         return {
-            "status": row.status,
+            "status":       row.status,
             "current_step": row.current_step or "",
-            "progress": row.progress,
-            "detail": row.detail or {},
-            "started_at": row.started_at.isoformat() if row.started_at else None,
-            "finished_at": row.finished_at.isoformat() if row.finished_at else None,
-            "error": row.error,
-            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            "progress":     row.progress,
+            "detail":       row.detail or {},
+            "embed_job":    row.embed_job or {},   # 向量化离线任务状态
+            "started_at":   row.started_at.isoformat() if row.started_at else None,
+            "finished_at":  row.finished_at.isoformat() if row.finished_at else None,
+            "error":        row.error,
+            "updated_at":   row.updated_at.isoformat() if row.updated_at else None,
         }
 
     def set_status(self, dataset_id: int, data: dict[str, Any]) -> None:
@@ -47,6 +48,9 @@ class PipelineRepository:
         row.current_step = data.get("current_step", "")
         row.progress     = data.get("progress", 0)
         row.detail       = data.get("detail")
+        # embed_job 仅在显式传入时才覆盖，防止主流程进度更新时清除向量化状态
+        if "embed_job" in data:
+            row.embed_job = data["embed_job"] or None
         # started_at / finished_at 仅在显式传入时才覆盖，防止进度更新时将其清空
         if "started_at" in data and data["started_at"] is not None:
             row.started_at = data["started_at"]

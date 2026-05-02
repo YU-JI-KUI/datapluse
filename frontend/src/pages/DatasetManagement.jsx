@@ -9,7 +9,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Pencil, Trash2, Users, FolderOpen, Search, X } from 'lucide-react'
+import { Plus, Pencil, Trash2, Users, FolderOpen, Search, X, RotateCcw } from 'lucide-react'
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table'
@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
-import { datasetApi, userApi } from '@/lib/api'
+import { datasetApi, userApi, pipelineApi } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 
 // ── 新建/编辑数据集弹窗 ────────────────────────────────────────────────────────
@@ -182,6 +182,9 @@ export default function DatasetManagement() {
   const [assignDs, setAssignDs]     = useState(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [deleteDs, setDeleteDs]     = useState(null)
+  const [resetOpen, setResetOpen]   = useState(false)
+  const [resetDs, setResetDs]       = useState(null)
+  const [resetEmbed, setResetEmbed] = useState(false)
 
   // 获取全部数据集（含 inactive），admin only
   const { data, isLoading, refetch } = useQuery({
@@ -237,9 +240,25 @@ export default function DatasetManagement() {
     }
   }
 
+  async function handleReset() {
+    if (!resetDs) return
+    try {
+      await pipelineApi.resetStatus(resetDs.id, resetEmbed)
+      toast.success(`数据集「${resetDs.name}」Pipeline 状态已重置`)
+      qc.invalidateQueries(['pipeline-status'])
+    } catch (err) {
+      toast.error(err.response?.data?.detail || '重置失败')
+    } finally {
+      setResetDs(null)
+      setResetOpen(false)
+      setResetEmbed(false)
+    }
+  }
+
   function openEdit(ds) { setEditDs(ds); setFormOpen(true) }
   function openAssign(ds) { setAssignDs(ds); setAssignOpen(true) }
   function requestDelete(ds) { setDeleteDs(ds); setConfirmOpen(true) }
+  function requestReset(ds) { setResetDs(ds); setResetEmbed(false); setResetOpen(true) }
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -342,6 +361,13 @@ export default function DatasetManagement() {
                           <Pencil className="w-4 h-4" />
                         </button>
                         <button
+                          onClick={() => requestReset(ds)}
+                          className="p-1.5 rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600 transition-colors"
+                          title="重置 Pipeline 状态"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => requestDelete(ds)}
                           className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
                           title="删除"
@@ -387,6 +413,41 @@ export default function DatasetManagement() {
         cancelLabel="取消"
         onConfirm={handleDelete}
       />
+
+      {/* 重置 Pipeline 状态弹窗 */}
+      <Dialog open={resetOpen} onOpenChange={v => { if (!v) { setResetOpen(false); setResetDs(null); setResetEmbed(false) } }}>
+        <DialogContent className="max-w-sm">
+          <h2 className="text-base font-semibold mb-1">重置 Pipeline 状态</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            数据集：<strong>{resetDs?.name}</strong>
+          </p>
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-xs text-orange-700 mb-4 space-y-1">
+            <p>将把 Pipeline 状态重置为 <strong>idle</strong>，仅清除状态记录。</p>
+            <p>不会修改任何数据条目（数据本身保持不变）。</p>
+            <p>适用于：Pipeline 卡在 running 状态、或需要重新触发全量运行。</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer mb-4">
+            <input
+              type="checkbox"
+              checked={resetEmbed}
+              onChange={e => setResetEmbed(e.target.checked)}
+              className="w-4 h-4 rounded"
+            />
+            同时重置向量化（embed_job）状态
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => { setResetOpen(false); setResetDs(null); setResetEmbed(false) }}>
+              取消
+            </Button>
+            <Button
+              className="bg-orange-500 hover:bg-orange-600 text-white"
+              onClick={handleReset}
+            >
+              确认重置
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

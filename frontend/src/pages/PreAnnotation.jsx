@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Cpu, RefreshCw, Loader2 } from 'lucide-react'
+import { Cpu, RefreshCw, Loader2, BrainCircuit } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -14,8 +14,9 @@ import SearchBar from '@/components/SearchBar'
 
 export default function PreAnnotation() {
   const qc = useQueryClient()
-  const [running, setRunning]   = useState(false)
-  const [datasetId]             = useState(() => getCurrentDatasetId())
+  const [running, setRunning]         = useState(false)
+  const [embedRunning, setEmbedRunning] = useState(false)
+  const [datasetId]                   = useState(() => getCurrentDatasetId())
 
   // 列表搜索/分页状态
   const [page, setPage]         = useState(1)
@@ -54,13 +55,30 @@ export default function PreAnnotation() {
     refetchInterval: 10000,
   })
 
-  const processedResult  = processedData?.data?.data ?? {}
+  const processedResult    = processedData?.data?.data ?? {}
   const preAnnotatedResult = preAnnotatedData?.data?.data ?? {}
-  const pipeline         = pipelineData?.data?.data ?? pipelineData?.data ?? {}
+  const pipeline           = pipelineData?.data?.data ?? pipelineData?.data ?? {}
+  const embedJob           = pipeline.embed_job ?? {}
 
-  const processedCount   = processedResult.pagination?.total || 0
+  const processedCount    = processedResult.pagination?.total || 0
   const preAnnotatedTotal = preAnnotatedResult.pagination?.total || 0
-  const preAnnotated     = preAnnotatedResult.list || []
+  const preAnnotated      = preAnnotatedResult.list || []
+
+  const embedRunningRemote = embedJob.status === 'running'
+
+  async function handleRunEmbed() {
+    setEmbedRunning(true)
+    try {
+      await pipelineApi.runEmbed(datasetId)
+      toast.success('向量化任务已启动（后台运行，可继续操作）')
+      qc.invalidateQueries(['pipeline-status'])
+    } catch (err) {
+      const msg = err.response?.data?.detail || '向量化启动失败'
+      toast.error(msg)
+    } finally {
+      setEmbedRunning(false)
+    }
+  }
 
   async function handleRunPreAnnotate() {
     setRunning(true)
@@ -106,6 +124,17 @@ export default function PreAnnotation() {
               : <><Cpu className="w-4 h-4 mr-2" /> 运行预标注</>
             }
           </Button>
+          <Button
+            variant="outline" size="sm"
+            onClick={handleRunEmbed}
+            disabled={embedRunning || embedRunningRemote}
+            title="向量化 + 重建 FAISS 索引（离线任务，不影响主流程）"
+          >
+            {(embedRunning || embedRunningRemote)
+              ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> 向量化中</>
+              : <><BrainCircuit className="w-4 h-4 mr-2" /> 触发向量化</>
+            }
+          </Button>
         </div>
       </div>
 
@@ -136,7 +165,7 @@ export default function PreAnnotation() {
         </Card>
       </div>
 
-      {/* 进度条 */}
+      {/* 预标注进度条 */}
       {(running || pipeline.current_step === 'pre_annotate') && (
         <Card className="border-purple-200 bg-purple-50">
           <CardContent className="p-4">
@@ -145,6 +174,55 @@ export default function PreAnnotation() {
               <span className="text-purple-600">{pipeline.progress || 0}%</span>
             </div>
             <Progress value={pipeline.progress || 0} className="h-1.5" />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Embed Job 状态卡（有状态时才显示） */}
+      {embedJob.status && (
+        <Card className={
+          embedJob.status === 'running'   ? 'border-blue-200 bg-blue-50' :
+          embedJob.status === 'completed' ? 'border-green-200 bg-green-50' :
+          embedJob.status === 'error'     ? 'border-red-200 bg-red-50' : ''
+        }>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between text-sm mb-1">
+              <div className="flex items-center gap-2">
+                <BrainCircuit className={`w-4 h-4 ${
+                  embedJob.status === 'running'   ? 'text-blue-600 animate-pulse' :
+                  embedJob.status === 'completed' ? 'text-green-600' : 'text-red-600'
+                }`} />
+                <span className={`font-medium ${
+                  embedJob.status === 'running'   ? 'text-blue-700' :
+                  embedJob.status === 'completed' ? 'text-green-700' : 'text-red-700'
+                }`}>
+                  {embedJob.status === 'running'   ? '向量化进行中...' :
+                   embedJob.status === 'completed' ? `向量化完成（索引已重建）` :
+                   `向量化失败：${embedJob.detail?.error || '未知错误'}`}
+                </span>
+              </div>
+              <span className="text-muted-foreground text-xs">
+                {embedJob.status === 'running'
+                  ? `${embedJob.progress || 0}%`
+                  : embedJob.detail?.elapsed_s != null
+                    ? `耗时 ${embedJob.detail.elapsed_s}s`
+                    : ''}
+              </span>
+            </div>
+            {embedJob.status === 'running' && (
+              <Progress value={embedJob.progress || 0} className="h-1.5 mt-2" />
+            )}
+            {embedJob.status === 'completed' && embedJob.detail?.index_size != null && (
+              <p className="text-xs text-green-600 mt-1">
+                索引向量数：{embedJob.detail.index_size.toLocaleString()}，
+                嵌入条数：{embedJob.detail.embedded?.toLocaleString() ?? '-'}
+              </p>
+            )}
+            {embedJob.updated_at && (
+              <p className="text-xs text-muted-foreground mt-1">
+                更新于 {embedJob.updated_at.slice(0, 16).replace('T', ' ')}
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

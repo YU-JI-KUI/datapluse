@@ -90,33 +90,71 @@ class VectorIndex:
     # ── 持久化 ────────────────────────────────────────────────────────────────
 
     def save(self) -> None:
-        """保存索引到磁盘（仅 FAISS 模式有持久化文件）"""
-        emb = get_emb()
+        """保存索引到磁盘（原子写：先写临时文件，再 rename，避免中途崩溃留下损坏文件）"""
+        emb  = get_emb()
         path = emb.vector_index_path(self._dataset_id)
         if _FAISS_AVAILABLE and self._faiss_index is not None:
-            faiss.write_index(self._faiss_index, str(path))
+            tmp = path.with_suffix(".tmp")
+            try:
+                faiss.write_index(self._faiss_index, str(tmp))
+                tmp.replace(path)   # 原子 rename，POSIX 保证
+            except Exception:
+                tmp.unlink(missing_ok=True)
+                raise
         elif self._np_vecs is not None:
-            # numpy 兜底：把 vecs 和 ids 分别保存
-            np.save(str(path.with_suffix(".vecs.npy")), self._np_vecs)
-            np.save(str(path.with_suffix(".ids.npy")),  np.array(self._np_ids, dtype=np.int64))
+            # numpy 兜底：同样走临时文件 + rename
+            for suffix, data in (
+                (".vecs.npy", self._np_vecs),
+                (".ids.npy",  np.array(self._np_ids, dtype=np.int64)),
+            ):
+                target = path.with_suffix(suffix)
+                tmp    = path.with_suffix(suffix + ".tmp")
+                try:
+                    np.save(str(tmp), data)
+                    tmp.replace(target)
+                except Exception:
+                    tmp.unlink(missing_ok=True)
+                    raise
 
     def load(self) -> bool:
-        """从磁盘加载索引，返回是否成功"""
+        """从磁盘加载索引，返回是否成功。
+        文件损坏时自动删除并返回 False，让上层重新从 DB 重建，而不是抛出异常。
+        """
         emb  = get_emb()
         path = emb.vector_index_path(self._dataset_id)
         if _FAISS_AVAILABLE and path.exists():
-            self._faiss_index = faiss.read_index(str(path))
-            self._dim = self._faiss_index.d
-            return True
+            try:
+                self._faiss_index = faiss.read_index(str(path))
+                self._dim = self._faiss_index.d
+                return True
+            except Exception as exc:
+                _log.warning(
+                    "faiss index corrupted, deleting and will rebuild from DB",
+                    dataset_id=self._dataset_id,
+                    path=str(path),
+                    error=str(exc),
+                )
+                path.unlink(missing_ok=True)   # 删除损坏文件，下次重建
+                return False
         # numpy 兜底
         vecs_path = path.with_suffix(".vecs.npy")
         ids_path  = path.with_suffix(".ids.npy")
         if vecs_path.exists() and ids_path.exists():
-            self._np_vecs = np.load(str(vecs_path))
-            self._np_ids  = np.load(str(ids_path)).tolist()
-            if self._np_vecs.ndim == 2:
-                self._dim = self._np_vecs.shape[1]
-            return True
+            try:
+                self._np_vecs = np.load(str(vecs_path))
+                self._np_ids  = np.load(str(ids_path)).tolist()
+                if self._np_vecs.ndim == 2:
+                    self._dim = self._np_vecs.shape[1]
+                return True
+            except Exception as exc:
+                _log.warning(
+                    "numpy index corrupted, deleting and will rebuild from DB",
+                    dataset_id=self._dataset_id,
+                    error=str(exc),
+                )
+                vecs_path.unlink(missing_ok=True)
+                ids_path.unlink(missing_ok=True)
+                return False
         return False
 
     # ── 属性 ──────────────────────────────────────────────────────────────────

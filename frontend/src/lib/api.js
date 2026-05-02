@@ -129,6 +129,19 @@ export const pipelineApi = {
     if (!datasetId) return _empty()
     return api.post('/pipeline/run-step', { step, dataset_id: datasetId })
   },
+  // 触发 Embed 离线任务（向量化 + 重建 FAISS 索引），与主 pipeline 解耦
+  runEmbed: (datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/pipeline/embed', {}, { params: { dataset_id: datasetId } })
+  },
+  // 重置 Pipeline 状态为 idle（解除卡住/错误状态）
+  // resetEmbed=true 时同时清除 embed_job 状态
+  resetStatus: (datasetId, resetEmbed = false) => {
+    if (!datasetId) return _empty()
+    return api.post('/pipeline/reset', {}, {
+      params: { dataset_id: datasetId, reset_embed: resetEmbed },
+    })
+  },
   status: (datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty({ status: 'idle', progress: 0, detail: {} })
     return api.get('/pipeline/status', { params: { dataset_id: datasetId } })
