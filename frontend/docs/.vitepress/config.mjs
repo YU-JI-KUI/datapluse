@@ -2,13 +2,13 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   lang:        'zh-CN',
-  title:       'Datapulse',
+  title:       'Datapulse · 文档',
   description: 'AI 数据生产平台用户文档',
   base:        '/docs/',
   outDir:      '../public/docs',
 
   themeConfig: {
-    logo: { light: '../logo.svg', dark: '../logo.svg', alt: 'Datapulse' },
+    logo: '/logo.svg',
     siteTitle: 'Datapulse 文档',
 
     nav: [

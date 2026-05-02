@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <clipPath id="clip">
+      <rect width="100" height="100" rx="22"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="100" height="100" rx="22" fill="url(#bg)"/>
+
+  <!-- D letterform (path-based for crisp rendering at all sizes) -->
+  <g clip-path="url(#clip)">
+    <!-- Outer D: left bar + right semicircle -->
+    <path d="M20 14 L20 86 L52 86 A36 36 0 0 0 52 14 Z" fill="white"/>
+    <!-- Inner cutout -->
+    <path d="M30 25 L30 75 L48 75 A25 25 0 0 0 48 25 Z" fill="url(#bg)"/>
+
+    <!-- Pulse / EKG line at bottom -->
+    <polyline
+      points="8,80 22,80 28,68 35,90 41,74 47,80 92,80"
+      fill="none"
+      stroke="rgba(255,255,255,0.75)"
+      stroke-width="4"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+</svg>
