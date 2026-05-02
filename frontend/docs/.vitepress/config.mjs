@@ -8,7 +8,7 @@ export default defineConfig({
   outDir:      '../public/docs',
 
   themeConfig: {
-    logo: { light: '/logo.svg', dark: '/logo.svg', alt: 'Datapulse' },
+    logo: { light: '../logo.svg', dark: '../logo.svg', alt: 'Datapulse' },
     siteTitle: 'Datapulse 文档',
 
     nav: [
@@ -49,7 +49,7 @@ export default defineConfig({
     socialLinks: [],
 
     footer: {
-      message:   'Datapulse 内部文档，仅供内部使用',
+      message:   'Datapulse 使用文档，仅供内部使用',
       copyright: `© ${new Date().getFullYear()} Datapulse Team`,
     },
 
