@@ -28,7 +28,7 @@
 |------|------|
 | `content` | 文本内容（必选） |
 | `label` | 最终意图标签 |
-| `label_source` | 标签来源：`auto`（多数投票）/ `manual`（管理员裁决） |
+| `label_source` | 标签来源：`auto`（多数投票）/ `manual`（人工裁决） |
 | `model_pred` | 模型预测标签 |
 | `model_score` | 模型置信度（0～1） |
 | `annotator` | 标注员用户名 |
