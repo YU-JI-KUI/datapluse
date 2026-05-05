@@ -37,9 +37,8 @@ async def _embed_all_datasets() -> None:
 
     db = get_db()
     try:
-        result = db.list_datasets(status="active")
-        # list_datasets 返回分页结构或列表，兼容两种格式
-        datasets: list[dict] = result.get("list", result) if isinstance(result, dict) else result
+        # list_datasets() 默认只返回 active 数据集（include_inactive=False），无需额外过滤
+        datasets: list[dict] = db.list_datasets()
     except Exception:
         _log.exception("scheduler.embed_all: failed to list datasets")
         return
@@ -70,7 +69,7 @@ def start_scheduler() -> AsyncIOScheduler:
     # 每天上海时间 02:00 触发全量向量化
     scheduler.add_job(
         _embed_all_datasets,
-        trigger=CronTrigger(hour=2, minute=0, timezone=_SHANGHAI),
+        trigger=CronTrigger(hour=21, minute=17, timezone=_SHANGHAI),
         id="embed_all_datasets",
         name="Daily embedding for all active datasets",
         replace_existing=True,
