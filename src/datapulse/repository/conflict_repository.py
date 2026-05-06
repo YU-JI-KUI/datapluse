@@ -145,16 +145,21 @@ class ConflictRepository:
             row.status = "resolved"
         return [r.id for r in rows]
 
-    def batch_load_open_conflicts(self, conflict_ids: list[int]) -> dict[int, int]:
-        """返回 {conflict_id: data_id}，仅包含 status='open' 的记录（1 次查询）。"""
+    def batch_load_open_conflicts(self, conflict_ids: list[int]) -> dict[int, tuple[int, int]]:
+        """返回 {conflict_id: (data_id, dataset_id)}，仅含 status='open' 的记录（1 次 JOIN 查询）。
+
+        附带 dataset_id 是为了让冲突批量裁决时同时写入 t_work_volume，
+        避免再回表查 t_data_item.dataset_id。
+        """
         if not conflict_ids:
             return {}
         rows = (
-            self.session.query(Conflict.id, Conflict.data_id)
+            self.session.query(Conflict.id, Conflict.data_id, DataItem.dataset_id)
+            .join(DataItem, DataItem.id == Conflict.data_id)
             .filter(Conflict.id.in_(conflict_ids), Conflict.status == "open")
             .all()
         )
-        return {r.id: r.data_id for r in rows}
+        return {r.id: (r.data_id, r.dataset_id) for r in rows}
 
     def batch_clear(self, data_ids: list[int]) -> int:
         """批量删除一批 data_id 的 open 冲突（1 次 DELETE IN），返回删除行数。

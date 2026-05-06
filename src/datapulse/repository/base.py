@@ -597,8 +597,8 @@ class DBManager:
         with self._session() as s:
             return ConflictRepository(s).batch_revoke(conflict_ids)
 
-    def batch_load_open_conflicts(self, conflict_ids: list[int]) -> dict[int, int]:
-        """返回 {conflict_id: data_id}，仅含 status='open' 的记录（1 次查询）。"""
+    def batch_load_open_conflicts(self, conflict_ids: list[int]) -> dict[int, tuple[int, int]]:
+        """返回 {conflict_id: (data_id, dataset_id)}，仅含 status='open' 的记录（1 次查询）。"""
         from datapulse.repository.conflict_repository import ConflictRepository
         with self._session() as s:
             return ConflictRepository(s).batch_load_open_conflicts(conflict_ids)
@@ -620,6 +620,46 @@ class DBManager:
         from datapulse.repository.data_repository import DataRepository
         with self._session() as s:
             DataRepository(s).enrich_for_conflict(items)
+
+    # ── Work Volume（标注员工作量明细） ───────────────────────────────────────
+
+    def record_work_volume(
+        self,
+        *,
+        data_id: int,
+        dataset_id: int,
+        username: str,
+        action_type: str,
+        created_by: str = "",
+    ) -> None:
+        """单条写入工作量明细。action_type: 'annotation' | 'conflict_resolve'。"""
+        from datapulse.repository.work_volume_repository import WorkVolumeRepository
+        with self._session() as s:
+            WorkVolumeRepository(s).record_one(
+                data_id=data_id, dataset_id=dataset_id,
+                username=username, action_type=action_type,
+                created_by=created_by or username,
+            )
+
+    def bulk_record_work_volume(self, records: list[dict]) -> int:
+        """批量写入工作量明细（1 次 bulk INSERT）。每项须含 username, dataset_id, data_id, action_type。"""
+        from datapulse.repository.work_volume_repository import WorkVolumeRepository
+        with self._session() as s:
+            return WorkVolumeRepository(s).bulk_record(records)
+
+    def get_annotator_stats(
+        self,
+        dataset_id: int | None,
+        today_start: datetime,
+        week_start: datetime,
+        month_start: datetime,
+    ) -> list[dict]:
+        """一次 GROUP BY 返回所有标注员的今/周/月工作量。dataset_id=None 表示跨数据集汇总。"""
+        from datapulse.repository.work_volume_repository import WorkVolumeRepository
+        with self._session() as s:
+            return WorkVolumeRepository(s).query_aggregates(
+                dataset_id, today_start, week_start, month_start,
+            )
 
     # ── Comment ───────────────────────────────────────────────────────────────
 

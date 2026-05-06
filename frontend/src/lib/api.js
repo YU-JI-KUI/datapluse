@@ -322,4 +322,13 @@ export const templateApi = {
   delete: (id)              => api.delete(`/templates/${id}`),
 }
 
+// ── Dashboard ──────────────────────────────────────────────────────────────────
+
+export const dashboardApi = {
+  // 每个标注员的今日 / 本周 / 本月工作量；不传 dataset_id = 跨数据集汇总
+  annotatorStats: (datasetId) =>
+    api.get('/dashboard/annotator-stats',
+      datasetId != null ? { params: { dataset_id: datasetId } } : {}),
+}
+
 export default api

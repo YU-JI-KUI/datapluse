@@ -176,6 +176,20 @@ class Conflict(Base):
     created_by    = Column(String(45), nullable=False, default="")
 
 
+class WorkVolume(Base):
+    """t_work_volume — 标注员工作量明细（每次标注 / 裁决一行，仅 INSERT）"""
+
+    __tablename__ = "t_work_volume"
+
+    id          = Column(BigInteger, primary_key=True, autoincrement=True)
+    username    = Column(String(100), nullable=False, index=True)
+    dataset_id  = Column(BigInteger, nullable=False, index=True)
+    data_id     = Column(BigInteger, nullable=False)
+    action_type = Column(String(20), nullable=False)
+    created_at  = Column(_TS, nullable=False)
+    created_by  = Column(String(45), nullable=False, default="")
+
+
 class ExportTemplate(Base):
     """t_export_template — 导出模板（字段映射 + 格式 + 过滤条件）"""
 

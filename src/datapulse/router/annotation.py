@@ -42,6 +42,12 @@ async def submit_annotation(body: AnnotationCreate, user: CurrentUser):
         cot=body.cot,
         created_by=user.username,
     )
+    # 记录工作量明细（每次提交都 +1，DataExplorer 修改也走这条路径）
+    db.record_work_volume(
+        data_id=body.data_id, dataset_id=item["dataset_id"],
+        username=user.username, action_type="annotation",
+        created_by=user.username,
+    )
     # 将数据状态推进到 annotated
     db.update_stage(body.data_id, "annotated", updated_by=user.username)
 
@@ -163,9 +169,10 @@ async def batch_submit(
     user: CurrentUser,
 ):
     """批量提交标注（自动记录标注日志评论，与单条提交行为一致）"""
-    db      = get_db()
-    results = []
-    errors  = []
+    db           = get_db()
+    results      = []
+    errors       = []
+    work_records = []
     now_str = datetime.now(_SHANGHAI).strftime("%Y-%m-%d %H:%M")
     for req in body:
         item = db.get_data(req.data_id, enrich=False)
@@ -180,5 +187,15 @@ async def batch_submit(
             user.username,
             f"[批量标注] {user.username} 于 {now_str} 标注为「{req.label}」（v{ann['version']}）",
         )
+        work_records.append({
+            "username":    user.username,
+            "dataset_id":  item["dataset_id"],
+            "data_id":     req.data_id,
+            "action_type": "annotation",
+            "created_by":  user.username,
+        })
         results.append(ann)
+    # 批量写入工作量明细（1 次 bulk INSERT，避免 N+1）
+    if work_records:
+        db.bulk_record_work_volume(work_records)
     return success({"updated": results, "errors": errors})

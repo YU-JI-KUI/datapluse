@@ -156,11 +156,18 @@ async def resolve_conflict(conflict_id: int, body: ResolveBody, user: CurrentUse
     conflict = db.get_conflict_by_id(conflict_id)
     if not conflict:
         raise NotFoundError(f"冲突记录不存在: id={conflict_id}")
-    data_id = conflict["data_id"]
+    data_id   = conflict["data_id"]
+    data_item = db.get_data(data_id, enrich=False)
 
     db.set_annotation_result_manual(data_id, body.label, resolver=user.username, cot=body.cot)
     db.update_stage(data_id, "checked", updated_by=user.username)
     db.resolve_conflict(conflict_id)
+    if data_item:
+        db.record_work_volume(
+            data_id=data_id, dataset_id=data_item["dataset_id"],
+            username=user.username, action_type="conflict_resolve",
+            created_by=user.username,
+        )
 
     now_str = datetime.now(_SHANGHAI).strftime("%Y-%m-%d %H:%M")
     db.create_comment(
@@ -194,13 +201,14 @@ async def batch_resolve_conflicts(body: BatchResolveBody, user: CurrentUser):
 
     db = get_db()
 
-    # 1. 批量加载 open 冲突 → {conflict_id: data_id}（1 次 IN 查询）
+    # 1. 批量加载 open 冲突 → {conflict_id: (data_id, dataset_id)}（1 次 JOIN 查询）
     conflict_map = db.batch_load_open_conflicts(body.conflict_ids)
     if not conflict_map:
         return success({"resolved": 0, "data_ids": []})
 
     resolved_ids = list(conflict_map.keys())
-    data_ids     = list(conflict_map.values())
+    pairs        = list(conflict_map.values())            # [(data_id, dataset_id), ...]
+    data_ids     = [did for did, _ in pairs]
 
     # 2. 批量写入 manual 标注结果（3 IN + 1 bulk INSERT）
     db.bulk_set_annotation_result_manual(
@@ -223,6 +231,18 @@ async def batch_resolve_conflicts(body: BatchResolveBody, user: CurrentUser):
             "created_by": user.username,
         }
         for data_id in data_ids
+    ])
+
+    # 6. 批量写入工作量明细（1 bulk INSERT，每条裁决 +1）
+    db.bulk_record_work_volume([
+        {
+            "username":    user.username,
+            "dataset_id":  dsid,
+            "data_id":     did,
+            "action_type": "conflict_resolve",
+            "created_by":  user.username,
+        }
+        for did, dsid in pairs
     ])
 
     return success({

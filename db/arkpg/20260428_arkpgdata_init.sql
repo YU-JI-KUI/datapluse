@@ -446,6 +446,35 @@ CREATE INDEX IF NOT EXISTS idx_t_user_dataset_dataset_id ON t_user_dataset(datas
 DO $$ BEGIN RAISE NOTICE '[OK ]  t_user_dataset'; END $$;
 
 
+-- ---------------------------------------------------------------------------
+-- 17. 标注员工作量明细表（每次操作一行，仅 INSERT；用于 Dashboard 统计）
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN RAISE NOTICE '[DDL] 17/17 t_work_volume ...'; END $$;
+CREATE TABLE IF NOT EXISTS t_work_volume (
+    id          BIGSERIAL    NOT NULL,
+    username    VARCHAR(100) NOT NULL,
+    dataset_id  BIGINT       NOT NULL,
+    data_id     BIGINT       NOT NULL,
+    action_type VARCHAR(20)  NOT NULL,
+    created_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by  VARCHAR(45)  NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_work_volume PRIMARY KEY (id)
+);
+COMMENT ON TABLE  t_work_volume             IS '标注员工作量明细表（每次操作一行，仅 INSERT）';
+COMMENT ON COLUMN t_work_volume.id          IS '主键ID';
+COMMENT ON COLUMN t_work_volume.username    IS '操作人用户名（逻辑外键 → t_user.username）';
+COMMENT ON COLUMN t_work_volume.dataset_id  IS '数据集ID（逻辑外键 → t_dataset.id）';
+COMMENT ON COLUMN t_work_volume.data_id     IS '数据ID（逻辑外键 → t_data_item.id）';
+COMMENT ON COLUMN t_work_volume.action_type IS '操作类型：annotation=提交标注，conflict_resolve=冲突裁决';
+COMMENT ON COLUMN t_work_volume.created_at  IS '操作时间（上海时区）';
+COMMENT ON COLUMN t_work_volume.created_by  IS '操作人';
+CREATE INDEX IF NOT EXISTS idx_t_work_volume_user_time
+    ON t_work_volume (username, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_t_work_volume_dataset_time
+    ON t_work_volume (dataset_id, created_at DESC);
+DO $$ BEGIN RAISE NOTICE '[OK ]  t_work_volume'; END $$;
+
+
 -- =============================================================================
 -- 初始数据（所有 INSERT 均幂等）
 -- =============================================================================

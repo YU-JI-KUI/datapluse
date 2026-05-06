@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import AnnotatorVolumeTable from '@/components/AnnotatorVolumeTable'
 import { dataApi, pipelineApi, getCurrentDatasetId } from '@/lib/api'
 import { toast } from 'sonner'
 import { useState, useEffect } from 'react'
@@ -570,6 +571,19 @@ export default function Dashboard() {
         </Card>
 
       </div>
+
+      {/* ── 标注员工作量 ─────────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">标注员工作量</CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            每次标注 / 冲突裁决都计 +1（同一条数据反复修改也算多次）；撤销不计入。每 15 秒自动刷新。
+          </p>
+        </CardHeader>
+        <CardContent>
+          <AnnotatorVolumeTable datasetId={datasetId} />
+        </CardContent>
+      </Card>
     </div>
   )
 }
