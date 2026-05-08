@@ -1,0 +1,15 @@
+{
+  "docker": [
+    {
+      "component": "super-agent-ark-datapulse",
+      "type": "sfe",
+      "name": "super-agent-ark-datapulse"
+    }
+  ],
+  "sqls": {
+    "postgresql": [
+      "db/arkpg/20260428_arkpgdata_init.sql",
+      "db/arkpg/20260508_arkpgdata_add_annotation_cot_fields.sql"
+    ]
+  }
+}

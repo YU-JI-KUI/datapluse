@@ -327,10 +327,24 @@ export default function Annotation() {
   const handleLabel = useCallback(async (label) => {
     if (!currentItem || submitting) return
     setSubmitting(true)
+
+    // 自动生成 COT（仅当 cot 为空且有任意结构化字段时）
+    // 格式：【关键词｜关键词说明｜标签｜业务分类】
+    let finalCot = cot.trim() || null
+    if (!finalCot && requireCot) {
+      const kw   = keywords.trim()
+      const desc = keywordsDesc.trim()
+      const cat  = category !== 'none' ? category : ''
+      if (kw || desc || cat) {
+        finalCot = `${kw}｜${desc}｜${label}｜${cat}`
+        setCot(finalCot)   // 回填到输入框，让用户可见
+      }
+    }
+
     try {
       await annotationApi.submit(
         currentItem.id, label,
-        cot.trim() || null,
+        finalCot,
         (category !== 'none' ? category : null),
         keywords.trim() || null,
         keywordsDesc.trim() || null,

@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard, Database, Search, Tag, AlertTriangle,
   Settings, Download, LogOut, Cpu, ChevronLeft, ChevronRight,
-  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen, BookOpen, Tags,
+  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen, BookOpen, Tags, Terminal,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { datasetApi, authApi, getCurrentDatasetId, setCurrentDatasetId } from '@/lib/api'
@@ -25,6 +25,7 @@ const navItems = [
   { to: '/config',         label: '配置中心',      icon: Settings },
   { to: '/datasets',       label: '数据集管理',    icon: FolderOpen, adminOnly: true },
   { to: '/users',          label: '用户管理',      icon: Users,       adminOnly: true },
+  { to: '/admin-sql',      label: 'SQL 工具',      icon: Terminal,    adminOnly: true },
 ]
 
 // ── 修改密码弹窗 ───────────────────────────────────────────────────────────────

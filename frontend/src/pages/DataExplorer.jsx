@@ -17,6 +17,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -386,10 +387,22 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
   async function handleSubmit() {
     if (!label) { toast.error('请选择标注标签'); return }
     setSubmitting(true)
+
+    // 自动生成 COT（格式：【关键词｜关键词说明｜标签｜业务分类】）
+    let finalCot = cot.trim() || null
+    if (!finalCot && requireCot) {
+      const kw   = keywords.trim()
+      const desc = keywordsDesc.trim()
+      const cat  = category !== 'none' ? category : ''
+      if (kw || desc || cat) {
+        finalCot = `【${kw}｜${desc}｜${label}｜${cat}】`
+      }
+    }
+
     try {
       await annotationApi.submit(
         item.id, label,
-        cot.trim() || null,
+        finalCot,
         category !== 'none' ? category : null,
         keywords.trim() || null,
         keywordsDesc.trim() || null,
@@ -615,7 +628,8 @@ export default function DataExplorer() {
   const [sideItem, setSideItem]             = useState(null)
   const [sideMode, setSideMode]             = useState('detail')
   const [datasetId, setDatasetId]           = useState(() => getCurrentDatasetId())
-  const [openMenuId, setOpenMenuId]         = useState(null)  // 3-dot 菜单
+  // 3-dot 菜单（portal 渲染，避免被 Table overflow-auto 裁剪）
+  const [menuState, setMenuState] = useState(null) // { item, top, left } | null
 
   // 修改标注标签对话框
   const [editItem, setEditItem]       = useState(null)
@@ -639,11 +653,24 @@ export default function DataExplorer() {
 
   // 点击页面其他区域关闭 3-dot 菜单
   useEffect(() => {
-    if (!openMenuId) return
-    const handler = () => setOpenMenuId(null)
+    if (!menuState) return
+    const handler = () => setMenuState(null)
     document.addEventListener('click', handler)
     return () => document.removeEventListener('click', handler)
-  }, [openMenuId])
+  }, [menuState])
+
+  // 打开 3-dot 菜单：用 getBoundingClientRect 计算 fixed 坐标，避开 table overflow
+  function openMenu(e, item) {
+    e.stopPropagation()
+    if (menuState?.item?.id === item.id) { setMenuState(null); return }
+    const rect       = e.currentTarget.getBoundingClientRect()
+    const menuWidth  = 144 // w-36
+    const menuHeight = 170 // 大概高度
+    const spaceBelow = window.innerHeight - rect.bottom
+    const top  = spaceBelow < menuHeight ? rect.top - menuHeight - 4 : rect.bottom + 4
+    const left = rect.right - menuWidth
+    setMenuState({ item, top, left })
+  }
 
   const { data: labelOptionsRes } = useQuery({
     queryKey: ['label-options', datasetId],
@@ -1061,42 +1088,13 @@ export default function DataExplorer() {
                         </TableCell>
                         {/* 3-dot 操作菜单 */}
                         <TableCell onClick={e => e.stopPropagation()}>
-                          <div className="relative flex justify-center">
+                          <div className="flex justify-center">
                             <button
-                              onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === item.id ? null : item.id) }}
+                              onClick={e => openMenu(e, item)}
                               className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                             >
                               <MoreHorizontal className="w-4 h-4" />
                             </button>
-                            {openMenuId === item.id && (
-                              <div className="absolute right-0 top-8 z-50 bg-white border rounded-lg shadow-lg py-1 w-36 text-sm">
-                                <button
-                                  onClick={() => { openDetail(item); setOpenMenuId(null) }}
-                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted transition-colors"
-                                >
-                                  <Eye className="w-3.5 h-3.5 text-muted-foreground" />查看详情
-                                </button>
-                                <button
-                                  onClick={(e) => { openEdit(item, e); setOpenMenuId(null) }}
-                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted transition-colors"
-                                >
-                                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />修改标注
-                                </button>
-                                <button
-                                  onClick={() => { openComment(item); setOpenMenuId(null) }}
-                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted transition-colors"
-                                >
-                                  <MessageSquare className="w-3.5 h-3.5 text-muted-foreground" />添加评论
-                                </button>
-                                <div className="border-t my-1" />
-                                <button
-                                  onClick={() => { requestDelete(item.id); setOpenMenuId(null) }}
-                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-destructive hover:bg-red-50 transition-colors"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />删除
-                                </button>
-                              </div>
-                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1166,6 +1164,42 @@ export default function DataExplorer() {
         onConfirm={handleBatchEdit}
         submitting={batchEditing}
       />
+
+      {/* 3-dot 操作菜单 — 用 portal 渲染到 body，position: fixed 避开 table overflow-auto */}
+      {menuState && createPortal(
+        <div
+          style={{ position: 'fixed', top: menuState.top, left: menuState.left, zIndex: 9999 }}
+          className="bg-white border rounded-lg shadow-lg py-1 w-36 text-sm"
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            onClick={() => { openDetail(menuState.item); setMenuState(null) }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted transition-colors"
+          >
+            <Eye className="w-3.5 h-3.5 text-muted-foreground" />查看详情
+          </button>
+          <button
+            onClick={e => { openEdit(menuState.item, e); setMenuState(null) }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted transition-colors"
+          >
+            <Pencil className="w-3.5 h-3.5 text-muted-foreground" />修改标注
+          </button>
+          <button
+            onClick={() => { openComment(menuState.item); setMenuState(null) }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted transition-colors"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-muted-foreground" />添加评论
+          </button>
+          <div className="border-t my-1" />
+          <button
+            onClick={() => { requestDelete(menuState.item.id); setMenuState(null) }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-destructive hover:bg-red-50 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />删除
+          </button>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }

@@ -13,6 +13,7 @@ import Export from '@/pages/Export'
 import Users from '@/pages/Users'
 import DatasetManagement from '@/pages/DatasetManagement'
 import Categories       from '@/pages/Categories'
+import AdminSQL        from '@/pages/AdminSQL'
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem('token')
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="export"         element={<Export />} />
           <Route path="datasets"        element={<RequireAdmin><DatasetManagement /></RequireAdmin>} />
           <Route path="users"          element={<RequireAdmin><Users /></RequireAdmin>} />
+          <Route path="admin-sql"      element={<RequireAdmin><AdminSQL /></RequireAdmin>} />
         </Route>
       </Routes>
     </BrowserRouter>

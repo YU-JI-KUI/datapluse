@@ -352,6 +352,12 @@ export const categoryApi = {
   },
 }
 
+// ── Admin ──────────────────────────────────────────────────────────────────────
+
+export const adminApi = {
+  executeSQL: (sql) => api.post('/admin/execute-sql', { sql }),
+}
+
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 
 export const dashboardApi = {
