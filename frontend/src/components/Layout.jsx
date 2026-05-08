@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard, Database, Search, Tag, AlertTriangle,
   Settings, Download, LogOut, Cpu, ChevronLeft, ChevronRight,
-  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen, BookOpen,
+  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen, BookOpen, Tags,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { datasetApi, authApi, getCurrentDatasetId, setCurrentDatasetId } from '@/lib/api'
@@ -14,12 +14,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
 const navItems = [
-  { to: '/dashboard',      label: 'Dashboard',    icon: LayoutDashboard },
-  { to: '/explorer',       label: 'Data Explorer', icon: Search },
+  { to: '/dashboard',      label: '首页',          icon: LayoutDashboard },
+  { to: '/explorer',       label: '数据管理',      icon: Search },
   { to: '/data',           label: '数据上传',      icon: Database },
   { to: '/pre-annotation', label: '预标注',        icon: Cpu },
   { to: '/annotation',     label: '标注工作台',    icon: Tag },
   { to: '/conflicts',      label: '冲突检测',      icon: AlertTriangle },
+  { to: '/categories',     label: '业务分类',      icon: Tags },
   { to: '/export',         label: '数据导出',      icon: Download },
   { to: '/config',         label: '配置中心',      icon: Settings },
   { to: '/datasets',       label: '数据集管理',    icon: FolderOpen, adminOnly: true },

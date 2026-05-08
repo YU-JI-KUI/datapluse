@@ -29,15 +29,18 @@ def _now() -> datetime:
 
 def _ann_to_dict(a: Annotation) -> dict[str, Any]:
     return {
-        "id": a.id,
-        "data_id": a.data_id,
-        "username": a.username,
-        "label": a.label,
-        "cot": a.cot,
-        "version": a.version,
-        "is_active": a.is_active,
-        "created_at": a.created_at.isoformat() if a.created_at else None,
-        "created_by": a.created_by,
+        "id":            a.id,
+        "data_id":       a.data_id,
+        "username":      a.username,
+        "label":         a.label,
+        "cot":           a.cot,
+        "category":      a.category,
+        "keywords":      a.keywords,
+        "keywords_desc": a.keywords_desc,
+        "version":       a.version,
+        "is_active":     a.is_active,
+        "created_at":    a.created_at.isoformat() if a.created_at else None,
+        "created_by":    a.created_by,
     }
 
 
@@ -130,6 +133,9 @@ class AnnotationRepository:
         username: str,
         label: str,
         cot: str | None = None,
+        category: str | None = None,
+        keywords: str | None = None,
+        keywords_desc: str | None = None,
         created_by: str = "",
     ) -> dict[str, Any]:
         """提交标注，自动处理版本递增并将旧版本标记为历史，然后触发聚合更新"""
@@ -156,6 +162,9 @@ class AnnotationRepository:
             username=username,
             label=label,
             cot=cot or None,
+            category=category or None,
+            keywords=keywords or None,
+            keywords_desc=keywords_desc or None,
             version=new_version,
             is_active=True,
             created_at=ts,

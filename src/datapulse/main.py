@@ -43,7 +43,7 @@ from datapulse.repository import get_db, init_db
 from datapulse.scheduler import start_scheduler, stop_scheduler
 
 # 新版 router（遵循统一响应规范）
-from datapulse.router import annotation, comment, conflict, dashboard, data_item, data_state, pre_annotation
+from datapulse.router import annotation, category, comment, conflict, dashboard, data_item, data_state, pre_annotation
 
 
 @asynccontextmanager
@@ -104,6 +104,7 @@ app.include_router(conflict.router,       prefix="/api/conflicts",        tags=[
 app.include_router(pre_annotation.router, prefix="/api/pre-annotations",  tags=["LLM预标注"])
 app.include_router(data_state.router,     prefix="/api/data-state",       tags=["状态流转"])
 app.include_router(dashboard.router,      prefix="/api/dashboard",        tags=["Dashboard"])
+app.include_router(category.router,       prefix="/api/categories",       tags=["业务分类"])
 
 # ── API 路由（旧版，保持兼容）────────────────────────────────────────────────
 app.include_router(auth.router,       prefix="/api/auth",      tags=["认证"])

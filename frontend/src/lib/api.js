@@ -153,8 +153,15 @@ export const pipelineApi = {
 
 export const annotationApi = {
   // 提交标注（POST /api/annotations）
-  submit: (data_id, label, cot = null) =>
-    api.post('/annotations', { data_id, label, ...(cot ? { cot } : {}) }),
+  submit: (data_id, label, cot = null, category = null, keywords = null, keywords_desc = null) =>
+    api.post('/annotations', {
+      data_id,
+      label,
+      ...(cot           ? { cot }           : {}),
+      ...(category      ? { category }      : {}),
+      ...(keywords      ? { keywords }      : {}),
+      ...(keywords_desc ? { keywords_desc } : {}),
+    }),
 
   // 批量提交（POST /api/annotations/batch）
   batchSubmit: (annotations) =>
@@ -320,6 +327,29 @@ export const templateApi = {
   },
   update: (id, data)        => api.put(`/templates/${id}`, data),
   delete: (id)              => api.delete(`/templates/${id}`),
+}
+
+// ── Categories ─────────────────────────────────────────────────────────────────
+
+export const categoryApi = {
+  list: (params = {}, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty({ list: [], pagination: { page: 1, page_size: 10, total: 0 } })
+    return api.get('/categories', { params: { dataset_id: datasetId, ...params } })
+  },
+  create: (data, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    return api.post('/categories', { ...data, dataset_id: datasetId })
+  },
+  update: (id, data)  => api.patch(`/categories/${id}`, data),
+  delete:      (id)       => api.delete(`/categories/${id}`),
+  bulkDelete:  (ids)      => api.post('/categories/bulk-delete', { ids }),
+  upload: (file, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return _empty()
+    const form = new FormData()
+    form.append('file', file)
+    form.append('dataset_id', String(datasetId))
+    return api.post('/categories/upload', form)
+  },
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────

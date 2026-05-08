@@ -40,6 +40,9 @@ async def submit_annotation(body: AnnotationCreate, user: CurrentUser):
         username=user.username,
         label=body.label,
         cot=body.cot,
+        category=body.category,
+        keywords=body.keywords,
+        keywords_desc=body.keywords_desc,
         created_by=user.username,
     )
     # 记录工作量明细（每次提交都 +1，DataExplorer 修改也走这条路径）
@@ -179,8 +182,12 @@ async def batch_submit(
         if not item:
             errors.append({"data_id": req.data_id, "error": "数据不存在"})
             continue
-        ann = db.create_annotation(req.data_id, user.username, req.label,
-                                    cot=req.cot, created_by=user.username)
+        ann = db.create_annotation(
+            req.data_id, user.username, req.label,
+            cot=req.cot, category=req.category,
+            keywords=req.keywords, keywords_desc=req.keywords_desc,
+            created_by=user.username,
+        )
         db.update_stage(req.data_id, "annotated", updated_by=user.username)
         db.create_comment(
             req.data_id,

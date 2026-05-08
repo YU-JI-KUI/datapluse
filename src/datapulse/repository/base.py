@@ -321,6 +321,49 @@ class DBManager:
         with self._session() as s:
             DatasetRepository(s).assign_users(dataset_id, usernames, by)
 
+    # ── Category ──────────────────────────────────────────────────────────────
+
+    def list_categories(self, dataset_id: int, keyword: str | None = None,
+                        page: int = 1, page_size: int = 10) -> dict:
+        from datapulse.repository.category_repository import CategoryRepository
+        with self._session() as s:
+            return CategoryRepository(s).list(dataset_id, keyword=keyword, page=page, page_size=page_size)
+
+    def get_category(self, category_id: int) -> dict | None:
+        from datapulse.repository.category_repository import CategoryRepository
+        with self._session() as s:
+            return CategoryRepository(s).get(category_id)
+
+    def create_category(self, dataset_id: int, name: str, description: str = "",
+                        created_by: str = "system") -> dict:
+        from datapulse.repository.category_repository import CategoryRepository
+        with self._session() as s:
+            return CategoryRepository(s).create(dataset_id, name, description, created_by)
+
+    def update_category(self, category_id: int, name: str | None = None,
+                        description: str | None = None, updated_by: str = "system") -> dict | None:
+        from datapulse.repository.category_repository import CategoryRepository
+        with self._session() as s:
+            return CategoryRepository(s).update(category_id, name=name, description=description, updated_by=updated_by)
+
+    def delete_category(self, category_id: int) -> bool:
+        from datapulse.repository.category_repository import CategoryRepository
+        with self._session() as s:
+            return CategoryRepository(s).delete(category_id)
+
+    def bulk_create_categories(self, dataset_id: int, records: list[dict],
+                               created_by: str = "system") -> dict:
+        """批量导入分类（Excel 上传）；重名的跳过，返回统计信息。"""
+        from datapulse.repository.category_repository import CategoryRepository
+        with self._session() as s:
+            return CategoryRepository(s).bulk_create(dataset_id, records, created_by)
+
+    def bulk_delete_categories(self, category_ids: list[int]) -> int:
+        """批量删除分类（1 次 DELETE IN），返回实际删除条数。"""
+        from datapulse.repository.category_repository import CategoryRepository
+        with self._session() as s:
+            return CategoryRepository(s).bulk_delete(category_ids)
+
     # ── Data ──────────────────────────────────────────────────────────────────
 
     def create_data(self, dataset_id: int, content: str, source: str = "",
@@ -404,13 +447,14 @@ class DBManager:
                       keyword: str | None = None,
                       start_date: str | None = None, end_date: str | None = None,
                       label: str | None = None,
+                      category: str | None = None,
                       page: int = 1, page_size: int = 20, enrich: bool = True) -> dict:
         from datapulse.repository.data_repository import DataRepository
         with self._session() as s:
             return DataRepository(s).list_all(
                 dataset_id, status=status, keyword=keyword,
                 start_date=start_date, end_date=end_date,
-                label=label,
+                label=label, category=category,
                 page=page, page_size=page_size, enrich=enrich,
             )
 
@@ -462,10 +506,18 @@ class DBManager:
     # ── Annotation ────────────────────────────────────────────────────────────
 
     def create_annotation(self, data_id: int, username: str, label: str,
-                           cot: str | None = None, created_by: str = "") -> dict:
+                           cot: str | None = None,
+                           category: str | None = None,
+                           keywords: str | None = None,
+                           keywords_desc: str | None = None,
+                           created_by: str = "") -> dict:
         from datapulse.repository.annotation_repository import AnnotationRepository
         with self._session() as s:
-            return AnnotationRepository(s).create_annotation(data_id, username, label, cot=cot, created_by=created_by)
+            return AnnotationRepository(s).create_annotation(
+                data_id, username, label,
+                cot=cot, category=category, keywords=keywords,
+                keywords_desc=keywords_desc, created_by=created_by,
+            )
 
     def get_active_annotations(self, data_id: int) -> list[dict]:
         from datapulse.repository.annotation_repository import AnnotationRepository

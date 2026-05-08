@@ -145,13 +145,16 @@ def _enrich_my_annotation(
     my_ann_row = next((a for a in ann_rows if a.username == my_username), None)
     base["my_annotation"] = (
         {
-            "id":         my_ann_row.id,
-            "username":   my_ann_row.username,
-            "label":      my_ann_row.label,
-            "cot":        my_ann_row.cot,
-            "version":    my_ann_row.version,
-            "is_active":  True,
-            "created_at": my_ann_row.created_at.isoformat() if my_ann_row.created_at else None,
+            "id":            my_ann_row.id,
+            "username":      my_ann_row.username,
+            "label":         my_ann_row.label,
+            "cot":           my_ann_row.cot,
+            "category":      my_ann_row.category,
+            "keywords":      my_ann_row.keywords,
+            "keywords_desc": my_ann_row.keywords_desc,
+            "version":       my_ann_row.version,
+            "is_active":     True,
+            "created_at":    my_ann_row.created_at.isoformat() if my_ann_row.created_at else None,
         }
         if my_ann_row else None
     )
@@ -185,13 +188,16 @@ def _enrich(session: Session, base: dict[str, Any], my_username: str | None = No
     )
     base["annotations"] = [
         {
-            "id":         a.id,
-            "username":   a.username,
-            "label":      a.label,
-            "cot":        a.cot,
-            "version":    a.version,
-            "is_active":  True,
-            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "id":            a.id,
+            "username":      a.username,
+            "label":         a.label,
+            "cot":           a.cot,
+            "category":      a.category,
+            "keywords":      a.keywords,
+            "keywords_desc": a.keywords_desc,
+            "version":       a.version,
+            "is_active":     True,
+            "created_at":    a.created_at.isoformat() if a.created_at else None,
         }
         for a in ann_rows
     ]
@@ -650,6 +656,7 @@ class DataRepository:
         start_date: str | None = None,
         end_date: str | None = None,
         label: str | None = None,
+        category: str | None = None,
         page: int = 1,
         page_size: int = 20,
         enrich: bool = True,
@@ -668,6 +675,17 @@ class DataRepository:
                 AnnotationResult,
                 AnnotationResult.data_id == DataItem.id,
             ).filter(AnnotationResult.final_label == label)
+        if category:
+            # 过滤：存在活跃标注且 category 匹配的条目（subquery，避免 JOIN 污染 label JOIN）
+            cat_subq = (
+                self.session.query(Annotation.data_id)
+                .filter(
+                    Annotation.is_active.is_(True),
+                    Annotation.category == category,
+                )
+                .subquery()
+            )
+            q = q.filter(DataItem.id.in_(self.session.query(cat_subq.c.data_id)))
         total = q.count()
         rows = (
             q.order_by(DataItem.updated_at.desc(), DataItem.id.desc())

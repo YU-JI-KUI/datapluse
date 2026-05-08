@@ -12,6 +12,7 @@ import ConfigCenter from '@/pages/ConfigCenter'
 import Export from '@/pages/Export'
 import Users from '@/pages/Users'
 import DatasetManagement from '@/pages/DatasetManagement'
+import Categories       from '@/pages/Categories'
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem('token')
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="pre-annotation" element={<PreAnnotation />} />
           <Route path="annotation"     element={<Annotation />} />
           <Route path="conflicts"      element={<ConflictDetection />} />
+          <Route path="categories"    element={<Categories />} />
           <Route path="config"         element={<ConfigCenter />} />
           <Route path="export"         element={<Export />} />
           <Route path="datasets"        element={<RequireAdmin><DatasetManagement /></RequireAdmin>} />

@@ -85,6 +85,7 @@ async def _parse_body(request: Request) -> dict | list | str | None:
     读取并解析请求体，返回：
       - dict   — JSON body（已 key 级别脱敏）
       - dict   — form-encoded body（已 key 级别脱敏）
+      - dict   — multipart/form-data（仅记录非文件字段 + 文件元数据，不记录二进制内容）
       - str    — 其他格式（截断为 _BODY_MAX_LEN 字符）
       - None   — 无 body
     注：request.body() 在 Starlette 中会缓存，重复读取安全。
@@ -94,6 +95,28 @@ async def _parse_body(request: Request) -> dict | list | str | None:
         return None
 
     ct = request.headers.get("content-type", "")
+
+    # multipart/form-data（含文件上传）：只记录元数据，不读取二进制内容
+    if "multipart/form-data" in ct:
+        try:
+            form = await request.form()
+            summary: dict = {}
+            for key, value in form.multi_items():
+                if hasattr(value, "filename"):
+                    # UploadFile：记录文件名 + 大小，不记录内容
+                    summary[key] = {
+                        "filename": value.filename,
+                        "size":     len(body),     # 近似总 body 大小
+                        "content_type": value.content_type,
+                    }
+                else:
+                    # 普通文本字段
+                    str_val = str(value)
+                    summary[key] = "***" if key.lower() in SENSITIVE_KEYS else str_val
+            return summary
+        except Exception:
+            return "<multipart/form-data: parse error>"
+
     raw = body.decode("utf-8", errors="replace")
 
     if "application/x-www-form-urlencoded" in ct:

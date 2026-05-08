@@ -138,11 +138,14 @@ class Annotation(Base):
 
     __tablename__ = "t_annotation"
 
-    id         = Column(BigInteger, primary_key=True, autoincrement=True)
-    data_id    = Column(BigInteger, nullable=False, index=True)
-    username   = Column(String(100), nullable=False)
-    label      = Column(String(200), nullable=False)
-    cot        = Column(Text, nullable=True)   # Chain of Thought 标注理由
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    data_id       = Column(BigInteger, nullable=False, index=True)
+    username      = Column(String(100), nullable=False)
+    label         = Column(String(200), nullable=False)
+    cot           = Column(Text, nullable=True)          # Chain of Thought 标注理由
+    category      = Column(String(200), nullable=True)   # 业务分类（来自 t_category.name）
+    keywords      = Column(String(500), nullable=True)   # 关键词
+    keywords_desc = Column(Text, nullable=True)          # 关键词说明
     version    = Column(Integer, nullable=False, default=1)
     is_active  = Column(Boolean, nullable=False, default=True)
     created_at = Column(_TS, nullable=False)
@@ -283,3 +286,22 @@ class AnnotationResult(Base):
     cot             = Column(Text,        nullable=True)                   # 裁决 COT（manual 时填写）
     updated_at      = Column(_TS, nullable=False)
     updated_by      = Column(String(45), nullable=False, default="")
+
+
+class Category(Base):
+    """t_category — 业务分类（按数据集隔离）"""
+
+    __tablename__ = "t_category"
+
+    id          = Column(BigInteger, primary_key=True, autoincrement=True)
+    dataset_id  = Column(BigInteger, nullable=False, index=True)
+    name        = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False, default="")
+    created_at  = Column(_TS, nullable=False)
+    created_by  = Column(String(100), nullable=False, default="")
+    updated_at  = Column(_TS, nullable=False)
+    updated_by  = Column(String(100), nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "name", name="uk_t_category_dataset_name"),
+    )

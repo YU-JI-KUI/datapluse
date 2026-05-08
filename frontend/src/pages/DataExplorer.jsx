@@ -21,7 +21,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   MessageSquare, RefreshCw,
-  X, Send, Eye, Clock, User, Tag, Cpu, Trash2, GitBranch, Pencil, Tags,
+  X, Send, Eye, Clock, User, Tag, Cpu, Trash2, GitBranch, Pencil, Tags, MoreHorizontal,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -35,7 +35,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
 import SearchBar from '@/components/SearchBar'
-import { dataApi, commentApi, annotationApi, configApi, getCurrentDatasetId } from '@/lib/api'
+import { dataApi, commentApi, annotationApi, categoryApi, configApi, getCurrentDatasetId } from '@/lib/api'
 import {
   formatDate, getStatusLabel, getStatusColor,
   getActiveLabel, getPreLabel, getPreScore, scoreColor,
@@ -339,9 +339,12 @@ function DetailPanel({ item, onClose }) {
 // ── 修改标注标签对话框 ────────────────────────────────────────────────────────
 
 function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
-  const [label,      setLabel]      = useState('')
-  const [cot,        setCot]        = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const [label,        setLabel]        = useState('')
+  const [cot,          setCot]          = useState('')
+  const [category,     setCategory]     = useState('none')
+  const [keywords,     setKeywords]     = useState('')
+  const [keywordsDesc, setKeywordsDesc] = useState('')
+  const [submitting,   setSubmitting]   = useState(false)
 
   // 从配置拿标签列表和 requireCot 设置
   const { data: cfgRes } = useQuery({
@@ -350,19 +353,47 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
     enabled:  open,
   })
   const labels     = cfgRes?.data?.data?.labels || []
-  // requireCot 仅控制是否显示 COT 输入框，不强制填写
   const requireCot = cfgRes?.data?.data?.pipeline?.require_cot ?? false
 
-  // 打开时重置
+  // 业务分类列表
+  const { data: catRes } = useQuery({
+    queryKey: ['categories-all'],
+    queryFn:  () => categoryApi.list({ page: 1, page_size: 100 }),
+    enabled:  open && requireCot,
+  })
+  const categoryOptions = catRes?.data?.data?.list ?? []
+
+  // 打开时重置，并回填当前数据的已有值
   useEffect(() => {
-    if (open) { setLabel(''); setCot('') }
-  }, [open])
+    if (open) {
+      setLabel('')
+      setCot('')
+      setCategory('none')
+      setKeywords('')
+      setKeywordsDesc('')
+      // 回填当前条目第一个有效标注的值（方便修改时保留旧内容）
+      const firstAnn = item?.annotations?.[0]
+      if (firstAnn) {
+        if (firstAnn.label)        setLabel(firstAnn.label)
+        if (firstAnn.cot)          setCot(firstAnn.cot)
+        if (firstAnn.category)     setCategory(firstAnn.category)
+        if (firstAnn.keywords)     setKeywords(firstAnn.keywords)
+        if (firstAnn.keywords_desc) setKeywordsDesc(firstAnn.keywords_desc)
+      }
+    }
+  }, [open, item])
 
   async function handleSubmit() {
     if (!label) { toast.error('请选择标注标签'); return }
     setSubmitting(true)
     try {
-      await annotationApi.submit(item.id, label, cot.trim() || null)
+      await annotationApi.submit(
+        item.id, label,
+        cot.trim() || null,
+        category !== 'none' ? category : null,
+        keywords.trim() || null,
+        keywordsDesc.trim() || null,
+      )
       toast.success(`已更新标注：${label}`)
       onSuccess?.()
       onOpenChange(false)
@@ -375,9 +406,9 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>修改标注标签 · #{item?.id}</DialogTitle>
+          <DialogTitle>修改标注 · #{item?.id}</DialogTitle>
         </DialogHeader>
 
         {item && (
@@ -404,29 +435,71 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
             </Select>
           </div>
 
-          {/* COT（由配置中心控制是否显示）*/}
+          {/* COT 结构化字段（由配置中心控制是否显示）*/}
           {requireCot && (
-            <div>
-              <label className="block text-sm font-medium mb-1.5">
-                标注理由（COT）<span className="text-xs text-muted-foreground ml-1">(Chain of Thought，选填)</span>
-              </label>
-              <textarea
-                className="w-full min-h-[100px] rounded-md border border-gray-200 px-3 py-2 text-sm bg-background
-                           placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-200 resize-y"
-                placeholder="请说明选择该标签的依据，例如：用户询问了保费金额，符合寿险意图的定义…"
-                value={cot}
-                onChange={e => setCot(e.target.value)}
-              />
+            <div className="space-y-3 border border-blue-100 rounded-xl p-4 bg-blue-50/40">
+              <p className="text-xs font-medium text-blue-700 flex items-center gap-1.5">
+                标注补充信息
+                <span className="text-muted-foreground font-normal">（均为选填）</span>
+              </p>
+
+              {/* 业务分类 */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">业务分类</label>
+                <Select value={category} onValueChange={setCategory}>
+                  <SelectTrigger className="h-8 text-sm bg-white">
+                    <SelectValue placeholder="选择业务分类（可选）" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" className="text-sm text-muted-foreground">不填写</SelectItem>
+                    {categoryOptions.map(c => (
+                      <SelectItem key={c.id} value={c.name} className="text-sm">{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* 关键词 */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">关键词</label>
+                <Input
+                  value={keywords}
+                  onChange={e => setKeywords(e.target.value)}
+                  placeholder="输入关键词（可选）"
+                  className="h-8 text-sm bg-white"
+                />
+              </div>
+
+              {/* 关键词说明 */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">关键词说明</label>
+                <textarea
+                  value={keywordsDesc}
+                  onChange={e => setKeywordsDesc(e.target.value)}
+                  placeholder="对关键词的详细说明（可选）"
+                  rows={2}
+                  className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60"
+                />
+              </div>
+
+              {/* COT 理由 */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">标注理由 (COT)</label>
+                <textarea
+                  value={cot}
+                  onChange={e => setCot(e.target.value)}
+                  placeholder="填写标注理由或推理依据（可选）"
+                  rows={2}
+                  className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60"
+                />
+              </div>
             </div>
           )}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={submitting || !label}
-          >
+          <Button onClick={handleSubmit} disabled={submitting || !label}>
             {submitting ? '提交中…' : '确认修改'}
           </Button>
         </DialogFooter>
@@ -534,13 +607,15 @@ const STATUS_OPTIONS = [
 ]
 
 export default function DataExplorer() {
-  const [filters, setFilters]         = useState({})
-  const [labelFilter, setLabelFilter] = useState('all')
-  const [page, setPage]               = useState(1)
-  const [pageSize, setPageSize]       = useState(10)
-  const [sideItem, setSideItem]       = useState(null)
-  const [sideMode, setSideMode]       = useState('detail')
-  const [datasetId, setDatasetId]     = useState(() => getCurrentDatasetId())
+  const [filters, setFilters]               = useState({})
+  const [labelFilter, setLabelFilter]       = useState('all')
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [page, setPage]                     = useState(1)
+  const [pageSize, setPageSize]             = useState(10)
+  const [sideItem, setSideItem]             = useState(null)
+  const [sideMode, setSideMode]             = useState('detail')
+  const [datasetId, setDatasetId]           = useState(() => getCurrentDatasetId())
+  const [openMenuId, setOpenMenuId]         = useState(null)  // 3-dot 菜单
 
   // 修改标注标签对话框
   const [editItem, setEditItem]       = useState(null)
@@ -555,11 +630,20 @@ export default function DataExplorer() {
       setDatasetId(e.detail.datasetId)
       setSelectedIds(new Set())
       setLabelFilter('all')
+      setCategoryFilter('all')
       setPage(1)
     }
     window.addEventListener('datasetChanged', handler)
     return () => window.removeEventListener('datasetChanged', handler)
   }, [])
+
+  // 点击页面其他区域关闭 3-dot 菜单
+  useEffect(() => {
+    if (!openMenuId) return
+    const handler = () => setOpenMenuId(null)
+    document.addEventListener('click', handler)
+    return () => document.removeEventListener('click', handler)
+  }, [openMenuId])
 
   const { data: labelOptionsRes } = useQuery({
     queryKey: ['label-options', datasetId],
@@ -569,12 +653,31 @@ export default function DataExplorer() {
   })
   const labelOptions = labelOptionsRes?.data?.data || []
 
+  // 配置（用于判断 requireCot）
+  const { data: configData } = useQuery({
+    queryKey: ['config', datasetId],
+    queryFn:  () => configApi.get(datasetId),
+    enabled:  !!datasetId,
+    staleTime: 60_000,
+  })
+  const requireCot = configData?.data?.data?.pipeline?.require_cot ?? false
+
+  // 业务分类列表（仅 requireCot 时加载）
+  const { data: categoriesData } = useQuery({
+    queryKey: ['categories-all', datasetId],
+    queryFn:  () => categoryApi.list({ page: 1, page_size: 100 }, datasetId),
+    enabled:  !!datasetId && requireCot,
+    staleTime: 60_000,
+  })
+  const categoryOptions = categoriesData?.data?.data?.list ?? []
+
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['explorer', datasetId, filters, labelFilter, page, pageSize],
+    queryKey: ['explorer', datasetId, filters, labelFilter, categoryFilter, page, pageSize],
     queryFn: () => dataApi.list({
       status:     filters.status     || undefined,
       keyword:    filters.keyword    || undefined,
       label:      labelFilter !== 'all' ? labelFilter : undefined,
+      category:   (requireCot && categoryFilter !== 'all') ? categoryFilter : undefined,
       start_date: filters.start_date || undefined,
       end_date:   filters.end_date   || undefined,
       page,
@@ -706,7 +809,7 @@ export default function DataExplorer() {
           {/* Header */}
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold">Data Explorer</h1>
+              <h1 className="text-2xl font-bold">数据管理</h1>
               <p className="text-muted-foreground text-sm mt-1">浏览所有数据，查看标注详情，添加评论</p>
             </div>
             <div className="flex items-center gap-2">
@@ -753,30 +856,61 @@ export default function DataExplorer() {
                   共 <span className="font-semibold text-foreground">{total}</span> 条
                 </div>
               </div>
-              {/* 标注标签过滤 */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground whitespace-nowrap">标注标签：</span>
-                <Select
-                  value={labelFilter}
-                  onValueChange={v => { setLabelFilter(v); setPage(1); setSelectedIds(new Set()) }}
-                >
-                  <SelectTrigger className="w-48 h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">全部标签</SelectItem>
-                    {labelOptions.map(l => (
-                      <SelectItem key={l} value={l}>{l}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {labelFilter !== 'all' && (
-                  <button
-                    onClick={() => { setLabelFilter('all'); setPage(1) }}
-                    className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+              {/* 标注标签 + 业务分类过滤 */}
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">标注标签：</span>
+                  <Select
+                    value={labelFilter}
+                    onValueChange={v => { setLabelFilter(v); setPage(1); setSelectedIds(new Set()) }}
                   >
-                    <X className="w-3 h-3" /> 清除
-                  </button>
+                    <SelectTrigger className="w-40 h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部标签</SelectItem>
+                      {labelOptions.map(l => (
+                        <SelectItem key={l} value={l}>{l}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {labelFilter !== 'all' && (
+                    <button
+                      onClick={() => { setLabelFilter('all'); setPage(1) }}
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+                    >
+                      <X className="w-3 h-3" /> 清除
+                    </button>
+                  )}
+                </div>
+
+                {/* 业务分类过滤（仅 requireCot 时显示）*/}
+                {requireCot && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">业务分类：</span>
+                    <Select
+                      value={categoryFilter}
+                      onValueChange={v => { setCategoryFilter(v); setPage(1); setSelectedIds(new Set()) }}
+                    >
+                      <SelectTrigger className="w-40 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部分类</SelectItem>
+                        {categoryOptions.map(c => (
+                          <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {categoryFilter !== 'all' && (
+                      <button
+                        onClick={() => { setCategoryFilter('all'); setPage(1) }}
+                        className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+                      >
+                        <X className="w-3 h-3" /> 清除
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </CardContent>
@@ -807,24 +941,25 @@ export default function DataExplorer() {
                     </TableHead>
                     <TableHead className="w-12">ID</TableHead>
                     <TableHead>文本内容</TableHead>
-                    <TableHead className="w-28">状态</TableHead>
-                    <TableHead className="w-36">预测标签</TableHead>
-                    <TableHead className="w-36">标注标签</TableHead>
-                    <TableHead className="w-40 whitespace-nowrap">创建时间</TableHead>
+                    <TableHead className="w-24">状态</TableHead>
+                    <TableHead className="w-32">预测标签</TableHead>
+                    <TableHead className="w-32">标注标签</TableHead>
+                    {requireCot && <TableHead className="w-28">业务分类</TableHead>}
+                    {requireCot && <TableHead className="w-44">关键词</TableHead>}
                     <TableHead className="w-40 whitespace-nowrap">更新时间</TableHead>
-                    <TableHead className="w-32 text-center">操作</TableHead>
+                    <TableHead className="w-14 text-center">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={requireCot ? 11 : 9} className="text-center py-12 text-muted-foreground">
                         <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />加载中...
                       </TableCell>
                     </TableRow>
                   ) : items.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={requireCot ? 11 : 9} className="text-center py-12 text-muted-foreground">
                         {Object.values(filters).some(Boolean)
                           ? '没有符合条件的数据'
                           : '暂无数据'}
@@ -836,6 +971,7 @@ export default function DataExplorer() {
                     const activeLabel = getActiveLabel(item)
                     const isActive    = sideItem?.id === item.id
                     const isSelected  = selectedIds.has(item.id)
+                    const firstAnn    = item.annotations?.[0]
 
                     return (
                       <TableRow
@@ -891,42 +1027,76 @@ export default function DataExplorer() {
                             : <span className="text-xs text-muted-foreground">—</span>
                           }
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                          {formatDate(item.created_at)}
-                        </TableCell>
+                        {/* 业务分类列 */}
+                        {requireCot && (
+                          <TableCell className="text-xs">
+                            {firstAnn?.category
+                              ? <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-200 whitespace-nowrap">{firstAnn.category}</span>
+                              : <span className="text-muted-foreground">—</span>
+                            }
+                          </TableCell>
+                        )}
+                        {/* 关键词列 */}
+                        {requireCot && (
+                          <TableCell className="text-xs max-w-[11rem]">
+                            {firstAnn?.keywords ? (
+                              <div>
+                                <p className="font-medium text-foreground truncate">{firstAnn.keywords}</p>
+                                {firstAnn.keywords_desc && (
+                                  <p
+                                    className="text-muted-foreground line-clamp-1 leading-snug mt-0.5"
+                                    title={firstAnn.keywords_desc}
+                                  >
+                                    {firstAnn.keywords_desc}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        )}
                         <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                           {formatDate(item.updated_at)}
                         </TableCell>
+                        {/* 3-dot 操作菜单 */}
                         <TableCell onClick={e => e.stopPropagation()}>
-                          <div className="flex items-center justify-center gap-1">
+                          <div className="relative flex justify-center">
                             <button
-                              title="查看详情"
-                              onClick={() => openDetail(item)}
-                              className={`p-1.5 rounded transition-colors ${isActive && sideMode === 'detail' ? 'bg-blue-100 text-blue-600' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+                              onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === item.id ? null : item.id) }}
+                              className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                             >
-                              <Eye className="w-4 h-4" />
+                              <MoreHorizontal className="w-4 h-4" />
                             </button>
-                            <button
-                              title="修改标注标签"
-                              onClick={(e) => openEdit(item, e)}
-                              className="p-1.5 rounded transition-colors text-muted-foreground hover:text-primary hover:bg-primary/10"
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button
-                              title="添加评论"
-                              onClick={() => openComment(item)}
-                              className={`p-1.5 rounded transition-colors ${isActive && sideMode === 'comment' ? 'bg-blue-100 text-blue-600' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
-                            >
-                              <MessageSquare className="w-4 h-4" />
-                            </button>
-                            <button
-                              title="删除"
-                              onClick={() => requestDelete(item.id)}
-                              className="p-1.5 rounded transition-colors text-muted-foreground hover:text-destructive hover:bg-red-50"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {openMenuId === item.id && (
+                              <div className="absolute right-0 top-8 z-50 bg-white border rounded-lg shadow-lg py-1 w-36 text-sm">
+                                <button
+                                  onClick={() => { openDetail(item); setOpenMenuId(null) }}
+                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted transition-colors"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-muted-foreground" />查看详情
+                                </button>
+                                <button
+                                  onClick={(e) => { openEdit(item, e); setOpenMenuId(null) }}
+                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted transition-colors"
+                                >
+                                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />修改标注
+                                </button>
+                                <button
+                                  onClick={() => { openComment(item); setOpenMenuId(null) }}
+                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted transition-colors"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5 text-muted-foreground" />添加评论
+                                </button>
+                                <div className="border-t my-1" />
+                                <button
+                                  onClick={() => { requestDelete(item.id); setOpenMenuId(null) }}
+                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-destructive hover:bg-red-50 transition-colors"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />删除
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>

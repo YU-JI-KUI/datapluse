@@ -63,6 +63,7 @@ async def list_data_items(
     status:     str | None    = Query(None, description="按阶段过滤"),
     keyword:    str | None    = Query(None, description="文本关键词搜索"),
     label:      str | None    = Query(None, description="按标注标签过滤"),
+    category:   str | None    = Query(None, description="按业务分类过滤（COT 字段）"),
     start_date: str | None    = Query(None, description="更新时间起（YYYY-MM-DD）"),
     end_date:   str | None    = Query(None, description="更新时间止（YYYY-MM-DD）"),
     page:       int           = Query(1, ge=1),
@@ -72,6 +73,7 @@ async def list_data_items(
     db     = get_db()
     result = db.list_all_data(
         dataset_id, status=status, keyword=keyword, label=label,
+        category=category,
         start_date=start_date, end_date=end_date,
         page=page, page_size=page_size, enrich=True,
     )

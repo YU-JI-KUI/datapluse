@@ -31,7 +31,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Input } from '@/components/ui/input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
-import { annotationApi, configApi, getCurrentDatasetId } from '@/lib/api'
+import { annotationApi, categoryApi, configApi, getCurrentDatasetId } from '@/lib/api'
 import { formatDate, scoreColor } from '@/lib/utils'
 
 // ── 标签颜色 ──────────────────────────────────────────────────────────────────
@@ -204,6 +204,9 @@ export default function Annotation() {
   const [submitting, setSubmitting]   = useState(false)
   const [revoking, setRevoking]       = useState(false)
   const [cot, setCot]                 = useState('')
+  const [category, setCategory]       = useState('none')
+  const [keywords, setKeywords]       = useState('')
+  const [keywordsDesc, setKeywordsDesc] = useState('')
   const [view, setView]               = useState('unannotated')
   const [keyword, setKeyword]         = useState('')
   const [keywordInput, setKeywordInput] = useState('')
@@ -224,13 +227,21 @@ export default function Annotation() {
     return () => window.removeEventListener('datasetChanged', handler)
   }, [])
 
+  // 重置 COT 结构化字段
+  const resetCotFields = () => {
+    setCot('')
+    setCategory('none')
+    setKeywords('')
+    setKeywordsDesc('')
+  }
+
   // 切换 view 时回到第一页，清空当前选中，重置标签过滤
   const handleViewChange = (v) => {
     setView(v)
     setPage(1)
     setLabelFilter('all')
     setCurrentItem(null)
-    setCot('')
+    resetCotFields()
   }
 
   // ── 主列表查询 ────────────────────────────────────────────────────────────
@@ -282,10 +293,18 @@ export default function Annotation() {
   const countMy          = cntMy?.data?.data?.pagination?.total           ?? 0
   const progress         = countAll > 0 ? Math.round((countMy / countAll) * 100) : 0
 
+  // 业务分类列表
+  const { data: categoriesData } = useQuery({
+    queryKey: ['categories-all', datasetId],
+    queryFn: () => categoryApi.list({ page: 1, page_size: 100 }, datasetId),
+    enabled: !!datasetId,
+  })
+  const categoryOptions = categoriesData?.data?.data?.list ?? []
+
   const configLabels = configData?.data?.data?.labels ?? configData?.data?.labels
   const labels = configLabels || ['寿险意图', '拒识', '健康险意图', '财险意图', '其他意图']
 
-  // requireCot 仅控制是否显示 COT 输入框，不强制填写
+  // requireCot 仅控制是否显示 COT 结构化字段，不强制填写
   const requireCot = configData?.data?.data?.pipeline?.require_cot ?? false
 
   // 自动选中第一条（切换 view / 页 时）
@@ -309,9 +328,15 @@ export default function Annotation() {
     if (!currentItem || submitting) return
     setSubmitting(true)
     try {
-      await annotationApi.submit(currentItem.id, label, cot.trim() || null)
+      await annotationApi.submit(
+        currentItem.id, label,
+        cot.trim() || null,
+        (category !== 'none' ? category : null),
+        keywords.trim() || null,
+        keywordsDesc.trim() || null,
+      )
       toast.success(`已标注：${label}`, { duration: 1500 })
-      setCot('')  // 标注后清空 COT
+      resetCotFields()  // 标注后清空 COT 字段
 
       // 刷新各计数 + 列表
       qc.invalidateQueries(['ann-cnt-all', datasetId])
@@ -333,7 +358,7 @@ export default function Annotation() {
     } finally {
       setSubmitting(false)
     }
-  }, [currentItem, submitting, cot, items, view, datasetId, qc, refetchList, syncCurrentItem])
+  }, [currentItem, submitting, cot, category, keywords, keywordsDesc, items, view, datasetId, qc, refetchList, syncCurrentItem]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 撤销标注（仅自己的）
   const handleRevoke = useCallback(async () => {
@@ -639,29 +664,84 @@ export default function Annotation() {
                       撤销标注
                     </Button>
                   </div>
-                  {myAnn.cot && (
-                    <div className="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded px-3 py-2">
-                      <span className="font-medium">我的理由：</span>{myAnn.cot}
+                  {(myAnn.cot || myAnn.category || myAnn.keywords) && (
+                    <div className="text-xs text-orange-700 bg-orange-50 border border-orange-100 rounded px-3 py-2 space-y-1">
+                      {myAnn.cot && (
+                        <p><span className="font-medium">理由：</span>{myAnn.cot}</p>
+                      )}
+                      {myAnn.category && (
+                        <p><span className="font-medium">业务分类：</span>{myAnn.category}</p>
+                      )}
+                      {myAnn.keywords && (
+                        <p><span className="font-medium">关键词：</span>{myAnn.keywords}</p>
+                      )}
+                      {myAnn.keywords_desc && (
+                        <p><span className="font-medium">关键词说明：</span>{myAnn.keywords_desc}</p>
+                      )}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* COT 推理过程输入框（由配置中心控制是否显示）*/}
+              {/* COT 结构化字段（由配置中心 require_cot 控制是否显示）*/}
               {requireCot && (
-                <div>
-                  <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
-                    <Tag className="w-4 h-4 text-primary" />
-                    标注理由
-                    <span className="text-xs text-muted-foreground font-normal ml-1">（Chain of Thought，选填）</span>
+                <div className="space-y-3 border border-blue-100 rounded-xl p-4 bg-blue-50/40">
+                  <p className="text-sm font-medium flex items-center gap-1.5 text-blue-700">
+                    <Tag className="w-4 h-4" />
+                    标注补充信息
+                    <span className="text-xs text-muted-foreground font-normal ml-1">（Chain of Thought，均为选填）</span>
                   </p>
-                  <textarea
-                    value={cot}
-                    onChange={e => setCot(e.target.value)}
-                    placeholder="可填写标注理由或推理依据，说明为什么选择该标签（选填）"
-                    rows={3}
-                    className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60 transition-colors"
-                  />
+
+                  {/* 业务分类 */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">业务分类</label>
+                    <Select value={category} onValueChange={setCategory}>
+                      <SelectTrigger className="h-8 text-sm bg-white">
+                        <SelectValue placeholder="选择业务分类（可选）" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none" className="text-sm text-muted-foreground">不填写</SelectItem>
+                        {categoryOptions.map(c => (
+                          <SelectItem key={c.id} value={c.name} className="text-sm">{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* 关键词 */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">关键词</label>
+                    <Input
+                      value={keywords}
+                      onChange={e => setKeywords(e.target.value)}
+                      placeholder="输入关键词（可选）"
+                      className="h-8 text-sm bg-white"
+                    />
+                  </div>
+
+                  {/* 关键词说明 */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">关键词说明</label>
+                    <textarea
+                      value={keywordsDesc}
+                      onChange={e => setKeywordsDesc(e.target.value)}
+                      placeholder="对关键词的详细说明（可选）"
+                      rows={2}
+                      className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60 transition-colors"
+                    />
+                  </div>
+
+                  {/* 标注理由 */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">标注理由 (COT)</label>
+                    <textarea
+                      value={cot}
+                      onChange={e => setCot(e.target.value)}
+                      placeholder="填写标注理由或推理依据（可选）"
+                      rows={2}
+                      className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60 transition-colors"
+                    />
+                  </div>
                 </div>
               )}
 
