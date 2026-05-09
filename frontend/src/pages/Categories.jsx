@@ -7,7 +7,7 @@
  * - Excel 上传弹窗（拖拽 / 点击，格式说明）
  */
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -34,13 +34,13 @@ function CategoryDialog({ open, onOpenChange, initial, onSave }) {
   const [desc, setDesc]     = useState(initial?.description ?? '')
   const [saving, setSaving] = useState(false)
 
-  const handleOpen = (v) => {
-    if (v) {
+  // 每次对话框打开（或切换编辑目标）时同步表单初始值
+  useEffect(() => {
+    if (open) {
       setName(initial?.name        ?? '')
       setDesc(initial?.description ?? '')
     }
-    onOpenChange(v)
-  }
+  }, [open, initial?.id])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -57,7 +57,7 @@ function CategoryDialog({ open, onOpenChange, initial, onSave }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{initial ? '编辑业务分类' : '新建业务分类'}</DialogTitle>

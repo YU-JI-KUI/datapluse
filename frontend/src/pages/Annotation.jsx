@@ -203,7 +203,6 @@ export default function Annotation() {
   const [currentItem, setCurrentItem] = useState(null)
   const [submitting, setSubmitting]   = useState(false)
   const [revoking, setRevoking]       = useState(false)
-  const [cot, setCot]                 = useState('')
   const [category, setCategory]       = useState('none')
   const [keywords, setKeywords]       = useState('')
   const [keywordsDesc, setKeywordsDesc] = useState('')
@@ -227,9 +226,8 @@ export default function Annotation() {
     return () => window.removeEventListener('datasetChanged', handler)
   }, [])
 
-  // 重置 COT 结构化字段
+  // 重置结构化字段
   const resetCotFields = () => {
-    setCot('')
     setCategory('none')
     setKeywords('')
     setKeywordsDesc('')
@@ -304,7 +302,7 @@ export default function Annotation() {
   const configLabels = configData?.data?.data?.labels ?? configData?.data?.labels
   const labels = configLabels || ['寿险意图', '拒识', '健康险意图', '财险意图', '其他意图']
 
-  // requireCot 仅控制是否显示 COT 结构化字段，不强制填写
+  // requireCot 控制是否显示 COT 结构化字段（业务分类/关键词/关键词说明）
   const requireCot = configData?.data?.data?.pipeline?.require_cot ?? false
 
   // 自动选中第一条（切换 view / 页 时）
@@ -323,23 +321,26 @@ export default function Annotation() {
     })
   }, [refetchList])
 
+  // 我的标注 tab：切换条目时回显上次输入的结构化字段
+  useEffect(() => {
+    if (view === 'my_annotated' && currentItem?.my_annotation) {
+      const ann = currentItem.my_annotation
+      setCategory(ann.category || 'none')
+      setKeywords(ann.keywords || '')
+      setKeywordsDesc(ann.keywords_desc || '')
+    }
+  }, [currentItem?.id, view]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // 提交标注
   const handleLabel = useCallback(async (label) => {
     if (!currentItem || submitting) return
     setSubmitting(true)
 
-    // 自动生成 COT（仅当 cot 为空且有任意结构化字段时）
-    // 格式：【关键词｜关键词说明｜标签｜业务分类】
-    let finalCot = cot.trim() || null
-    if (!finalCot && requireCot) {
-      const kw   = keywords.trim()
-      const desc = keywordsDesc.trim()
-      const cat  = category !== 'none' ? category : ''
-      if (kw || desc || cat) {
-        finalCot = `${kw}｜${desc}｜${label}｜${cat}`
-        setCot(finalCot)   // 回填到输入框，让用户可见
-      }
-    }
+    // 从结构化字段自动生成 COT 字符串，格式：关键词｜关键词说明｜标签｜业务分类
+    const kw   = keywords.trim()
+    const desc = keywordsDesc.trim()
+    const cat  = category !== 'none' ? category : ''
+    const finalCot = (kw || desc || cat) ? `${kw}｜${desc}｜${label}｜${cat}` : null
 
     try {
       await annotationApi.submit(
@@ -372,7 +373,7 @@ export default function Annotation() {
     } finally {
       setSubmitting(false)
     }
-  }, [currentItem, submitting, cot, category, keywords, keywordsDesc, items, view, datasetId, qc, refetchList, syncCurrentItem]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentItem, submitting, category, keywords, keywordsDesc, items, view, datasetId, qc, refetchList, syncCurrentItem]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 撤销标注（仅自己的）
   const handleRevoke = useCallback(async () => {
@@ -697,13 +698,13 @@ export default function Annotation() {
                 </div>
               )}
 
-              {/* COT 结构化字段（由配置中心 require_cot 控制是否显示）*/}
+              {/* 结构化标注字段（由配置中心 展示COT 开关控制）*/}
               {requireCot && (
                 <div className="space-y-3 border border-blue-100 rounded-xl p-4 bg-blue-50/40">
                   <p className="text-sm font-medium flex items-center gap-1.5 text-blue-700">
                     <Tag className="w-4 h-4" />
                     标注补充信息
-                    <span className="text-xs text-muted-foreground font-normal ml-1">（Chain of Thought，均为选填）</span>
+                    <span className="text-xs text-muted-foreground font-normal ml-1">（均为选填）</span>
                   </p>
 
                   {/* 业务分类 */}
@@ -740,18 +741,6 @@ export default function Annotation() {
                       value={keywordsDesc}
                       onChange={e => setKeywordsDesc(e.target.value)}
                       placeholder="对关键词的详细说明（可选）"
-                      rows={2}
-                      className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60 transition-colors"
-                    />
-                  </div>
-
-                  {/* 标注理由 */}
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">标注理由 (COT)</label>
-                    <textarea
-                      value={cot}
-                      onChange={e => setCot(e.target.value)}
-                      placeholder="填写标注理由或推理依据（可选）"
                       rows={2}
                       className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60 transition-colors"
                     />

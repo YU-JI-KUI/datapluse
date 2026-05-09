@@ -287,7 +287,7 @@ export default function ConfigCenter() {
           />
         </div>
         <Field
-          label="展示 COT 输入框（标注理由）"
+          label="展示 COT"
           name="require_cot"
           type="toggle"
           value={config.pipeline?.require_cot ?? false}

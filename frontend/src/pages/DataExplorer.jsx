@@ -141,8 +141,8 @@ function DetailPanel({ item, onClose }) {
   const resolver     = item?.resolver
   const resultCot    = item?.result_cot
 
-  // 是否有任何 COT 数据
-  const hasCot = preAnn?.cot || annotations.some(a => a.cot) || resultCot
+  // 是否有任何推理链数据（结构化字段 or 旧 COT 文本）
+  const hasCot = preAnn?.cot || annotations.some(a => a.cot || a.category || a.keywords || a.keywords_desc) || resultCot
 
   return (
     <div className="flex flex-col h-full">
@@ -200,30 +200,32 @@ function DetailPanel({ item, onClose }) {
                 </div>
               )}
 
-              {/* 2. 各标注员 COT */}
-              {annotations.filter(a => a.is_active).map(a => (
-                a.cot ? (
+              {/* 2. 各标注员结构化字段 */}
+              {annotations.filter(a => a.is_active).map(a => {
+                const parts = [
+                  a.category    || '',
+                  a.keywords    || '',
+                  a.keywords_desc || '',
+                  a.label       || '',
+                ].filter(Boolean)
+                const cotText = parts.join('｜')
+                return (
                   <div key={a.id} className="border rounded-lg p-3 bg-blue-50/30 border-blue-100">
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 mb-2">
                       <User className="w-3.5 h-3.5" />
-                      <span>{a.username} 的标注理由</span>
+                      <span>{a.username}</span>
                       <span className="ml-auto bg-blue-100 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 font-medium">
                         {a.label}
                       </span>
                     </div>
-                    <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{a.cot}</p>
-                  </div>
-                ) : (
-                  <div key={a.id} className="border rounded-lg p-3 bg-gray-50/50 border-gray-100">
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <User className="w-3.5 h-3.5" />
-                      <span>{a.username}</span>
-                      <span className="ml-auto bg-gray-100 text-gray-600 rounded px-1.5 py-0.5">{a.label}</span>
-                      <span className="text-xs italic">未填写理由</span>
-                    </div>
+                    {cotText ? (
+                      <p className="text-sm text-gray-700 leading-relaxed font-mono">{cotText}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground italic">未填写补充信息</p>
+                    )}
                   </div>
                 )
-              ))}
+              })}
 
               {/* 3. 裁决 COT（manual 时）*/}
               {labelSource === 'manual' && (
@@ -341,7 +343,6 @@ function DetailPanel({ item, onClose }) {
 
 function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
   const [label,        setLabel]        = useState('')
-  const [cot,          setCot]          = useState('')
   const [category,     setCategory]     = useState('none')
   const [keywords,     setKeywords]     = useState('')
   const [keywordsDesc, setKeywordsDesc] = useState('')
@@ -360,7 +361,7 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
   const { data: catRes } = useQuery({
     queryKey: ['categories-all'],
     queryFn:  () => categoryApi.list({ page: 1, page_size: 100 }),
-    enabled:  open && requireCot,
+    enabled:  open,
   })
   const categoryOptions = catRes?.data?.data?.list ?? []
 
@@ -368,17 +369,15 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
   useEffect(() => {
     if (open) {
       setLabel('')
-      setCot('')
       setCategory('none')
       setKeywords('')
       setKeywordsDesc('')
       // 回填当前条目第一个有效标注的值（方便修改时保留旧内容）
       const firstAnn = item?.annotations?.[0]
       if (firstAnn) {
-        if (firstAnn.label)        setLabel(firstAnn.label)
-        if (firstAnn.cot)          setCot(firstAnn.cot)
-        if (firstAnn.category)     setCategory(firstAnn.category)
-        if (firstAnn.keywords)     setKeywords(firstAnn.keywords)
+        if (firstAnn.label)         setLabel(firstAnn.label)
+        if (firstAnn.category)      setCategory(firstAnn.category)
+        if (firstAnn.keywords)      setKeywords(firstAnn.keywords)
         if (firstAnn.keywords_desc) setKeywordsDesc(firstAnn.keywords_desc)
       }
     }
@@ -388,16 +387,11 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
     if (!label) { toast.error('请选择标注标签'); return }
     setSubmitting(true)
 
-    // 自动生成 COT（格式：【关键词｜关键词说明｜标签｜业务分类】）
-    let finalCot = cot.trim() || null
-    if (!finalCot && requireCot) {
-      const kw   = keywords.trim()
-      const desc = keywordsDesc.trim()
-      const cat  = category !== 'none' ? category : ''
-      if (kw || desc || cat) {
-        finalCot = `【${kw}｜${desc}｜${label}｜${cat}】`
-      }
-    }
+    // 从结构化字段自动生成 COT 字符串
+    const kw   = keywords.trim()
+    const desc = keywordsDesc.trim()
+    const cat  = category !== 'none' ? category : ''
+    const finalCot = (kw || desc || cat) ? `${kw}｜${desc}｜${label}｜${cat}` : null
 
     try {
       await annotationApi.submit(
@@ -448,7 +442,7 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
             </Select>
           </div>
 
-          {/* COT 结构化字段（由配置中心控制是否显示）*/}
+          {/* 结构化标注字段（由配置中心 展示COT 开关控制）*/}
           {requireCot && (
             <div className="space-y-3 border border-blue-100 rounded-xl p-4 bg-blue-50/40">
               <p className="text-xs font-medium text-blue-700 flex items-center gap-1.5">
@@ -494,18 +488,6 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
                   className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60"
                 />
               </div>
-
-              {/* COT 理由 */}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">标注理由 (COT)</label>
-                <textarea
-                  value={cot}
-                  onChange={e => setCot(e.target.value)}
-                  placeholder="填写标注理由或推理依据（可选）"
-                  rows={2}
-                  className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60"
-                />
-              </div>
             </div>
           )}
         </div>
@@ -524,8 +506,10 @@ function EditAnnotationDialog({ open, onOpenChange, item, onSuccess }) {
 // ── 批量修改标签对话框 ──────────────────────────────────────────────────────────
 
 function BatchEditDialog({ open, onOpenChange, selectedCount, onConfirm, submitting }) {
-  const [label, setLabel] = useState('')
-  const [cot,   setCot]   = useState('')
+  const [label,        setLabel]        = useState('')
+  const [category,     setCategory]     = useState('none')
+  const [keywords,     setKeywords]     = useState('')
+  const [keywordsDesc, setKeywordsDesc] = useState('')
 
   // 从配置拿标签列表和 requireCot 设置
   const { data: cfgRes } = useQuery({
@@ -536,14 +520,26 @@ function BatchEditDialog({ open, onOpenChange, selectedCount, onConfirm, submitt
   const labels     = cfgRes?.data?.data?.labels || []
   const requireCot = cfgRes?.data?.data?.pipeline?.require_cot ?? false
 
+  // 业务分类列表
+  const { data: catRes } = useQuery({
+    queryKey: ['categories-all'],
+    queryFn:  () => categoryApi.list({ page: 1, page_size: 100 }),
+    enabled:  open,
+  })
+  const categoryOptions = catRes?.data?.data?.list ?? []
+
   // 打开时重置
   useEffect(() => {
-    if (open) { setLabel(''); setCot('') }
+    if (open) { setLabel(''); setCategory('none'); setKeywords(''); setKeywordsDesc('') }
   }, [open])
 
   function handleConfirm() {
     if (!label) { toast.error('请选择标注标签'); return }
-    onConfirm(label, cot.trim() || null)
+    const kw   = keywords.trim()
+    const desc = keywordsDesc.trim()
+    const cat  = category !== 'none' ? category : ''
+    const cot  = (kw || desc || cat) ? `${kw}｜${desc}｜${label}｜${cat}` : null
+    onConfirm(label, cot, category !== 'none' ? category : null, kw || null, desc || null)
   }
 
   return (
@@ -580,19 +576,52 @@ function BatchEditDialog({ open, onOpenChange, selectedCount, onConfirm, submitt
             </Select>
           </div>
 
-          {/* COT（由配置中心控制是否显示）*/}
+          {/* 结构化标注字段（由配置中心 展示COT 开关控制）*/}
           {requireCot && (
-            <div>
-              <label className="block text-sm font-medium mb-1.5">
-                标注理由（COT）<span className="text-xs text-muted-foreground ml-1">(Chain of Thought，选填)</span>
-              </label>
-              <textarea
-                className="w-full min-h-[100px] rounded-md border border-gray-200 px-3 py-2 text-sm bg-background
-                           placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-200 resize-y"
-                placeholder="请说明选择该标签的依据，批量操作时所有条目将使用相同的理由…"
-                value={cot}
-                onChange={e => setCot(e.target.value)}
-              />
+            <div className="space-y-3 border border-blue-100 rounded-xl p-4 bg-blue-50/40">
+              <p className="text-xs font-medium text-blue-700">
+                标注补充信息
+                <span className="text-muted-foreground font-normal ml-1">（均为选填，批量操作时所有条目将使用相同的值）</span>
+              </p>
+
+              {/* 业务分类 */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">业务分类</label>
+                <Select value={category} onValueChange={setCategory}>
+                  <SelectTrigger className="h-8 text-sm bg-white">
+                    <SelectValue placeholder="选择业务分类（可选）" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" className="text-sm text-muted-foreground">不填写</SelectItem>
+                    {categoryOptions.map(c => (
+                      <SelectItem key={c.id} value={c.name} className="text-sm">{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* 关键词 */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">关键词</label>
+                <Input
+                  value={keywords}
+                  onChange={e => setKeywords(e.target.value)}
+                  placeholder="输入关键词（可选）"
+                  className="h-8 text-sm bg-white"
+                />
+              </div>
+
+              {/* 关键词说明 */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">关键词说明</label>
+                <textarea
+                  value={keywordsDesc}
+                  onChange={e => setKeywordsDesc(e.target.value)}
+                  placeholder="对关键词的详细说明（可选）"
+                  rows={2}
+                  className="w-full text-sm border rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60"
+                />
+              </div>
             </div>
           )}
         </div>
@@ -805,11 +834,17 @@ export default function DataExplorer() {
   const [batchEditOpen,    setBatchEditOpen]    = useState(false)
   const [batchEditing,     setBatchEditing]     = useState(false)
 
-  async function handleBatchEdit(label, cot) {
+  async function handleBatchEdit(label, cot, category, keywords, keywordsDesc) {
     const ids = [...selectedIds]
     setBatchEditing(true)
     try {
-      const payload = ids.map(id => ({ data_id: id, label, cot: cot || null }))
+      const payload = ids.map(id => ({
+        data_id: id, label,
+        cot: cot || null,
+        category: category || null,
+        keywords: keywords || null,
+        keywords_desc: keywordsDesc || null,
+      }))
       const res = await annotationApi.batchSubmit(payload)
       const errors = res?.data?.data?.errors || []
       if (errors.length > 0) {

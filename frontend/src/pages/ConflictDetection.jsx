@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -14,7 +14,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
-import { conflictApi, dataApi, configApi, getCurrentDatasetId } from '@/lib/api'
+import { conflictApi, dataApi, configApi, categoryApi, getCurrentDatasetId } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 import TablePagination from '@/components/TablePagination'
 
@@ -91,20 +91,38 @@ function ConflictDetail({ conflict }) {
 // ── 解决冲突弹窗（单条 & 批量共用）─────────────────────────────────────────────
 function ResolveDialog({ title, subtext, labels, open, onOpenChange, onSubmit, requireCot = false }) {
   const [selectedLabel, setSelectedLabel] = useState('')
-  const [cot, setCot]                     = useState('')
-  const [submitting, setSubmitting]       = useState(false)
+  const [category,      setCategory]      = useState('none')
+  const [keywords,      setKeywords]      = useState('')
+  const [keywordsDesc,  setKeywordsDesc]  = useState('')
+  const [submitting,    setSubmitting]    = useState(false)
 
-  function handleClose() {
-    setSelectedLabel('')
-    setCot('')
-    onOpenChange(false)
-  }
+  // 业务分类列表
+  const { data: catRes } = useQuery({
+    queryKey: ['categories-all'],
+    queryFn:  () => categoryApi.list({ page: 1, page_size: 100 }),
+    enabled:  open,
+  })
+  const categoryOptions = catRes?.data?.data?.list ?? []
+
+  // 打开时重置
+  useEffect(() => {
+    if (open) {
+      setSelectedLabel(''); setCategory('none'); setKeywords(''); setKeywordsDesc('')
+    }
+  }, [open])
+
+  function handleClose() { onOpenChange(false) }
 
   async function handleSubmit() {
     if (!selectedLabel) { toast.error('请选择最终标注标签'); return }
     setSubmitting(true)
+    // 从结构化字段自动生成 COT 字符串
+    const kw   = keywords.trim()
+    const desc = keywordsDesc.trim()
+    const cat  = category !== 'none' ? category : ''
+    const cot  = (kw || desc || cat) ? `${kw}｜${desc}｜${selectedLabel}｜${cat}` : null
     try {
-      await onSubmit(selectedLabel, cot.trim() || null)
+      await onSubmit(selectedLabel, cot)
       handleClose()
     } finally {
       setSubmitting(false)
@@ -157,18 +175,52 @@ function ResolveDialog({ title, subtext, labels, open, onOpenChange, onSubmit, r
             )}
           </div>
 
+          {/* 结构化标注字段（由配置中心 展示COT 开关控制）*/}
           {requireCot && (
-            <div>
-              <p className="text-xs font-medium mb-1.5">
-                裁决理由 <span className="font-normal text-muted-foreground">（选填）</span>
+            <div className="space-y-3 border border-blue-100 rounded-xl p-4 bg-blue-50/40">
+              <p className="text-xs font-medium text-blue-700">
+                标注补充信息
+                <span className="text-muted-foreground font-normal ml-1">（均为选填）</span>
               </p>
-              <textarea
-                value={cot}
-                onChange={e => setCot(e.target.value)}
-                placeholder="可填写裁决依据和推理过程（选填）"
-                rows={2}
-                className="w-full text-sm border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60"
-              />
+
+              {/* 业务分类 */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">业务分类</label>
+                <Select value={category} onValueChange={setCategory}>
+                  <SelectTrigger className="h-8 text-sm bg-white">
+                    <SelectValue placeholder="选择业务分类（可选）" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" className="text-sm text-muted-foreground">不填写</SelectItem>
+                    {categoryOptions.map(c => (
+                      <SelectItem key={c.id} value={c.name} className="text-sm">{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* 关键词 */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">关键词</label>
+                <Input
+                  value={keywords}
+                  onChange={e => setKeywords(e.target.value)}
+                  placeholder="输入关键词（可选）"
+                  className="h-8 text-sm bg-white"
+                />
+              </div>
+
+              {/* 关键词说明 */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">关键词说明</label>
+                <textarea
+                  value={keywordsDesc}
+                  onChange={e => setKeywordsDesc(e.target.value)}
+                  placeholder="对关键词的详细说明（可选）"
+                  rows={2}
+                  className="w-full text-sm border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 border-gray-200 bg-white placeholder:text-muted-foreground/60"
+                />
+              </div>
             </div>
           )}
         </div>
@@ -234,7 +286,7 @@ export default function ConflictDetection() {
     enabled:  !!datasetId,
   })
   const configLabels = configData?.data?.data?.labels ?? configData?.data?.labels
-  const labels    = configLabels || ['寿险意图', '拒识', '健康险意图', '财险意图', '其他意图']
+  const labels     = configLabels || ['寿险意图', '拒识', '健康险意图', '财险意图', '其他意图']
   const requireCot = configData?.data?.data?.pipeline?.require_cot ?? false
 
   const annotatedCount = annotatedData?.data?.data?.pagination?.total || 0
