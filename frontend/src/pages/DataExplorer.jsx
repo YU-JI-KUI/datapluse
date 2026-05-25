@@ -783,13 +783,24 @@ export default function DataExplorer() {
     setEditOpen(true)
   }
 
-  function handleEditSuccess() {
-    refetch()
-    // 如果侧边栏正在显示该条，刷新后关闭（数据已变）
-    if (sideItem?.id === editItem?.id) closeSide()
-  }
-
   const qc = useQueryClient()
+
+  async function handleEditSuccess() {
+    // 失效所有 explorer 缓存（含其他过滤/分页参数组合），并强制立即重拉当前页
+    await qc.invalidateQueries({ queryKey: ['explorer'] })
+    await refetch()
+    // 侧边栏正在显示该条 → 同步拉最新条目数据回填，让用户立刻看到新标签
+    if (sideItem?.id === editItem?.id) {
+      try {
+        const res  = await dataApi.getItem(editItem.id)
+        const next = res?.data?.data
+        if (next) setSideItem(next)
+        else closeSide()
+      } catch {
+        closeSide()
+      }
+    }
+  }
 
   // ── 单条删除 ─────────────────────────────────────────────────────────────────
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)

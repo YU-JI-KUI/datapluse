@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const PAGE_SIZE_OPTIONS = ['10', '25', '50', '100']
+const PAGE_SIZE_OPTIONS = ['10', '25', '50', '100', '200', '500']
 
 /**
  * @param {object}   props
