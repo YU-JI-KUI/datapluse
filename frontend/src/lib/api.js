@@ -311,6 +311,19 @@ export const exportApi = {
     if (!datasetId) return _empty([])
     return api.get('/export/fields', { params: { dataset_id: datasetId } })
   },
+  /**
+   * 冲突列表全量导出（按当前过滤参数，不限当前页）。
+   * params: { format, status, conflict_type, keyword }
+   */
+  conflictsDownload: async (params, datasetId = getCurrentDatasetId()) => {
+    if (!datasetId) return null
+    const body = { ...params, dataset_id: datasetId }
+    const res = await api.post('/export/conflicts/prepare', body)
+    const { token, filename, count } = res.data?.data ?? {}
+    if (!token) throw new Error('导出失败：未获取到下载 token')
+    window.location.href = `/api/export/download/${token}`
+    return { filename, count }
+  },
 }
 
 // ── Templates ──────────────────────────────────────────────────────────────────

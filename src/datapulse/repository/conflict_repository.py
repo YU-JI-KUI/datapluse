@@ -255,3 +255,50 @@ class ConflictRepository:
             for c, content in rows
         ]
         return records, total
+
+    def list_by_dataset_for_export(
+        self,
+        dataset_id: int,
+        status: str | None = None,
+        conflict_type: str | None = None,
+        keyword: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """全量导出：与 list_by_dataset_paged 共用过滤逻辑，但不分页。
+        固定 3 次查询：Conflict+DataItem JOIN / AnnotationResult IN / 内存组装。
+        """
+        q = (
+            self.session.query(Conflict, DataItem.content)
+            .join(DataItem, DataItem.id == Conflict.data_id)
+            .filter(DataItem.dataset_id == dataset_id)
+        )
+        if status:
+            q = q.filter(Conflict.status == status)
+        if conflict_type:
+            q = q.filter(Conflict.conflict_type == conflict_type)
+        if keyword:
+            q = q.filter(DataItem.content.ilike(f"%{keyword}%"))
+
+        rows = q.order_by(Conflict.created_at.desc()).all()
+        if not rows:
+            return []
+
+        # 批量加载已解决冲突的 AnnotationResult（1 次 IN 查询）
+        resolved_data_ids = [c.data_id for c, _ in rows if c.status == "resolved"]
+        ar_map: dict[int, AnnotationResult] = {}
+        if resolved_data_ids:
+            for ar in (
+                self.session.query(AnnotationResult)
+                .filter(AnnotationResult.data_id.in_(resolved_data_ids))
+                .all()
+            ):
+                ar_map[ar.data_id] = ar
+
+        return [
+            _conflict_to_dict(
+                c,
+                data_content=content,
+                final_label=ar_map[c.data_id].final_label if c.data_id in ar_map else None,
+                resolver=ar_map[c.data_id].resolver if c.data_id in ar_map else None,
+            )
+            for c, content in rows
+        ]

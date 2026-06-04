@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import {
   AlertTriangle, Play, RefreshCw, CheckCircle, Loader2,
   ShieldAlert, GitMerge, Users, Check, SearchCheck, Undo2, Search, X,
+  Download,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -14,7 +15,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
-import { conflictApi, dataApi, configApi, categoryApi, getCurrentDatasetId } from '@/lib/api'
+import { conflictApi, dataApi, configApi, categoryApi, exportApi, getCurrentDatasetId } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 import TablePagination from '@/components/TablePagination'
 
@@ -245,6 +246,8 @@ export default function ConflictDetection() {
   // ── 操作状态 ───────────────────────────────────────────────────────────────
   const [running, setRunning]           = useState(false)
   const [selfChecking, setSelfChecking] = useState(false)
+  const [exporting, setExporting]       = useState(false)
+  const [exportFormat, setExportFormat] = useState('excel')   // excel | csv | json
 
   // ── 过滤 + 分页 ────────────────────────────────────────────────────────────
   const [statusFilter, setStatusFilter]   = useState('open')
@@ -415,6 +418,25 @@ export default function ConflictDetection() {
     }
   }
 
+  // ── 全量导出（按当前过滤参数，不限当前页）─────────────────────────────────
+  async function handleExport() {
+    if (total === 0) { toast.error('当前过滤条件下没有可导出的冲突'); return }
+    setExporting(true)
+    try {
+      const res = await exportApi.conflictsDownload({
+        format:        exportFormat,
+        status:        statusFilter === 'all' ? undefined : statusFilter,
+        conflict_type: typeFilter   === 'all' ? undefined : typeFilter,
+        keyword:       keyword || undefined,
+      })
+      toast.success(`已导出 ${res?.count ?? total} 条冲突`)
+    } catch (err) {
+      toast.error(err.response?.data?.detail || '导出失败')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   // ── 是否显示批量撤销（选中项都是语义冲突）────────────────────────────────
   const selectedConflicts = conflicts.filter(c => selected.has(c.id))
   const selectedAllSemantic = selectedConflicts.length > 0
@@ -428,10 +450,36 @@ export default function ConflictDetection() {
           <h1 className="text-2xl font-bold">冲突检测</h1>
           <p className="text-muted-foreground text-sm mt-1">检测多人标注分歧与语义相似冲突</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-4 h-4 mr-2" /> 刷新
           </Button>
+
+          {/* 全量导出：按当前过滤条件导出所有冲突，不限当前页 */}
+          <div className="flex items-center gap-1">
+            <Select value={exportFormat} onValueChange={setExportFormat}>
+              <SelectTrigger className="h-8 w-[88px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="excel">Excel</SelectItem>
+                <SelectItem value="csv">CSV</SelectItem>
+                <SelectItem value="json">JSON</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline" size="sm"
+              onClick={handleExport}
+              disabled={exporting || total === 0}
+              title={`按当前过滤条件全量导出（共 ${total} 条）`}
+            >
+              {exporting
+                ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                : <Download className="w-4 h-4 mr-2" />}
+              导出
+            </Button>
+          </div>
+
           <Button
             variant="outline" size="sm"
             onClick={handleSelfCheck}

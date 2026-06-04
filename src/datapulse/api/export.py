@@ -70,6 +70,29 @@ class ExportRequest(BaseModel):
     template_id: int | None = None  # 指定模板 ID，None 则用默认字段
 
 
+class ConflictExportRequest(BaseModel):
+    """冲突列表导出请求：固定列、全量、按当前页面过滤参数。"""
+    dataset_id: int
+    format: str = "excel"                     # json | excel | csv
+    status: str | None = None                 # open / resolved / revoked
+    conflict_type: str | None = None          # label_conflict / semantic_conflict
+    keyword: str | None = None                # 文本关键词
+
+
+# 冲突导出固定列（不接模板系统，保持简单）
+_CONFLICT_EXPORT_COLUMNS = [
+    ("id",            "冲突 ID"),
+    ("data_id",       "数据 ID"),
+    ("data_content",  "数据文本"),
+    ("conflict_type", "冲突类型"),
+    ("status",        "冲突状态"),
+    ("final_label",   "裁决后最终标签"),
+    ("resolver",      "裁决人"),
+    ("created_by",    "创建人"),
+    ("created_at",    "检测时间"),
+]
+
+
 def _apply_columns(item: dict, columns: list[dict]) -> dict:
     """按模板列定义将 item 转换为输出 dict"""
     return {col["target"]: item.get(col["source"]) for col in columns if col.get("include", True)}
@@ -124,6 +147,57 @@ async def prepare_export(body: ExportRequest, user: CurrentUser):
 
     token = _register_file(fpath, filename)
     return {"success": True, "data": {"token": token, "filename": filename}}
+
+
+@router.post("/conflicts/prepare")
+async def prepare_conflict_export(body: ConflictExportRequest, user: CurrentUser):
+    """生成冲突列表导出文件（全量，不分页），返回一次性下载 token。
+
+    与 prepare_export 共用 token 机制与 /download/{token} 端点。
+    """
+    if not user.has_permission("export:create"):
+        raise HTTPException(403, "无权限导出数据")
+    db = get_db()
+
+    records = db.list_conflicts_for_export(
+        body.dataset_id,
+        status=body.status,
+        conflict_type=body.conflict_type,
+        keyword=body.keyword,
+    )
+    if not records:
+        raise HTTPException(404, "没有可导出的冲突记录")
+
+    # 按固定列裁剪 + 中文表头
+    headers = {src: title for src, title in _CONFLICT_EXPORT_COLUMNS}
+    clean_items = [
+        {headers[src]: rec.get(src) for src, _ in _CONFLICT_EXPORT_COLUMNS}
+        for rec in records
+    ]
+
+    ts  = datetime.now(_SHANGHAI_TZ).strftime("%Y%m%d_%H%M%S")
+    fmt = body.format
+
+    if fmt == "excel":
+        filename = f"datapulse_conflicts_{ts}.xlsx"
+        fpath = _TEMP_DIR / filename
+        pd.DataFrame(clean_items).to_excel(str(fpath), index=False, engine="openpyxl")
+    elif fmt == "csv":
+        filename = f"datapulse_conflicts_{ts}.csv"
+        fpath = _TEMP_DIR / filename
+        buf = io.StringIO()
+        if clean_items:
+            writer = csv.DictWriter(buf, fieldnames=clean_items[0].keys())
+            writer.writeheader()
+            writer.writerows(clean_items)
+        fpath.write_bytes(buf.getvalue().encode("utf-8-sig"))
+    else:  # json
+        filename = f"datapulse_conflicts_{ts}.json"
+        fpath = _TEMP_DIR / filename
+        fpath.write_bytes(json.dumps(clean_items, ensure_ascii=False, indent=2).encode("utf-8"))
+
+    token = _register_file(fpath, filename)
+    return {"success": True, "data": {"token": token, "filename": filename, "count": len(records)}}
 
 
 @router.get("/download/{token}")

@@ -72,6 +72,10 @@ DEFAULT_COLUMNS = [
     {"source": "resolver",          "target": "resolver",          "include": False},
     {"source": "model_pred",        "target": "model_pred",        "include": True},
     {"source": "model_score",       "target": "model_score",       "include": True},
+    # 结构化标注字段（cot 三件套）
+    {"source": "category",          "target": "category",          "include": True},
+    {"source": "keywords",          "target": "keywords",          "include": True},
+    {"source": "keywords_desc",     "target": "keywords_desc",     "include": True},
     {"source": "source_ref",        "target": "source_ref",        "include": True},
     {"source": "status",            "target": "status",            "include": True},
     {"source": "created_at",        "target": "created_at",        "include": True},
@@ -101,6 +105,10 @@ AVAILABLE_FIELDS = [
     {"source": "model_pred",        "label": "模型预测标签"},
     {"source": "model_score",       "label": "模型置信度"},
     {"source": "model_name",        "label": "预测模型名称"},
+    # ── 结构化标注字段（cot 三件套）────────────────────────────────────────────
+    {"source": "category",          "label": "业务分类"},
+    {"source": "keywords",          "label": "关键词"},
+    {"source": "keywords_desc",     "label": "关键词说明"},
     # ── 冲突 ──────────────────────────────────────────────────────────────────
     {"source": "conflict_flag",     "label": "是否存在冲突"},
     {"source": "conflict_type",     "label": "冲突类型"},
@@ -626,6 +634,19 @@ class DBManager:
             return ConflictRepository(s).list_by_dataset_paged(
                 dataset_id, status=status, conflict_type=conflict_type,
                 keyword=keyword, page=page, page_size=page_size,
+            )
+
+    def list_conflicts_for_export(
+        self,
+        dataset_id: int,
+        status: str | None = None,
+        conflict_type: str | None = None,
+        keyword: str | None = None,
+    ) -> list[dict]:
+        from datapulse.repository.conflict_repository import ConflictRepository
+        with self._session() as s:
+            return ConflictRepository(s).list_by_dataset_for_export(
+                dataset_id, status=status, conflict_type=conflict_type, keyword=keyword,
             )
 
     def get_conflict_by_id(self, conflict_id: int) -> dict | None:

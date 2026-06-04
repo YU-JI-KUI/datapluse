@@ -43,6 +43,10 @@ const ALL_FIELDS = [
   { source: 'model_pred',        label: '模型预测标签' },
   { source: 'model_score',       label: '模型置信度' },
   { source: 'model_name',        label: '预测模型名称' },
+  // ── 结构化标注字段（cot 三件套）─────────────────────────────────────────
+  { source: 'category',          label: '业务分类' },
+  { source: 'keywords',          label: '关键词' },
+  { source: 'keywords_desc',     label: '关键词说明' },
   // ── 冲突 ──────────────────────────────────────────────────────────────────
   { source: 'conflict_flag',     label: '是否存在冲突' },
   { source: 'conflict_type',     label: '冲突类型' },
@@ -52,7 +56,7 @@ const ALL_FIELDS = [
 
 function TemplateEditor({ initial, onSave, onCancel }) {
   // 默认模板：与后端 DEFAULT_COLUMNS 核心字段对齐
-  const DEFAULT_SOURCES = ['id', 'content', 'label', 'label_source', 'annotator', 'annotated_at', 'model_pred', 'model_score', 'source_ref', 'status', 'created_at']
+  const DEFAULT_SOURCES = ['id', 'content', 'label', 'label_source', 'annotator', 'annotated_at', 'model_pred', 'model_score', 'category', 'keywords', 'keywords_desc', 'source_ref', 'status', 'created_at']
   const defaultColumns = DEFAULT_SOURCES
     .map(src => ALL_FIELDS.find(f => f.source === src))
     .filter(Boolean)

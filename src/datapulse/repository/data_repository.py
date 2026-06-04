@@ -951,7 +951,9 @@ class DataRepository:
             anns = ann_by_data.get(row.id, [])
             item["annotations"] = [
                 {"id": a.id, "username": a.username, "label": a.label,
-                 "cot": a.cot, "version": a.version, "is_active": True,
+                 "cot": a.cot, "category": a.category, "keywords": a.keywords,
+                 "keywords_desc": a.keywords_desc,
+                 "version": a.version, "is_active": True,
                  "created_at": a.created_at.isoformat() if a.created_at else None}
                 for a in anns
             ]
@@ -969,10 +971,25 @@ class DataRepository:
                 item["annotators"]        = ", ".join(a.username for a in anns) if anns else None
                 is_manual = ar.label_source == "manual" and ar.resolver
                 item["annotator"] = ar.resolver if is_manual else item["annotators"]
+
+                # 结构化字段（category/keywords/keywords_desc）：
+                #   manual → 取 resolver 的标注；auto → 取第一个有值的有效标注
+                primary_ann = None
+                if is_manual:
+                    primary_ann = next((a for a in anns if a.username == ar.resolver), None)
+                if primary_ann is None:
+                    primary_ann = next(
+                        (a for a in anns if a.category or a.keywords or a.keywords_desc),
+                        anns[0] if anns else None,
+                    )
+                item["category"]      = primary_ann.category      if primary_ann else None
+                item["keywords"]      = primary_ann.keywords      if primary_ann else None
+                item["keywords_desc"] = primary_ann.keywords_desc if primary_ann else None
             else:
                 for f in ("label", "label_source", "annotator_count", "resolver",
                           "result_cot", "result_updated_at", "annotated_at",
-                          "annotators", "annotator"):
+                          "annotators", "annotator",
+                          "category", "keywords", "keywords_desc"):
                     item[f] = None if f != "annotator_count" else 0
 
             # 冲突信息
