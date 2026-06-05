@@ -67,7 +67,7 @@ async def list_data_items(
     start_date: str | None    = Query(None, description="更新时间起（YYYY-MM-DD）"),
     end_date:   str | None    = Query(None, description="更新时间止（YYYY-MM-DD）"),
     page:       int           = Query(1, ge=1),
-    page_size:  int           = Query(20, ge=1, le=200),
+    page_size:  int           = Query(20, ge=1, le=500),
 ):
     """分页查询数据列表"""
     db     = get_db()

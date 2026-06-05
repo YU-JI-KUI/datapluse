@@ -45,7 +45,7 @@ async def list_users(
     start_date: str | None = Query(None,  description="更新时间起（YYYY-MM-DD）"),
     end_date:   str | None = Query(None,  description="更新时间止（YYYY-MM-DD）"),
     page:       int = Query(1,  ge=1),
-    page_size:  int = Query(20, ge=1, le=200),
+    page_size:  int = Query(20, ge=1, le=500),
 ):
     """获取用户列表（管理员，支持分页和过滤）"""
     from datapulse.core.response import page_data

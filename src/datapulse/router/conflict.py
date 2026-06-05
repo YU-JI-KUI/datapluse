@@ -54,7 +54,7 @@ async def list_conflicts(
     conflict_type: str | None = Query(None, description="label_conflict / semantic_conflict"),
     keyword:       str | None = Query(None, description="文本内容关键词过滤（模糊匹配）"),
     page:          int        = Query(1,    ge=1),
-    page_size:     int        = Query(10,   ge=1, le=100),
+    page_size:     int        = Query(10,   ge=1, le=500),
 ):
     """分页查询指定 dataset 下的冲突列表"""
     db = get_db()

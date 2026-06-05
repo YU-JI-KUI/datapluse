@@ -47,7 +47,7 @@ async def list_categories(
     dataset_id: int        = Query(...),
     keyword:    str | None = Query(None),
     page:       int        = Query(1,  ge=1),
-    page_size:  int        = Query(10, ge=1, le=100),
+    page_size:  int        = Query(10, ge=1, le=500),
 ):
     db     = get_db()
     result = db.list_categories(dataset_id, keyword=keyword, page=page, page_size=page_size)

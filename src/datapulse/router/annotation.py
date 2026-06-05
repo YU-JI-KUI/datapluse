@@ -117,7 +117,7 @@ async def get_my_annotation_items(
     dataset_id: int           = Query(..., description="数据集 ID"),
     view:       str           = Query("all", description="all | unannotated | my_annotated"),
     page:       int           = Query(1, ge=1),
-    page_size:  int           = Query(50, ge=1, le=200),
+    page_size:  int           = Query(50, ge=1, le=500),
     keyword:    str | None    = Query(None, description="文本关键词过滤"),
     label:      str | None    = Query(None, description="标签过滤（仅 my_annotated 视图生效）"),
 ):
@@ -142,7 +142,7 @@ async def get_annotation_queue(
     user:       CurrentUser,
     dataset_id: int = Query(..., description="数据集 ID"),
     page:       int = Query(1, ge=1),
-    page_size:  int = Query(20, ge=1, le=100),
+    page_size:  int = Query(20, ge=1, le=500),
 ):
     """获取当前用户的待标注队列（多人标注模式）。
     返回状态为 pre_annotated 或 annotated、但当前用户尚未标注的所有条目。
