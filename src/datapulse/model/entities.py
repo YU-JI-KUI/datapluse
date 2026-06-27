@@ -355,3 +355,30 @@ class EvalTaskRow(Base):
     __table_args__ = (
         UniqueConstraint("task_id", "row_index", name="uk_t_eval_task_row_task_idx"),
     )
+
+
+class EvalPrompt(Base):
+    """t_eval_prompt — AI 评测提示词（支持页面实时编辑，改后不重启即生效）
+
+    一条 prompt 由 (bu, name) 唯一标识。bu 用约定字符串区分作用域：
+      _root    = prompts/ 根目录的共用模板（如 judge_user.md）
+      _default = 各 BU 通用兜底（prompts/_default/）
+      其余     = 具体 BU（securities / life / ...）
+    库中无记录时加载层回退读 prompts/ 下的同名文件（出厂默认）。
+    """
+
+    __tablename__ = "t_eval_prompt"
+
+    id          = Column(BigInteger, primary_key=True, autoincrement=True)
+    bu          = Column(String(64), nullable=False)    # _root | _default | 具体BU code
+    name        = Column(String(128), nullable=False)   # 模板文件名，如 judge_system.md
+    content     = Column(Text, nullable=False, default="")
+    description = Column(String(255), nullable=False, default="")
+    created_at  = Column(_TS, nullable=False)
+    created_by  = Column(String(100), nullable=False, default="")
+    updated_at  = Column(_TS, nullable=False)
+    updated_by  = Column(String(100), nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("bu", "name", name="uk_t_eval_prompt_bu_name"),
+    )

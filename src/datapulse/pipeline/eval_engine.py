@@ -331,3 +331,83 @@ def export_report(task_id: str) -> Path | None:
         adv_df = pd.DataFrame(advice) if advice else pd.DataFrame([{"说明": "本次无优化建议(指标良好或样本不足)"}])
         adv_df.to_excel(writer, sheet_name="优化建议", index=False)
     return out
+
+
+# ── 提示词管理 ────────────────────────────────────────────────────────────────
+
+# 模板名 → 中文用途说明（编辑页展示，让用户知道每个模板影响什么）
+_PROMPT_DESC = {
+    "judge_system.md":      "Judge 系统人设：评测专家身份与总体判定立场",
+    "judge_user.md":        "Judge 用户模板：单条样本的输入拼装格式",
+    "task_dispatch.md":     "任务·分发判定：该不该本 BU 承接",
+    "task_business_type.md": "任务·业务分类：给客户问题打业务标签",
+    "task_resolved.md":     "任务·解决判定：答案是否解决客户问题",
+    "task_review.md":       "任务·人工复核：是否需要人工二次确认",
+    "advice_system.md":     "优化建议·系统人设：给建议的专家身份",
+    "advice_user.md":       "优化建议·用户模板：喂入聚合指标的格式",
+}
+
+
+def _prompt_desc(name: str) -> str:
+    return _PROMPT_DESC.get(name, "")
+
+
+def list_prompts() -> list[dict]:
+    """列出可编辑提示词清单：出厂模板叠加库里的自定义状态（不含全文，列表轻量）。"""
+    from datapulse.modules.eval import prompt_loader
+
+    db = get_db()
+    custom = {(r["bu"], r["name"]): r for r in db.eval_prompt_list()}
+    out = []
+    for it in prompt_loader.list_editable():
+        key = (it["bu"], it["name"])
+        c = custom.get(key)
+        out.append({
+            "bu": it["bu"],
+            "name": it["name"],
+            "description": _prompt_desc(it["name"]),
+            "customized": c is not None,           # 库里有记录=已被用户改过
+            "updated_at": c["updated_at"] if c else None,
+            "updated_by": c["updated_by"] if c else None,
+        })
+    return out
+
+
+def get_prompt(bu: str, name: str) -> dict | None:
+    """单条详情：当前有效内容 + 文件出厂默认（供对比/重置）+ 是否自定义。"""
+    from datapulse.modules.eval import prompt_loader
+
+    file_default = prompt_loader.file_default(bu, name)
+    rec = get_db().eval_prompt_get(bu, name)
+    if rec is None and file_default is None:
+        return None
+    return {
+        "bu": bu,
+        "name": name,
+        "description": _prompt_desc(name),
+        "content": rec["content"] if rec else file_default,
+        "file_default": file_default,
+        "customized": rec is not None,
+        "updated_at": rec["updated_at"] if rec else None,
+        "updated_by": rec["updated_by"] if rec else None,
+    }
+
+
+def save_prompt(bu: str, name: str, content: str, operator: str = "system") -> dict:
+    """保存提示词（upsert）并失效缓存，使下次评测即读到新值。"""
+    from datapulse.modules.eval import prompt_loader
+
+    rec = get_db().eval_prompt_upsert(bu, name, content,
+                                      description=_prompt_desc(name), updated_by=operator)
+    prompt_loader.bump_version()
+    return rec
+
+
+def reset_prompt(bu: str, name: str) -> bool:
+    """重置为文件出厂默认（删库记录）并失效缓存。返回是否真的删了。"""
+    from datapulse.modules.eval import prompt_loader
+
+    deleted = get_db().eval_prompt_delete(bu, name)
+    if deleted:
+        prompt_loader.bump_version()
+    return deleted

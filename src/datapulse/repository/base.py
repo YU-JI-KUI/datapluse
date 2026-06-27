@@ -896,6 +896,31 @@ class DBManager:
         with self._session() as s:
             return EvalRepository(s).load_rows_after(task_id, after_index, limit)
 
+    # ── 评测提示词（t_eval_prompt）────────────────────────────────────────────
+
+    def eval_prompt_get(self, bu: str, name: str) -> dict | None:
+        from datapulse.repository.eval_repository import EvalPromptRepository
+        with self._session() as s:
+            return EvalPromptRepository(s).get(bu, name)
+
+    def eval_prompt_list(self) -> list[dict]:
+        from datapulse.repository.eval_repository import EvalPromptRepository
+        with self._session() as s:
+            return EvalPromptRepository(s).list_all()
+
+    def eval_prompt_upsert(self, bu: str, name: str, content: str,
+                           description: str | None = None, updated_by: str = "system") -> dict:
+        from datapulse.repository.eval_repository import EvalPromptRepository
+        with self._session() as s:
+            return EvalPromptRepository(s).upsert(
+                bu, name, content, description=description, updated_by=updated_by
+            )
+
+    def eval_prompt_delete(self, bu: str, name: str) -> bool:
+        from datapulse.repository.eval_repository import EvalPromptRepository
+        with self._session() as s:
+            return EvalPromptRepository(s).delete(bu, name)
+
     def eval_save_result(self, task_id: str, result: dict, updated_by: str = "system") -> None:
         from datapulse.repository.eval_repository import EvalRepository
         with self._session() as s:

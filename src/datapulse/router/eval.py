@@ -22,6 +22,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from datapulse.api.auth import UserInfo, get_current_user
 from datapulse.config.settings import get_settings
@@ -202,3 +203,39 @@ async def get_config(user: CurrentUser):
         "pingan_ready":       settings.pingan_ready(),
         "concurrency":        settings.judge_concurrency,
     })
+
+
+# ── 提示词管理（页面实时编辑，改后不重启即生效）──────────────────────────────
+
+class PromptSaveBody(BaseModel):
+    content: str
+
+
+@router.get("/prompts")
+async def list_prompts(user: CurrentUser):
+    """可编辑提示词清单（出厂模板 + 是否已自定义）。"""
+    return success({"prompts": eval_engine.list_prompts()})
+
+
+@router.get("/prompts/{bu}/{name}")
+async def get_prompt(bu: str, name: str, user: CurrentUser):
+    """单条提示词：当前有效内容 + 文件出厂默认 + 是否自定义。"""
+    p = eval_engine.get_prompt(bu, name)
+    if not p:
+        raise NotFoundError("提示词不存在")
+    return success(p)
+
+
+@router.put("/prompts/{bu}/{name}")
+async def save_prompt(bu: str, name: str, body: PromptSaveBody, user: CurrentUser):
+    """保存提示词，立即生效（下次评测读到新值，无需重启）。"""
+    if not body.content.strip():
+        raise ParamError("提示词内容不能为空")
+    return success(eval_engine.save_prompt(bu, name, body.content, operator=user.username))
+
+
+@router.post("/prompts/{bu}/{name}/reset")
+async def reset_prompt(bu: str, name: str, user: CurrentUser):
+    """重置为文件出厂默认（删除库中自定义）。"""
+    eval_engine.reset_prompt(bu, name)
+    return success(eval_engine.get_prompt(bu, name))

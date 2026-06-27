@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from datapulse.model.entities import EvalTask, EvalTaskRow
+from datapulse.model.entities import EvalPrompt, EvalTask, EvalTaskRow
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -181,6 +181,59 @@ class EvalRepository:
         """
         slim = {k: v for k, v in result.items() if k != "rows"}
         self.update_task(task_id, updated_by=updated_by, result_json=slim)
+
+
+def _prompt_to_dict(p: EvalPrompt) -> dict[str, Any]:
+    return {
+        "id": p.id, "bu": p.bu, "name": p.name,
+        "content": p.content, "description": p.description,
+        "updated_at": _iso(p.updated_at), "updated_by": p.updated_by,
+    }
+
+
+class EvalPromptRepository:
+    """提示词持久化层。(bu, name) 唯一；库中无记录时由加载层回退读文件。"""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def get(self, bu: str, name: str) -> dict | None:
+        p = self.session.query(EvalPrompt).filter(
+            EvalPrompt.bu == bu, EvalPrompt.name == name
+        ).first()
+        return _prompt_to_dict(p) if p else None
+
+    def list_all(self) -> list[dict]:
+        rows = self.session.execute(
+            select(EvalPrompt).order_by(EvalPrompt.bu, EvalPrompt.name)
+        ).scalars().all()
+        return [_prompt_to_dict(p) for p in rows]
+
+    def upsert(self, bu: str, name: str, content: str,
+               description: str | None = None, updated_by: str = "system") -> dict:
+        """按 (bu, name) upsert。description 为 None 时不覆盖已有说明。"""
+        ts = _now()
+        values = {
+            "bu": bu, "name": name, "content": content,
+            "description": description or "",
+            "created_at": ts, "created_by": updated_by,
+            "updated_at": ts, "updated_by": updated_by,
+        }
+        set_ = {"content": content, "updated_at": ts, "updated_by": updated_by}
+        if description is not None:
+            set_["description"] = description
+        stmt = pg_insert(EvalPrompt).values(**values).on_conflict_do_update(
+            index_elements=["bu", "name"], set_=set_,
+        )
+        self.session.execute(stmt)
+        return self.get(bu, name)
+
+    def delete(self, bu: str, name: str) -> bool:
+        """删除一条（回退到文件默认）。返回是否真的删了。"""
+        n = self.session.query(EvalPrompt).filter(
+            EvalPrompt.bu == bu, EvalPrompt.name == name
+        ).delete()
+        return bool(n)
 
     def load_result(self, task_id: str) -> dict | None:
         """读回聚合结果。不再附带全量 rows（百万级 OOM）；逐条走 load_rows_paged。"""
