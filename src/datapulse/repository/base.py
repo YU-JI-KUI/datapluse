@@ -178,6 +178,11 @@ class DBManager:
         _log.info("ORM tables synced (CREATE TABLE IF NOT EXISTS)")
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
 
+    @property
+    def engine(self):
+        """暴露 engine 供子系统（如 eval）复用同一连接池，避免另开连接池。"""
+        return self._engine
+
     @contextmanager
     def _session(self) -> Session:
         s = self._session_factory()
@@ -838,98 +843,10 @@ class DBManager:
         with self._session() as s:
             return EmbeddingRepository(s).load_batch(dataset_id, item_ids)
 
-    # ── AI 评测（t_eval_task / t_eval_task_row）────────────────────────────────
+    # ── AI 评测访问已迁出 ──────────────────────────────────────────────────────
+    # eval 的 DB 访问改由 datapulse.modules.eval.eval_db 自管（复用本类 engine），
+    # 主体 DBManager 不再背 eval_* 方法。详见里程碑式解耦说明。
 
-    def eval_create_task(self, task_id: str, filename: str, file_path: str, bu: str,
-                         created_by: str = "system") -> None:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            EvalRepository(s).create_task(task_id, filename, file_path, bu, created_by=created_by)
-
-    def eval_update_task(self, task_id: str, updated_by: str = "system", **fields: Any) -> None:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            EvalRepository(s).update_task(task_id, updated_by=updated_by, **fields)
-
-    def eval_get_task(self, task_id: str) -> dict | None:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            return EvalRepository(s).get_task(task_id)
-
-    def eval_list_tasks(self) -> list[dict]:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            return EvalRepository(s).list_tasks()
-
-    def eval_save_rows(self, task_id: str, rows: list[dict], created_by: str = "system") -> None:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            EvalRepository(s).save_rows(task_id, rows, created_by=created_by)
-
-    def eval_done_row_indices(self, task_id: str) -> set[int]:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            return EvalRepository(s).done_row_indices(task_id)
-
-    def eval_load_rows(self, task_id: str) -> list[dict]:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            return EvalRepository(s).load_rows(task_id)
-
-    def eval_load_rows_paged(self, task_id: str, page: int, page_size: int) -> list[dict]:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            return EvalRepository(s).load_rows_paged(task_id, page, page_size)
-
-    def eval_count_rows(self, task_id: str) -> int:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            return EvalRepository(s).count_rows(task_id)
-
-    def eval_load_review_rows(self, task_id: str, limit: int = 500) -> list[dict]:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            return EvalRepository(s).load_review_rows(task_id, limit=limit)
-
-    def eval_load_rows_after(self, task_id: str, after_index: int, limit: int) -> list[tuple[int, dict]]:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            return EvalRepository(s).load_rows_after(task_id, after_index, limit)
-
-    # ── 评测提示词（t_eval_prompt）────────────────────────────────────────────
-
-    def eval_prompt_get(self, bu: str, name: str) -> dict | None:
-        from datapulse.repository.eval_repository import EvalPromptRepository
-        with self._session() as s:
-            return EvalPromptRepository(s).get(bu, name)
-
-    def eval_prompt_list(self) -> list[dict]:
-        from datapulse.repository.eval_repository import EvalPromptRepository
-        with self._session() as s:
-            return EvalPromptRepository(s).list_all()
-
-    def eval_prompt_upsert(self, bu: str, name: str, content: str,
-                           description: str | None = None, updated_by: str = "system") -> dict:
-        from datapulse.repository.eval_repository import EvalPromptRepository
-        with self._session() as s:
-            return EvalPromptRepository(s).upsert(
-                bu, name, content, description=description, updated_by=updated_by
-            )
-
-    def eval_prompt_delete(self, bu: str, name: str) -> bool:
-        from datapulse.repository.eval_repository import EvalPromptRepository
-        with self._session() as s:
-            return EvalPromptRepository(s).delete(bu, name)
-
-    def eval_save_result(self, task_id: str, result: dict, updated_by: str = "system") -> None:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            EvalRepository(s).save_result(task_id, result, updated_by=updated_by)
-
-    def eval_load_result(self, task_id: str) -> dict | None:
-        from datapulse.repository.eval_repository import EvalRepository
-        with self._session() as s:
-            return EvalRepository(s).load_result(task_id)
 
 
 # ── 单例 ──────────────────────────────────────────────────────────────────────

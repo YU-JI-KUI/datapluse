@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from datapulse.model.entities import EvalPrompt, EvalTask, EvalTaskRow
+from datapulse.modules.eval.entities import EvalPrompt, EvalTask, EvalTaskRow
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 

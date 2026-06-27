@@ -32,8 +32,8 @@ def bump_version() -> None:
 def _db_get(bu: str, name: str) -> str | None:
     """查库取提示词正文；DB 不可用（如测试环境）时静默返回 None 走文件回退。"""
     try:
-        from datapulse.repository.base import get_db
-        rec = get_db().eval_prompt_get(bu, name)
+        from datapulse.modules.eval import eval_db
+        rec = eval_db.prompt_get(bu, name)
         return rec["content"] if rec else None
     except Exception:
         return None

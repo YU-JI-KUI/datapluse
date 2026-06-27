@@ -20,9 +20,9 @@ import pandas as pd
 import structlog
 
 from datapulse.config.settings import get_settings
+from datapulse.modules.eval import eval_db
 from datapulse.modules.eval.bu.registry import get_bu
 from datapulse.modules.eval.evaluator import run_evaluation
-from datapulse.repository.base import get_db
 
 _log = structlog.get_logger(__name__)
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -61,71 +61,68 @@ def _public(t: dict) -> dict:
 
 def create_task(filename: str, file_path: str, bu: str, created_by: str = "system") -> dict:
     task_id = uuid.uuid4().hex[:12]
-    db = get_db()
-    db.eval_create_task(task_id, filename, file_path, bu, created_by=created_by)
+    eval_db.create_task(task_id, filename, file_path, bu, created_by=created_by)
     return get_task(task_id)
 
 
 def get_task(task_id: str) -> dict | None:
-    t = get_db().eval_get_task(task_id)
+    t = eval_db.get_task(task_id)
     return _public(t) if t else None
 
 
 def list_tasks() -> list[dict]:
-    return [_public(t) for t in get_db().eval_list_tasks()]
+    return [_public(t) for t in eval_db.list_tasks()]
 
 
 def get_result(task_id: str) -> dict | None:
-    return get_db().eval_load_result(task_id)
+    return eval_db.load_result(task_id)
 
 
 def list_rows(task_id: str, page: int, page_size: int) -> list[dict]:
     """分页读逐条评测明细（前端结果页表格用）。"""
-    return get_db().eval_load_rows_paged(task_id, page, page_size)
+    return eval_db.load_rows_paged(task_id, page, page_size)
 
 
 def count_rows(task_id: str) -> int:
-    return get_db().eval_count_rows(task_id)
+    return eval_db.count_rows(task_id)
 
 
 def list_review_rows(task_id: str) -> list[dict]:
     """需复核子集（有限上限），供前端「需复核」过滤。"""
-    return get_db().eval_load_review_rows(task_id)
+    return eval_db.load_review_rows(task_id)
 
 
 def can_resume(task_id: str) -> bool:
     """failed 且已有部分落盘 → 可续跑。"""
-    db = get_db()
-    t = db.eval_get_task(task_id)
-    return bool(t and t["status"] == "failed" and db.eval_done_row_indices(task_id))
+    t = eval_db.get_task(task_id)
+    return bool(t and t["status"] == "failed" and eval_db.done_row_indices(task_id))
 
 
 async def run_eval(task_id: str, resume: bool = False, operator: str = "eval") -> None:
     """后台跑评测。resume=True 时断点续跑（跳过已落盘行）。"""
-    db = get_db()
-    t = db.eval_get_task(task_id)
+    t = eval_db.get_task(task_id)
     if not t:
         return
     bu = get_bu(t.get("bu"))
-    db.eval_update_task(task_id, updated_by=operator, status="running", error=None)
+    eval_db.update_task(task_id, updated_by=operator, status="running", error=None)
 
     def on_progress(stage: str, done: int, total: int):
-        db.eval_update_task(task_id, updated_by=operator,
+        eval_db.update_task(task_id, updated_by=operator,
                             stage=stage, progress_done=done, progress_total=total)
 
     try:
         result = await run_evaluation(
             t["file_path"], bu, on_progress=on_progress, task_id=task_id, persist=True,
         )
-        db.eval_save_result(task_id, result, updated_by=operator)
-        db.eval_update_task(
+        eval_db.save_result(task_id, result, updated_by=operator)
+        eval_db.update_task(
             task_id, updated_by=operator,
             status="done", stage="done", mode=result["mode"], finished_at=_now(),
         )
         _log.info("eval.done", task_id=task_id, samples=result["summary"]["total_samples"])
     except Exception as e:
         _log.exception("eval.failed", task_id=task_id)
-        db.eval_update_task(task_id, updated_by=operator,
+        eval_db.update_task(task_id, updated_by=operator,
                             status="failed", error=str(e), finished_at=_now())
 
 
@@ -174,10 +171,9 @@ def _iter_all_rows(task_id: str, batch_size: int = 1000):
     用 row_index > 上批最大值 翻页（keyset 分页），每批走唯一索引定位，
     整体 O(N)；避免 OFFSET 分页导出到后段越翻越慢。
     """
-    db = get_db()
     after = -1   # row_index 从 0 起，-1 保证取到第一条
     while True:
-        batch = db.eval_load_rows_after(task_id, after, batch_size)
+        batch = eval_db.load_rows_after(task_id, after, batch_size)
         if not batch:
             break
         for idx, row_json in batch:
@@ -213,7 +209,7 @@ _DISAGREEMENT_COLUMNS = [
 
 def export_disagreements(task_id: str) -> Path | None:
     """把不一致 case 导出成 Excel（流式写），返回文件路径。"""
-    result = get_db().eval_load_result(task_id)
+    result = eval_db.load_result(task_id)
     if not result:
         return None
     out = _outputs_dir() / f"不一致case_{task_id}.xlsx"
@@ -261,7 +257,7 @@ def export_rows(task_id: str) -> Path | None:
     游标分页从 t_eval_task_row 流式读 + openpyxl write_only 流式写，常量内存，
     5万~几十万行稳定导出（不再全量建 records + DataFrame）。
     """
-    if not get_db().eval_load_result(task_id):
+    if not eval_db.load_result(task_id):
         return None
     out = _outputs_dir() / f"评测明细_{task_id}.xlsx"
     return _stream_to_xlsx(
@@ -272,7 +268,7 @@ def export_rows(task_id: str) -> Path | None:
 
 def export_report(task_id: str) -> Path | None:
     """完整评估报告导出 Excel：概览 / BU分发漏斗 / 业务洞察切片 / 优化建议 多 sheet。"""
-    result = get_db().eval_load_result(task_id)
+    result = eval_db.load_result(task_id)
     if not result:
         return None
     s = result["summary"]
@@ -356,8 +352,7 @@ def list_prompts() -> list[dict]:
     """列出可编辑提示词清单：出厂模板叠加库里的自定义状态（不含全文，列表轻量）。"""
     from datapulse.modules.eval import prompt_loader
 
-    db = get_db()
-    custom = {(r["bu"], r["name"]): r for r in db.eval_prompt_list()}
+    custom = {(r["bu"], r["name"]): r for r in eval_db.prompt_list()}
     out = []
     for it in prompt_loader.list_editable():
         key = (it["bu"], it["name"])
@@ -378,7 +373,7 @@ def get_prompt(bu: str, name: str) -> dict | None:
     from datapulse.modules.eval import prompt_loader
 
     file_default = prompt_loader.file_default(bu, name)
-    rec = get_db().eval_prompt_get(bu, name)
+    rec = eval_db.prompt_get(bu, name)
     if rec is None and file_default is None:
         return None
     return {
@@ -397,7 +392,7 @@ def save_prompt(bu: str, name: str, content: str, operator: str = "system") -> d
     """保存提示词（upsert）并失效缓存，使下次评测即读到新值。"""
     from datapulse.modules.eval import prompt_loader
 
-    rec = get_db().eval_prompt_upsert(bu, name, content,
+    rec = eval_db.prompt_upsert(bu, name, content,
                                       description=_prompt_desc(name), updated_by=operator)
     prompt_loader.bump_version()
     return rec
@@ -407,7 +402,7 @@ def reset_prompt(bu: str, name: str) -> bool:
     """重置为文件出厂默认（删库记录）并失效缓存。返回是否真的删了。"""
     from datapulse.modules.eval import prompt_loader
 
-    deleted = get_db().eval_prompt_delete(bu, name)
+    deleted = eval_db.prompt_delete(bu, name)
     if deleted:
         prompt_loader.bump_version()
     return deleted

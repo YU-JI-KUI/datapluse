@@ -63,6 +63,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     get_db().seed_defaults()
 
+    # AI 评测子系统：用独立 EvalBase 建自己的表（主体 create_all 不含 eval 表）
+    from datapulse.modules.eval.eval_db import init_eval_schema
+    init_eval_schema()
+
     start_scheduler()   # 启动定时任务（每天 02:00 上海时间全量向量化）
     _log.info("datapulse ready")
     try:
