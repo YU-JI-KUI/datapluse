@@ -79,6 +79,20 @@ def get_result(task_id: str) -> dict | None:
     return get_db().eval_load_result(task_id)
 
 
+def list_rows(task_id: str, page: int, page_size: int) -> list[dict]:
+    """分页读逐条评测明细（前端结果页表格用）。"""
+    return get_db().eval_load_rows_paged(task_id, page, page_size)
+
+
+def count_rows(task_id: str) -> int:
+    return get_db().eval_count_rows(task_id)
+
+
+def list_review_rows(task_id: str) -> list[dict]:
+    """需复核子集（有限上限），供前端「需复核」过滤。"""
+    return get_db().eval_load_review_rows(task_id)
+
+
 def can_resume(task_id: str) -> bool:
     """failed 且已有部分落盘 → 可续跑。"""
     db = get_db()
@@ -158,13 +172,29 @@ def export_disagreements(task_id: str) -> Path | None:
     return out
 
 
+def _iter_all_rows(task_id: str, batch_size: int = 1000):
+    """分页迭代某任务的全部逐条结果（按 row_index）。导出用，避免一次性全量加载。"""
+    db = get_db()
+    page = 1
+    while True:
+        batch = db.eval_load_rows_paged(task_id, page, batch_size)
+        if not batch:
+            break
+        yield from batch
+        if len(batch) < batch_size:
+            break
+        page += 1
+
+
 def export_rows(task_id: str) -> Path | None:
-    """逐条评测明细全量导出 Excel：每条一行，含模型完整判断 + 答案原文。"""
-    result = get_db().eval_load_result(task_id)
-    if not result:
+    """逐条评测明细全量导出 Excel：每条一行，含模型完整判断 + 答案原文。
+
+    逐条数据从 t_eval_task_row 分页读取（不再依赖 load_result 附带 rows）。
+    """
+    if not get_db().eval_load_result(task_id):
         return None
     records: list[dict[str, Any]] = []
-    for r in result.get("rows", []):
+    for r in _iter_all_rows(task_id):
         j = r["judge"] if isinstance(r["judge"], dict) else {}
         records.append({
             "会话ID": r["session"],

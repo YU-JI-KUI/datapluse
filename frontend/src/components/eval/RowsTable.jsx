@@ -1,5 +1,12 @@
-/** 逐条明细表：过滤（全部/不一致/需复核）+ 搜索 + 分页 + 点击查看详情。 */
-import { useMemo, useState } from 'react'
+/** 逐条明细表：服务端分页（百万级不再全量加载）。
+ *
+ * 三种视图：
+ *  - 全部   ：走 /rows 分页接口，按 row_index 翻页
+ *  - 不一致 ：用 result.disagreements（后端代表样本，≤上限），前端翻页 + 搜索
+ *  - 需复核 ：走 /rows?flag=review（有限子集），前端翻页 + 搜索
+ * 「全部」视图数据量可达百万，不提供前端全量搜索（搜索仅在不一致/需复核子集内生效）。
+ */
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, AlertTriangle, Search } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -7,47 +14,76 @@ import { Input } from '@/components/ui/input'
 import TablePagination from '@/components/TablePagination'
 import { EvalBadge, YesNo, SectionTitle } from './EvalPrimitives'
 import DetailDrawer from './DetailDrawer'
+import { evalApi } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
+const RESP = (r) => r?.data?.data ?? {}   // datapulse 统一响应：res.data.data
 const SCENE_TONE = { 正常: 'good', 该拒未拒: 'bad', 该分未分: 'warn' }
 
-const FILTERS = [
-  { key: 'all',      label: '全部' },
-  { key: 'disagree', label: '不一致' },
-  { key: 'review',   label: '需复核' },
-]
-
-export default function RowsTable({ rows = [] }) {
+export default function RowsTable({ taskId, disagreements = [], totalSamples = 0, reviewCount = 0 }) {
   const [filter, setFilter] = useState('all')
   const [kw, setKw] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const [active, setActive] = useState(null)
 
-  const counts = useMemo(() => ({
-    all: rows.length,
-    disagree: rows.filter(r => r.is_disagreement).length,
-    review: rows.filter(r => r.judge?.needs_human_review).length,
-  }), [rows])
+  // 全部：服务端分页结果；needs_review：一次拉回有限子集
+  const [pageRows, setPageRows] = useState([])
+  const [serverTotal, setServerTotal] = useState(0)
+  const [reviewRows, setReviewRows] = useState([])
+  const [loading, setLoading] = useState(false)
 
-  const filtered = useMemo(() => {
-    let r = rows
-    if (filter === 'disagree') r = r.filter(x => x.is_disagreement)
-    else if (filter === 'review') r = r.filter(x => x.judge?.needs_human_review)
-    if (kw.trim()) {
-      const q = kw.trim().toLowerCase()
-      r = r.filter(x =>
-        (x.question || '').toLowerCase().includes(q) ||
-        (x.j_intent || '').toLowerCase().includes(q) ||
-        (x.session || '').toLowerCase().includes(q))
-    }
-    return r
-  }, [rows, filter, kw])
+  const FILTERS = [
+    { key: 'all',      label: '全部',   count: totalSamples },
+    { key: 'disagree', label: '不一致', count: disagreements.length },
+    { key: 'review',   label: '需复核', count: reviewCount },
+  ]
 
-  const total = filtered.length
-  const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+  // 「全部」视图：随页码/页大小拉服务端分页
+  useEffect(() => {
+    if (filter !== 'all' || !taskId) return
+    let cancelled = false
+    setLoading(true)
+    evalApi.getRows(taskId, page, pageSize, 'all')
+      .then(res => {
+        if (cancelled) return
+        const d = RESP(res)
+        setPageRows(d.list || [])
+        setServerTotal(d.pagination?.total || 0)
+      })
+      .finally(() => !cancelled && setLoading(false))
+    return () => { cancelled = true }
+  }, [filter, taskId, page, pageSize])
 
-  function changeFilter(k) { setFilter(k); setPage(1) }
+  // 「需复核」视图：首次切入时拉回有限子集（之后前端翻页/搜索）
+  useEffect(() => {
+    if (filter !== 'review' || !taskId || reviewRows.length) return
+    let cancelled = false
+    setLoading(true)
+    evalApi.getRows(taskId, 1, 500, 'review')
+      .then(res => { if (!cancelled) setReviewRows(RESP(res).list || []) })
+      .finally(() => !cancelled && setLoading(false))
+    return () => { cancelled = true }
+  }, [filter, taskId])
+
+  // 子集视图（不一致/需复核）在前端做搜索 + 分页
+  const subsetAll = filter === 'disagree' ? disagreements : filter === 'review' ? reviewRows : []
+  const subsetFiltered = useMemo(() => {
+    if (filter === 'all') return []
+    const q = kw.trim().toLowerCase()
+    if (!q) return subsetAll
+    return subsetAll.filter(x =>
+      (x.question || '').toLowerCase().includes(q) ||
+      (x.j_intent || '').toLowerCase().includes(q) ||
+      (x.session || '').toLowerCase().includes(q))
+  }, [filter, subsetAll, kw])
+
+  // 当前页数据 + 总数：全部走服务端，子集走前端切片
+  const isAll = filter === 'all'
+  const total = isAll ? serverTotal : subsetFiltered.length
+  const display = isAll ? pageRows : subsetFiltered.slice((page - 1) * pageSize, page * pageSize)
+
+  function changeFilter(k) { setFilter(k); setPage(1); setKw('') }
 
   return (
     <Card>
@@ -64,7 +100,7 @@ export default function RowsTable({ rows = [] }) {
                   filter === f.key ? 'bg-blue-100 text-blue-700' : 'text-muted-foreground hover:bg-accent',
                 )}
               >
-                {f.label} <span className="tabular-nums">{counts[f.key]}</span>
+                {f.label} <span className="tabular-nums">{f.count}</span>
               </button>
             ))}
           </div>
@@ -73,7 +109,8 @@ export default function RowsTable({ rows = [] }) {
             <Input
               value={kw}
               onChange={e => { setKw(e.target.value); setPage(1) }}
-              placeholder="搜索问题 / 分类 / 会话"
+              disabled={isAll}
+              placeholder={isAll ? '搜索仅限子集视图' : '搜索问题 / 分类 / 会话'}
               className="pl-7 h-8 text-sm"
             />
           </div>
@@ -92,11 +129,15 @@ export default function RowsTable({ rows = [] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {pageRows.length === 0 ? (
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">加载中…</TableCell>
+              </TableRow>
+            ) : display.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">暂无数据</TableCell>
               </TableRow>
-            ) : pageRows.map((r, i) => (
+            ) : display.map((r, i) => (
               <TableRow
                 key={r.row_index ?? i}
                 onClick={() => setActive(r)}

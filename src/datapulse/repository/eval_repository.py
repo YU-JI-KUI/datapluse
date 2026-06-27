@@ -114,7 +114,7 @@ class EvalRepository:
         return set(rows)
 
     def load_rows(self, task_id: str) -> list[dict]:
-        """读回所有逐条结果（按 row_index 排序）。"""
+        """读回所有逐条结果（按 row_index 排序）。仅用于小数据量场景。"""
         rows = self.session.execute(
             select(EvalTaskRow.row_json)
             .where(EvalTaskRow.task_id == task_id)
@@ -122,19 +122,54 @@ class EvalRepository:
         ).scalars().all()
         return list(rows)
 
+    def load_rows_paged(self, task_id: str, page: int, page_size: int) -> list[dict]:
+        """分页读逐条结果（按 row_index 排序）。百万级下避免一次性全量加载。"""
+        offset = (page - 1) * page_size
+        rows = self.session.execute(
+            select(EvalTaskRow.row_json)
+            .where(EvalTaskRow.task_id == task_id)
+            .order_by(EvalTaskRow.row_index)
+            .offset(offset).limit(page_size)
+        ).scalars().all()
+        return list(rows)
+
+    def count_rows(self, task_id: str) -> int:
+        from sqlalchemy import func
+        return int(self.session.execute(
+            select(func.count()).select_from(EvalTaskRow).where(EvalTaskRow.task_id == task_id)
+        ).scalar() or 0)
+
+    def load_review_rows(self, task_id: str, limit: int = 500) -> list[dict]:
+        """读「需人工复核」的行（JSONB 过滤），上限 limit。
+
+        需复核是要人工处理的有限子集，与 disagreements 对称只取代表样本，
+        百万级下不做全量返回。row_json->'judge'->>'needs_human_review' 为真即命中。
+        """
+        rows = self.session.execute(
+            select(EvalTaskRow.row_json)
+            .where(
+                EvalTaskRow.task_id == task_id,
+                EvalTaskRow.row_json["judge"]["needs_human_review"].as_boolean().is_(True),
+            )
+            .order_by(EvalTaskRow.row_index)
+            .limit(limit)
+        ).scalars().all()
+        return list(rows)
+
     # ── 聚合结果 ──────────────────────────────────────────────────────────────
 
     def save_result(self, task_id: str, result: dict, updated_by: str = "system") -> None:
-        """落盘聚合结果（不含逐条 rows——rows 在 t_eval_task_row）。"""
-        slim = {k: v for k, v in result.items() if k not in ("rows", "disagreements")}
+        """落盘聚合结果（不含逐条 rows——rows 在 t_eval_task_row，前端分页查）。
+
+        disagreements 是有限代表样本（上限见 evaluator._MAX_DISAGREEMENTS），随聚合
+        结果入库供报表/导出；全量逐条不入 result_json，避免百万级把单行 JSONB 撑爆。
+        """
+        slim = {k: v for k, v in result.items() if k != "rows"}
         self.update_task(task_id, updated_by=updated_by, result_json=slim)
 
     def load_result(self, task_id: str) -> dict | None:
+        """读回聚合结果。不再附带全量 rows（百万级 OOM）；逐条走 load_rows_paged。"""
         t = self.get_task(task_id)
         if not t or not t.get("result_json"):
             return None
-        result = dict(t["result_json"])
-        rows = self.load_rows(task_id)
-        result["rows"] = rows
-        result["disagreements"] = [r for r in rows if r.get("is_disagreement")]
-        return result
+        return dict(t["result_json"])

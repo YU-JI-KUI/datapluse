@@ -118,6 +118,30 @@ async def task_result(task_id: str, user: CurrentUser):
     return success(result)
 
 
+@router.get("/tasks/{task_id}/rows")
+async def task_rows(
+    task_id: str,
+    user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=500),
+    flag: str = Query("all"),
+):
+    """分页查逐条评测明细（百万级下替代 /result 附带全量 rows）。
+
+    flag=all（默认）按 row_index 分页全量；flag=review 只取需复核子集（有限上限）。
+    「不一致」子集前端直接用 result.disagreements，不走此接口。
+    """
+    task = eval_engine.get_task(task_id)
+    if not task:
+        raise NotFoundError("任务不存在")
+    if flag == "review":
+        rows = eval_engine.list_review_rows(task_id)
+        return success(page_data(rows, 1, len(rows), len(rows)))
+    rows = eval_engine.list_rows(task_id, page, page_size)
+    total = eval_engine.count_rows(task_id)
+    return success(page_data(rows, page, page_size, total))
+
+
 @router.post("/tasks/{task_id}/resume")
 async def resume_task(task_id: str, user: CurrentUser, background_tasks: BackgroundTasks):
     """断点续跑：对中断的任务，跳过已完成行继续。"""

@@ -97,50 +97,209 @@ def assemble_row(sample: dict, judge: dict) -> dict:
     return row
 
 
-async def _judge_with_persistence(samples, bu, on_progress, task_id, persist) -> list[dict]:
-    """跑 judge 并(可选)逐批落盘 + 断点续跑。
+# 不一致 case / 未解决样例只保留有限条数:百万级下全量驻留会 OOM,
+# 报表/导出只需代表性样本,完整逐条已落盘 t_eval_task_row,可分页查。
+_MAX_DISAGREEMENTS = 500
+_MAX_UNRESOLVED_EXAMPLES = 3
 
-    续跑:读已落盘的 row_index,只对未完成样本跑 judge;已完成的直接读回。
-    落盘:分批写入,避免 3万行跑一半中断后全部重来。
+# _compute_metrics 的三个二值维度规格(与纯函数版本保持一致)
+_METRIC_SPECS = (
+    ("分发是否正确", "dispatch", "j_dispatch"),
+    ("一键场景分发是否正确", "oneclick", "j_dispatch"),
+    ("答案是否解决客户问题", "resolved", "j_resolved"),
+)
+
+
+class _IntentSlice:
+    """单个业务分类切片的增量计数(对齐 compute_insights.slice_stats)。"""
+    __slots__ = ("count", "in_bu", "resolved_yes", "need_review", "examples")
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.in_bu = 0
+        self.resolved_yes = 0
+        self.need_review = 0
+        self.examples: list[str] = []   # 进漏斗且未解决的典型问题，最多留 N 条
+
+
+class _StreamAggregator:
+    """流式聚合:逐批吃 rows、更新计数,跑完即丢弃 row 本体,不全量驻留内存。
+
+    finalize() 产出与 evaluator 中纯函数(compute_insights / _bu_dispatch_stats /
+    _intent_distribution / _compute_metrics)完全等价的结构。纯函数保留作小数据/
+    测试路径,本类是其增量版本,两者口径必须一致。
+    """
+
+    def __init__(self) -> None:
+        self.total = 0
+        self.intent_dist: Counter = Counter()             # j_intent 分布
+        self.slices: dict[str, _IntentSlice] = defaultdict(_IntentSlice)  # 按 j_intent 切片
+        # overall 漏斗(分母 = 分发到本BU)
+        self.in_bu_total = 0
+        self.resolved_yes_total = 0
+        # BU 分发漏斗
+        self.disp_scored = 0
+        self.disp_correct = 0
+        self.disp_miss = 0
+        self.disp_over = 0
+        # 校准指标:每个维度 4 种「是/否」配对的计数 {(gold, pred): n}
+        self.metric_pairs: dict[str, Counter] = {spec[1]: Counter() for spec in _METRIC_SPECS}
+        # summary 计数
+        self.needs_review = 0
+        self.errors = 0
+        self.disagreement_count = 0
+        self.disagreements: list[dict] = []   # 仅留前 _MAX_DISAGREEMENTS 条
+
+    def update(self, rows: list[dict]) -> None:
+        for r in rows:
+            self.total += 1
+            judge = r["judge"]
+            is_judge_dict = isinstance(judge, dict)
+
+            intent = r["j_intent"]
+            if intent:
+                self.intent_dist[intent] += 1
+
+            # 切片(未分类归入 "(未分类)"，与 compute_insights 一致)
+            sl = self.slices[intent or "(未分类)"]
+            sl.count += 1
+            in_bu = bool(r.get("dispatched_to_bu"))
+            need_review = is_judge_dict and judge.get("needs_human_review")
+            if need_review:
+                sl.need_review += 1
+            if in_bu:
+                sl.in_bu += 1
+                self.in_bu_total += 1
+                raw = r["j_resolved_raw"]
+                if raw == "yes":
+                    sl.resolved_yes += 1
+                    self.resolved_yes_total += 1
+                elif raw in ("no", "partial") and len(sl.examples) < _MAX_UNRESOLVED_EXAMPLES:
+                    sl.examples.append(r["question"])
+
+            # BU 分发漏斗
+            dc = r.get("dispatch_correct")
+            if dc is not None:
+                self.disp_scored += 1
+                should = bool(judge.get("should_dispatch_to_bu")) if is_judge_dict else False
+                if dc:
+                    self.disp_correct += 1
+                elif should and not in_bu:
+                    self.disp_miss += 1
+                elif not should and in_bu:
+                    self.disp_over += 1
+
+            # 校准配对计数
+            for _name, gold_key, j_key in _METRIC_SPECS:
+                gv = r["gold"].get(gold_key, "")
+                jv = r.get(j_key, "")
+                if gv in ("是", "否") and jv in ("是", "否"):
+                    self.metric_pairs[gold_key][(gv, jv)] += 1
+
+            # summary 计数
+            if need_review:
+                self.needs_review += 1
+            if is_judge_dict and "_error" in judge:
+                self.errors += 1
+            if r["is_disagreement"]:
+                self.disagreement_count += 1
+                if len(self.disagreements) < _MAX_DISAGREEMENTS:
+                    self.disagreements.append(r)
+
+    # ── finalize:产出与纯函数等价的结构 ──────────────────────────────────────
+
+    def intent_distribution(self) -> dict:
+        return {"by_intent": [{"name": k, "count": v} for k, v in self.intent_dist.most_common()]}
+
+    def insights(self) -> dict:
+        intent_slices = sorted(
+            (
+                {
+                    "name": name,
+                    "count": sl.count,
+                    "in_bu_count": sl.in_bu,
+                    "resolved_rate": _rate(sl.resolved_yes, sl.in_bu),
+                    "needs_review_rate": _rate(sl.need_review, sl.count),
+                    "unresolved_examples": sl.examples,
+                }
+                for name, sl in self.slices.items()
+            ),
+            key=lambda x: x["count"], reverse=True,
+        )
+        return {
+            "overall": {
+                "count": self.total,
+                "in_bu_count": self.in_bu_total,
+                "resolved_rate": _rate(self.resolved_yes_total, self.in_bu_total),
+                "dispatch_accuracy": _rate(self.disp_correct, self.disp_scored),
+            },
+            "by_intent": intent_slices,
+        }
+
+    def bu_dispatch(self) -> dict:
+        scored = self.disp_scored
+        return {
+            "scored": scored,
+            "correct": self.disp_correct,
+            "wrong": scored - self.disp_correct,
+            "accuracy": round(self.disp_correct / scored, 4) if scored else 0.0,
+            "miss_should_accept_but_rejected": self.disp_miss,
+            "over_should_reject_but_accepted": self.disp_over,
+        }
+
+    def metrics(self) -> list[dict]:
+        """从 4 种配对计数重建指标。等价于全量 y_true/y_pred 喂 binary_report。"""
+        out = []
+        for name, gold_key, _j_key in _METRIC_SPECS:
+            pairs = self.metric_pairs[gold_key]
+            if not pairs:
+                continue
+            y_true = ["是", "是", "否", "否"]
+            y_pred = ["是", "否", "是", "否"]
+            weights = [pairs.get((t, p), 0) for t, p in zip(y_true, y_pred)]
+            if sum(weights) == 0:
+                continue
+            out.append(binary_report(name, y_true, y_pred, sample_weight=weights))
+        return out
+
+
+async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _StreamAggregator) -> None:
+    """跑 judge,逐批喂累加器并落盘,不全量收集 rows(百万级避免 OOM)。
+
+    续跑:已落盘的行分批读回喂累加器(喂完即弃),再只对未完成样本跑 judge。
+    落盘:分批写入,避免大批量跑一半中断后全部重来。
     """
     total = len(samples)
     done_idx: set[int] = set()
-    cached: dict[int, dict] = {}
     if persist and task_id:
         done_idx = store.done_row_indices(task_id)
-        if done_idx:
-            cached = {r["row_index"]: r for r in store.load_rows(task_id)}
+        # 已落盘行分批读回喂累加器,不一次性全部驻留
+        for cached_batch in store.iter_rows(task_id, batch_size=1000):
+            agg.update(cached_batch)
 
     pending = [s for s in samples if s["row_index"] not in done_idx]
-    rows_by_idx: dict[int, dict] = dict(cached)
     done_count = len(done_idx)
-
     if on_progress:
         on_progress("judging", done_count, total)
 
-    # 分批跑,每批落盘一次,兼顾进度可见与 IO 次数
     batch_size = 200
     for start in range(0, len(pending), batch_size):
         batch = pending[start:start + batch_size]
         judges = await judge_batch(batch, bu)
         batch_rows = [assemble_row(s, j) for s, j in zip(batch, judges)]
-        for r in batch_rows:
-            rows_by_idx[r["row_index"]] = r
         if persist and task_id:
             store.save_rows(task_id, batch_rows)
+        agg.update(batch_rows)          # 喂累加器后该批即可释放
         done_count += len(batch_rows)
         if on_progress:
             on_progress("judging", done_count, total)
-
-    # 按原顺序还原
-    return [rows_by_idx[s["row_index"]] for s in samples]
 
 
 async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None, persist=False) -> dict:
     """跑一次完整评测。bu 注入该 BU 的领域知识(意图体系/分组/专家身份)。
 
-    persist=True 时逐批落盘到 SQLite,并在重入时跳过已完成行(断点续跑);
-    task_id 为落盘/续跑的键。
+    persist=True 时逐批落盘,并在重入时跳过已完成行(断点续跑);task_id 为落盘/续跑的键。
+    聚合走流式累加器,不在内存保留全量 rows;逐条结果在 t_eval_task_row,前端分页查。
     """
     if on_progress:
         on_progress("loading", 0, 1)
@@ -149,39 +308,41 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
     mode = gold_info["mode"]
     samples = build_all_samples(df, m, bu)
     total = len(samples)
+    # 会话级指标基于 samples(judge 前即确定),无需进累加器
+    sessions = len(set(s["session"] for s in samples))
+    multi_turn = _count_multi_turn(samples)
     if on_progress:
         on_progress("loaded", 1, 1)
 
-    rows = await _judge_with_persistence(samples, bu, on_progress, task_id, persist)
+    agg = _StreamAggregator()
+    await _judge_streaming(samples, bu, on_progress, task_id, persist, agg)
 
     # 校准指标仅在 calibration 模式算;production 无金标则为空
-    metrics = _compute_metrics(rows) if mode == "calibration" else []
-    intent_dist = _intent_distribution(rows)
-    insights = compute_insights(rows)  # 业务洞察:两种模式都算
-    bu_dispatch = _bu_dispatch_stats(rows)
+    metrics = agg.metrics() if mode == "calibration" else []
+    intent_dist = agg.intent_distribution()
+    insights = agg.insights()
+    bu_dispatch = agg.bu_dispatch()
     if on_progress:
         on_progress("advising", 0, 1)
     advice = await generate_advice(insights, bu, bu_dispatch)  # 优化建议(模型或规则)
     if on_progress:
         on_progress("advising", 1, 1)
-    disagreements = [r for r in rows if r["is_disagreement"]]
+
     summary = {
         "backend": active_backend(),
         "bu": bu.code,
         "bu_name": bu.name,
         "mode": mode,
         "total_samples": total,
-        "sessions": len(set(s["session"] for s in samples)),
-        "multi_turn_sessions": _count_multi_turn(samples),
+        "sessions": sessions,
+        "multi_turn_sessions": multi_turn,
         "bu_dispatch": bu_dispatch,                                    # BU 分发漏斗(准确率+两类错误)
         "end_to_end_resolved_rate": insights["overall"]["resolved_rate"],  # 漏斗口径解决率
         "dispatch_accuracy": bu_dispatch["accuracy"],
         "resolved_rate": insights["overall"]["resolved_rate"],
-        "needs_review": sum(
-            1 for r in rows if isinstance(r["judge"], dict) and r["judge"].get("needs_human_review")
-        ),
-        "disagreement_count": len(disagreements),
-        "errors": sum(1 for r in rows if isinstance(r["judge"], dict) and "_error" in r["judge"]),
+        "needs_review": agg.needs_review,
+        "disagreement_count": agg.disagreement_count,
+        "errors": agg.errors,
     }
 
     return {
@@ -195,8 +356,9 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
         "intent_distribution": intent_dist,
         "insights": insights,
         "advice": advice,
-        "rows": rows,
-        "disagreements": disagreements,
+        # rows 不再随结果返回(百万级 OOM);逐条在 t_eval_task_row,前端分页查。
+        # disagreements 仅返回有限代表样本,供报表/导出。
+        "disagreements": agg.disagreements,
     }
 
 

@@ -876,6 +876,21 @@ class DBManager:
         with self._session() as s:
             return EvalRepository(s).load_rows(task_id)
 
+    def eval_load_rows_paged(self, task_id: str, page: int, page_size: int) -> list[dict]:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            return EvalRepository(s).load_rows_paged(task_id, page, page_size)
+
+    def eval_count_rows(self, task_id: str) -> int:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            return EvalRepository(s).count_rows(task_id)
+
+    def eval_load_review_rows(self, task_id: str, limit: int = 500) -> list[dict]:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            return EvalRepository(s).load_review_rows(task_id, limit=limit)
+
     def eval_save_result(self, task_id: str, result: dict, updated_by: str = "system") -> None:
         from datapulse.repository.eval_repository import EvalRepository
         with self._session() as s:

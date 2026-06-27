@@ -424,6 +424,9 @@ export const evalApi = {
     api.get('/eval/tasks', { params: { page, page_size: pageSize } }),
   getTask:   (taskId) => api.get(`/eval/tasks/${taskId}`),
   getResult: (taskId) => api.get(`/eval/tasks/${taskId}/result`),
+  // 逐条明细分页（百万级下不再随 result 返回全量 rows）。flag: all | review
+  getRows:   (taskId, page = 1, pageSize = 20, flag = 'all') =>
+    api.get(`/eval/tasks/${taskId}/rows`, { params: { page, page_size: pageSize, flag } }),
   resume:    (taskId) => api.post(`/eval/tasks/${taskId}/resume`),
 
   // 三种导出（带 token 的 blob 下载）

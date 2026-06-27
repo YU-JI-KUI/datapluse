@@ -93,8 +93,13 @@ export default function EvalResult({ taskId, result }) {
         </>
       )}
 
-      {/* 逐条明细 */}
-      <RowsTable rows={result.rows} />
+      {/* 逐条明细（服务端分页：rows 不再随 result 全量返回） */}
+      <RowsTable
+        taskId={taskId}
+        disagreements={result.disagreements || []}
+        totalSamples={s.total_samples || 0}
+        reviewCount={s.needs_review || 0}
+      />
     </div>
   )
 }
