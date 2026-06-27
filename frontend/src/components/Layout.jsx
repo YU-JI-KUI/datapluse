@@ -13,21 +13,37 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-const navItems = [
-  { to: '/dashboard',      label: '首页',          icon: LayoutDashboard },
-  { to: '/explorer',       label: '数据管理',      icon: Search },
-  { to: '/data',           label: '数据上传',      icon: Database },
-  { to: '/pre-annotation', label: '预标注',        icon: Cpu },
-  { to: '/annotation',     label: '标注工作台',    icon: Tag },
-  { to: '/conflicts',      label: '冲突检测',      icon: AlertTriangle },
-  { to: '/eval',           label: 'AI 评测',       icon: Gauge },
-  { to: '/eval/prompts',   label: '评测提示词',    icon: FileText },
-  { to: '/categories',     label: '业务分类',      icon: Tags },
-  { to: '/export',         label: '数据导出',      icon: Download },
-  { to: '/config',         label: '配置中心',      icon: Settings },
-  { to: '/datasets',       label: '数据集管理',    icon: FolderOpen, adminOnly: true },
-  { to: '/users',          label: '用户管理',      icon: Users,       adminOnly: true },
-  { to: '/admin-sql',      label: 'SQL 工具',      icon: Terminal,    adminOnly: true },
+// 导航按子系统分组：标注平台 / AI 评测（独立子系统）/ 系统管理
+const navGroups = [
+  {
+    group: '标注平台',
+    items: [
+      { to: '/dashboard',      label: '首页',          icon: LayoutDashboard },
+      { to: '/explorer',       label: '数据管理',      icon: Search },
+      { to: '/data',           label: '数据上传',      icon: Database },
+      { to: '/pre-annotation', label: '预标注',        icon: Cpu },
+      { to: '/annotation',     label: '标注工作台',    icon: Tag },
+      { to: '/conflicts',      label: '冲突检测',      icon: AlertTriangle },
+      { to: '/categories',     label: '业务分类',      icon: Tags },
+      { to: '/export',         label: '数据导出',      icon: Download },
+      { to: '/config',         label: '配置中心',      icon: Settings },
+    ],
+  },
+  {
+    group: 'AI 评测',
+    items: [
+      { to: '/eval',           label: '对话评测',      icon: Gauge },
+      { to: '/eval/prompts',   label: '提示词管理',    icon: FileText },
+    ],
+  },
+  {
+    group: '系统管理',
+    items: [
+      { to: '/datasets',       label: '数据集管理',    icon: FolderOpen, adminOnly: true },
+      { to: '/users',          label: '用户管理',      icon: Users,       adminOnly: true },
+      { to: '/admin-sql',      label: 'SQL 工具',      icon: Terminal,    adminOnly: true },
+    ],
+  },
 ]
 
 // ── 修改密码弹窗 ───────────────────────────────────────────────────────────────
@@ -245,29 +261,44 @@ export default function Layout() {
           </div>
         )}
 
-        {/* Navigation */}
-        <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
-          {navItems
-            .filter(item => !item.adminOnly || isAdmin)
-            .map(({ to, label, icon: Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                title={collapsed ? label : undefined}
-                className={({ isActive }) =>
-                  cn(
-                    'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
-                    collapsed ? 'justify-center' : '',
-                    isActive
-                      ? 'bg-gray-700 text-white'
-                      : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
-                  )
-                }
-              >
-                <Icon className="w-4 h-4 shrink-0" />
-                {!collapsed && label}
-              </NavLink>
-            ))}
+        {/* Navigation — 按子系统分组 */}
+        <nav className="flex-1 px-2 py-4 space-y-4 overflow-y-auto">
+          {navGroups.map(({ group, items }) => {
+            const visible = items.filter(item => !item.adminOnly || isAdmin)
+            if (visible.length === 0) return null
+            return (
+              <div key={group} className="space-y-1">
+                {/* 分组标题：展开时显示文字，收起时用一条分隔线占位 */}
+                {collapsed ? (
+                  <div className="mx-2 my-2 border-t border-gray-700" />
+                ) : (
+                  <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    {group}
+                  </div>
+                )}
+                {visible.map(({ to, label, icon: Icon }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    end={to === '/eval'}
+                    title={collapsed ? label : undefined}
+                    className={({ isActive }) =>
+                      cn(
+                        'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
+                        collapsed ? 'justify-center' : '',
+                        isActive
+                          ? 'bg-gray-700 text-white'
+                          : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
+                      )
+                    }
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    {!collapsed && label}
+                  </NavLink>
+                ))}
+              </div>
+            )
+          })}
         </nav>
 
         {/* User + Toggle */}
