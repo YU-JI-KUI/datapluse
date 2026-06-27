@@ -140,92 +140,134 @@ def _outputs_dir() -> Path:
     return Path(get_settings().eval_outputs_dir)
 
 
-def export_disagreements(task_id: str) -> Path | None:
-    """把不一致 case 导出成 Excel，返回文件路径。"""
-    result = get_db().eval_load_result(task_id)
-    if not result:
-        return None
-    records: list[dict[str, Any]] = []
-    for r in result.get("disagreements", []):
-        j = r["judge"] if isinstance(r["judge"], dict) else {}
-        records.append({
-            "会话ID": r["session"],
-            "轮次": r["turn"],
-            "客户问题": r["question"],
-            "Judge意图": r["j_intent"],
-            "Judge分发判定": r["j_dispatch"],
-            "金标-分发是否正确": r["gold"].get("dispatch", ""),
-            "Judge解决度": r["j_resolved"],
-            "金标-答案是否解决": r["gold"].get("resolved", ""),
-            "Judge理由": j.get("dispatch_reason", ""),
-            "答案文本": r["answer_text"],
-            "需人工复核": j.get("needs_human_review", ""),
-        })
-    columns = [
-        "会话ID", "轮次", "客户问题", "Judge意图", "Judge分发判定",
-        "金标-分发是否正确", "Judge解决度", "金标-答案是否解决", "Judge理由",
-        "答案文本", "需人工复核",
-    ]
-    df = pd.DataFrame(records, columns=columns)
-    out = _outputs_dir() / f"不一致case_{task_id}.xlsx"
-    df.to_excel(out, index=False)
+def _stream_to_xlsx(out: Path, columns: list[str], row_iter) -> Path:
+    """用 openpyxl write_only 模式逐行写 xlsx，常量内存。
+
+    write_only 工作簿不在内存保留单元格对象，append 一行即落到底层流，
+    5万~几十万行也不会撑爆内存（对比 pandas.to_excel 需全量建对象树）。
+    row_iter 产出 dict，按 columns 顺序取值；缺失键写空串。
+    单元格只接受标量，list/dict 等结构统一转字符串。
+    """
+    from openpyxl import Workbook
+
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet()
+    ws.append(columns)
+    for rec in row_iter:
+        ws.append([_cell(rec.get(c, "")) for c in columns])
+    wb.save(out)
     return out
 
 
+def _cell(v: Any):
+    """xlsx 单元格只接受标量；其余转字符串，None 归空。"""
+    if v is None:
+        return ""
+    if isinstance(v, (str, int, float, bool)):
+        return v
+    return str(v)
+
+
 def _iter_all_rows(task_id: str, batch_size: int = 1000):
-    """分页迭代某任务的全部逐条结果（按 row_index）。导出用，避免一次性全量加载。"""
+    """游标分页迭代某任务全部逐条结果（按 row_index 升序）。
+
+    用 row_index > 上批最大值 翻页（keyset 分页），每批走唯一索引定位，
+    整体 O(N)；避免 OFFSET 分页导出到后段越翻越慢。
+    """
     db = get_db()
-    page = 1
+    after = -1   # row_index 从 0 起，-1 保证取到第一条
     while True:
-        batch = db.eval_load_rows_paged(task_id, page, batch_size)
+        batch = db.eval_load_rows_after(task_id, after, batch_size)
         if not batch:
             break
-        yield from batch
+        for idx, row_json in batch:
+            yield row_json
+        after = batch[-1][0]
         if len(batch) < batch_size:
             break
-        page += 1
+
+
+def _disagreement_record(r: dict) -> dict:
+    j = r["judge"] if isinstance(r["judge"], dict) else {}
+    return {
+        "会话ID": r["session"],
+        "轮次": r["turn"],
+        "客户问题": r["question"],
+        "Judge意图": r["j_intent"],
+        "Judge分发判定": r["j_dispatch"],
+        "金标-分发是否正确": r["gold"].get("dispatch", ""),
+        "Judge解决度": r["j_resolved"],
+        "金标-答案是否解决": r["gold"].get("resolved", ""),
+        "Judge理由": j.get("dispatch_reason", ""),
+        "答案文本": r["answer_text"],
+        "需人工复核": j.get("needs_human_review", ""),
+    }
+
+
+_DISAGREEMENT_COLUMNS = [
+    "会话ID", "轮次", "客户问题", "Judge意图", "Judge分发判定",
+    "金标-分发是否正确", "Judge解决度", "金标-答案是否解决", "Judge理由",
+    "答案文本", "需人工复核",
+]
+
+
+def export_disagreements(task_id: str) -> Path | None:
+    """把不一致 case 导出成 Excel（流式写），返回文件路径。"""
+    result = get_db().eval_load_result(task_id)
+    if not result:
+        return None
+    out = _outputs_dir() / f"不一致case_{task_id}.xlsx"
+    return _stream_to_xlsx(
+        out, _DISAGREEMENT_COLUMNS,
+        (_disagreement_record(r) for r in result.get("disagreements", [])),
+    )
+
+
+def _row_record(r: dict) -> dict:
+    j = r["judge"] if isinstance(r["judge"], dict) else {}
+    return {
+        "会话ID": r["session"],
+        "轮次": r["turn"],
+        "客户问题": r["question"],
+        "业务分类": r["j_intent"],
+        "分发场景": r.get("dispatch_scene", ""),
+        "AI判该本BU接": j.get("should_dispatch_to_bu", ""),
+        "实际分给本BU": r.get("dispatched_to_bu", ""),
+        "分发判定理由": j.get("dispatch_reason", ""),
+        "是否解决": r["j_resolved"],
+        "解决度原值": r.get("j_resolved_raw", ""),
+        "解决度理由": j.get("resolved_reason", ""),
+        "未解决原因": j.get("unresolved_cause", ""),
+        "需人工复核": j.get("needs_human_review", ""),
+        "复核原因": j.get("review_reason", ""),
+        "金标-分发是否正确": r["gold"].get("dispatch", ""),
+        "金标-答案是否解决": r["gold"].get("resolved", ""),
+        "答案原文": r["answer_text"],
+    }
+
+
+_ROW_COLUMNS = [
+    "会话ID", "轮次", "客户问题", "业务分类", "分发场景",
+    "AI判该本BU接", "实际分给本BU", "分发判定理由",
+    "是否解决", "解决度原值", "解决度理由", "未解决原因",
+    "需人工复核", "复核原因",
+    "金标-分发是否正确", "金标-答案是否解决", "答案原文",
+]
 
 
 def export_rows(task_id: str) -> Path | None:
     """逐条评测明细全量导出 Excel：每条一行，含模型完整判断 + 答案原文。
 
-    逐条数据从 t_eval_task_row 分页读取（不再依赖 load_result 附带 rows）。
+    游标分页从 t_eval_task_row 流式读 + openpyxl write_only 流式写，常量内存，
+    5万~几十万行稳定导出（不再全量建 records + DataFrame）。
     """
     if not get_db().eval_load_result(task_id):
         return None
-    records: list[dict[str, Any]] = []
-    for r in _iter_all_rows(task_id):
-        j = r["judge"] if isinstance(r["judge"], dict) else {}
-        records.append({
-            "会话ID": r["session"],
-            "轮次": r["turn"],
-            "客户问题": r["question"],
-            "业务分类": r["j_intent"],
-            "分发场景": r.get("dispatch_scene", ""),
-            "AI判该本BU接": j.get("should_dispatch_to_bu", ""),
-            "实际分给本BU": r.get("dispatched_to_bu", ""),
-            "分发判定理由": j.get("dispatch_reason", ""),
-            "是否解决": r["j_resolved"],
-            "解决度原值": r.get("j_resolved_raw", ""),
-            "解决度理由": j.get("resolved_reason", ""),
-            "未解决原因": j.get("unresolved_cause", ""),
-            "需人工复核": j.get("needs_human_review", ""),
-            "复核原因": j.get("review_reason", ""),
-            "金标-分发是否正确": r["gold"].get("dispatch", ""),
-            "金标-答案是否解决": r["gold"].get("resolved", ""),
-            "答案原文": r["answer_text"],
-        })
-    columns = [
-        "会话ID", "轮次", "客户问题", "业务分类", "分发场景",
-        "AI判该本BU接", "实际分给本BU", "分发判定理由",
-        "是否解决", "解决度原值", "解决度理由", "未解决原因",
-        "需人工复核", "复核原因",
-        "金标-分发是否正确", "金标-答案是否解决", "答案原文",
-    ]
-    df = pd.DataFrame(records, columns=columns)
     out = _outputs_dir() / f"评测明细_{task_id}.xlsx"
-    df.to_excel(out, index=False)
-    return out
+    return _stream_to_xlsx(
+        out, _ROW_COLUMNS,
+        (_row_record(r) for r in _iter_all_rows(task_id)),
+    )
 
 
 def export_report(task_id: str) -> Path | None:

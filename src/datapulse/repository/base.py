@@ -891,6 +891,11 @@ class DBManager:
         with self._session() as s:
             return EvalRepository(s).load_review_rows(task_id, limit=limit)
 
+    def eval_load_rows_after(self, task_id: str, after_index: int, limit: int) -> list[tuple[int, dict]]:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            return EvalRepository(s).load_rows_after(task_id, after_index, limit)
+
     def eval_save_result(self, task_id: str, result: dict, updated_by: str = "system") -> None:
         from datapulse.repository.eval_repository import EvalRepository
         with self._session() as s:

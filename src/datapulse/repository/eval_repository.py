@@ -139,6 +139,21 @@ class EvalRepository:
             select(func.count()).select_from(EvalTaskRow).where(EvalTaskRow.task_id == task_id)
         ).scalar() or 0)
 
+    def load_rows_after(self, task_id: str, after_index: int, limit: int) -> list[tuple[int, dict]]:
+        """游标分页：取 row_index > after_index 的下一批，返回 [(row_index, row_json)]。
+
+        导出迭代专用。相比 OFFSET 分页（导出到第 N 页要先扫过前 N×size 行再丢弃，
+        整体 O(N²)），游标分页每批都走 (task_id, row_index) 唯一索引定位，整体 O(N)，
+        百万级也不会越翻越慢。返回 row_index 供调用方推进游标。
+        """
+        rows = self.session.execute(
+            select(EvalTaskRow.row_index, EvalTaskRow.row_json)
+            .where(EvalTaskRow.task_id == task_id, EvalTaskRow.row_index > after_index)
+            .order_by(EvalTaskRow.row_index)
+            .limit(limit)
+        ).all()
+        return [(int(idx), rj) for idx, rj in rows]
+
     def load_review_rows(self, task_id: str, limit: int = 500) -> list[dict]:
         """读「需人工复核」的行（JSONB 过滤），上限 limit。
 
