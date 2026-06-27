@@ -135,10 +135,12 @@ datapluse/
 │       │   ├── model.py     #   LLM 预标注（mock / 真实接口）
 │       │   ├── embedding.py #   向量编码（mock / SentenceTransformer）
 │       │   ├── vector.py    #   FAISS 向量索引
-│       │   └── conflict.py  #   冲突检测（标注冲突 + 语义冲突）
+│       │   ├── conflict.py  #   冲突检测（标注冲突 + 语义冲突）
+│       │   └── eval/        #   AI 对话评测（pipeline/judge/advisor/metrics + bu/ + llm/ + prompts/）
 │       │
 │       ├── pipeline/
-│       │   └── engine.py    # Pipeline 引擎（4 步 + 进度追踪）
+│       │   ├── engine.py    # Pipeline 引擎（4 步 + 进度追踪）
+│       │   └── eval_engine.py# 评测任务引擎（后台执行 + 进度 + 导出）
 │       │
 │       ├── config/
 │       │   └── settings.py  # 配置单例（读取 config.yaml）
@@ -160,6 +162,7 @@ datapluse/
 │           ├── PreAnnotation.jsx    # LLM 预标注触发
 │           ├── Annotation.jsx       # 翻牌式人工标注
 │           ├── ConflictDetection.jsx# 冲突检测结果 + 人工审核
+│           ├── Eval.jsx             # AI 对话评测（上传 → 评测 → 报告）
 │           ├── ConfigCenter.jsx     # 可视化参数配置
 │           └── Export.jsx           # 数据导出 + 模板管理
 │
@@ -204,6 +207,28 @@ datapluse/
     ↓
 导出（JSON / Excel / CSV，按模板字段映射，流式返回）
 ```
+
+---
+
+## AI 对话评测
+
+独立功能模块（菜单「AI 评测」，不绑定标注数据集）：上传对话日志 Excel，自动评测
+**BU 分发准确率**与**端到端解决率**，产出业务洞察与优化建议。源自 ark-dialog-eval。
+
+**用法**：上传日志 Excel（或一键跑内置样例）→ 后台 LLM Judge 逐条评测 → 轮询进度 →
+出报告。两种模式自动识别：
+
+- **校准模式**（数据含人工金标）：额外算 κ / F1 / 混淆矩阵，验证 Judge 可信度
+- **生产模式**（无标注，如每日大批量日志）：直接出业务洞察 + 优化建议
+
+**BU（业务单元）**：内置证券 / 寿险两套意图体系与 prompt 分层，上传时选择。
+新增 BU 只需在 `src/datapulse/modules/eval/bu/` 加配置 + `prompts/<bu>/` 加分类与提示词。
+
+**Judge 后端**：`JUDGE_BACKEND=mock`（默认，内置规则桩，本地零配置可跑通）/ `pingan`
+（平安内网大模型，需配齐 `.env` 中的签名变量，缺失则自动降级 mock）。
+
+**评测结果**支持导出：完整报告（多 sheet）、逐条明细、不一致 case（校准模式）。
+长任务逐条落盘，中断可断点续跑。相关表：`t_eval_task` / `t_eval_task_row`。
 
 ---
 

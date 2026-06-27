@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard, Database, Search, Tag, AlertTriangle,
   Settings, Download, LogOut, Cpu, ChevronLeft, ChevronRight,
-  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen, BookOpen, Tags, Terminal,
+  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen, BookOpen, Tags, Terminal, Gauge,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { datasetApi, authApi, getCurrentDatasetId, setCurrentDatasetId } from '@/lib/api'
@@ -20,6 +20,7 @@ const navItems = [
   { to: '/pre-annotation', label: '预标注',        icon: Cpu },
   { to: '/annotation',     label: '标注工作台',    icon: Tag },
   { to: '/conflicts',      label: '冲突检测',      icon: AlertTriangle },
+  { to: '/eval',           label: 'AI 评测',       icon: Gauge },
   { to: '/categories',     label: '业务分类',      icon: Tags },
   { to: '/export',         label: '数据导出',      icon: Download },
   { to: '/config',         label: '配置中心',      icon: Settings },

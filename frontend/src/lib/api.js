@@ -380,4 +380,59 @@ export const dashboardApi = {
       datasetId != null ? { params: { dataset_id: datasetId } } : {}),
 }
 
+// ── AI 评测 ─────────────────────────────────────────────────────────────────────
+
+// 导出文件需带 token（FileResponse 走 <a href> 时拦截器不生效），用 fetch+blob 触发下载
+async function _downloadWithToken(path, fallbackName) {
+  const token = localStorage.getItem('token')
+  const res = await fetch(`/api${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`下载失败（${res.status}）`)
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') || ''
+  const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i)
+  const name = match ? decodeURIComponent(match[1]) : fallbackName
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+export const evalApi = {
+  // 配置 / BU / 意图（meta）
+  config:  ()   => api.get('/eval/meta/config'),
+  bus:     ()   => api.get('/eval/meta/bus'),
+  intents: (bu) => api.get('/eval/meta/intents', { params: { bu } }),
+
+  // 上传 Excel 起评测（仅存文件 + 建任务，立即返回 task_id）
+  upload: (file, bu = 'securities', onProgress) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post('/eval/upload', form, { params: { bu }, onUploadProgress: onProgress })
+  },
+  // 用内置样例起评测（kind: calib | prod）
+  runSample: (bu = 'securities', kind = 'calib') =>
+    api.get('/eval/sample', { params: { bu, kind } }),
+
+  // 任务列表 / 状态 / 结果 / 续跑
+  listTasks: (page = 1, pageSize = 50) =>
+    api.get('/eval/tasks', { params: { page, page_size: pageSize } }),
+  getTask:   (taskId) => api.get(`/eval/tasks/${taskId}`),
+  getResult: (taskId) => api.get(`/eval/tasks/${taskId}/result`),
+  resume:    (taskId) => api.post(`/eval/tasks/${taskId}/resume`),
+
+  // 三种导出（带 token 的 blob 下载）
+  exportDisagreements: (taskId) =>
+    _downloadWithToken(`/eval/tasks/${taskId}/export`, `不一致case_${taskId}.xlsx`),
+  exportRows: (taskId) =>
+    _downloadWithToken(`/eval/tasks/${taskId}/export/rows`, `评测明细_${taskId}.xlsx`),
+  exportReport: (taskId) =>
+    _downloadWithToken(`/eval/tasks/${taskId}/export/report`, `评估报告_${taskId}.xlsx`),
+}
+
 export default api

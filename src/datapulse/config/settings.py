@@ -97,6 +97,21 @@ class Settings(BaseSettings):
     cyberark_object:  str = ""
     cyberark_version: str = "2.0"
 
+    # ── AI 对话评测（ark-dialog-eval）──────────────────────────────────────────────
+    # judge_backend 决定 Judge 用谁：mock（内置规则桩，本地即可跑通）/ pingan（平安内网大模型）
+    judge_backend:     str = "mock"
+    judge_concurrency: int = 4
+    # 平安大模型平台（OpenAI 接口，双签名鉴权）；任一缺失则自动降级 mock
+    open_ai_url:       str = ""
+    rsa_pk:            str = ""
+    cre_id:            str = ""
+    open_api_code:     str = ""
+    llm_app_key:       str = ""
+    llm_app_secret:    str = ""
+    llm_scene_id:      str = ""
+    llm_timeout:       int = 30
+    llm_max_retries:   int = 3
+
     # ── 计算属性 ──────────────────────────────────────────────────────────────────
 
     @computed_field  # type: ignore[prop-decorator]
@@ -153,6 +168,45 @@ class Settings(BaseSettings):
     @property
     def is_prod(self) -> bool:
         return self.app_env.lower() == "prod"
+
+    # ── AI 评测相关 ───────────────────────────────────────────────────────────────
+
+    @property
+    def app_name(self) -> str:
+        """评测页展示用的平台名。"""
+        return "Datapulse 数据生产平台"
+
+    @property
+    def eval_uploads_dir(self) -> str:
+        """评测上传文件存放目录。"""
+        from pathlib import Path
+        d = Path(self.storage_base_path) / "eval" / "uploads"
+        d.mkdir(parents=True, exist_ok=True)
+        return str(d)
+
+    @property
+    def eval_outputs_dir(self) -> str:
+        """评测导出文件存放目录。"""
+        from pathlib import Path
+        d = Path(self.storage_base_path) / "eval" / "outputs"
+        d.mkdir(parents=True, exist_ok=True)
+        return str(d)
+
+    @property
+    def eval_sample_dir(self) -> str:
+        """内置评测样例目录（随仓库分发，位于项目根 db/eval_samples）。"""
+        from pathlib import Path
+        # settings.py 在 src/datapulse/config/ 下，向上三层到项目根
+        root = Path(__file__).resolve().parents[3]
+        return str(root / "db" / "eval_samples")
+
+    def pingan_ready(self) -> bool:
+        """平安大模型所需变量是否齐全；不齐则评测降级 mock。"""
+        required = [
+            self.open_ai_url, self.rsa_pk, self.cre_id, self.open_api_code,
+            self.llm_app_key, self.llm_app_secret, self.llm_scene_id,
+        ]
+        return all(required)
 
     # ── 内部方法 ──────────────────────────────────────────────────────────────────
 

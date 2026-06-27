@@ -1,0 +1,319 @@
+"""评测编排器:把 pipeline + judge + 指标/洞察 串成一次完整评测。
+
+两种模式(由数据是否带二值金标自动判定):
+  - calibration:有人工金标 → 额外算 κ/F1/混淆矩阵,证明 Judge 可信(低频)
+  - production :无金标(如每天 3万行原始日志)→ 直接出评测结论 + 业务洞察(高频)
+
+产出对象供 API/前端消费:summary / filter_stats / mode / metrics(仅校准) /
+intent_distribution / insights(业务洞察) / rows / disagreements。
+"""
+from __future__ import annotations
+
+from collections import Counter, defaultdict
+
+from datapulse.modules.eval import _store as store
+from datapulse.modules.eval.bu.base import BUConfig
+from datapulse.modules.eval.llm.judge_runner import active_backend, generate_advice, judge_batch
+from datapulse.modules.eval.metrics import binary_report
+from datapulse.modules.eval.pipeline import build_all_samples, detect_gold, load_and_prep
+
+
+def _resolved_to_binary(judge: dict) -> str:
+    """answer_resolved(yes/partial/no/unknown)归一成「是/否」与金标对齐。"""
+    if not isinstance(judge, dict) or "_error" in judge:
+        return ""
+    return "是" if judge.get("answer_resolved") == "yes" else "否"
+
+
+def _dispatch_correct(sample: dict, judge: dict) -> bool | None:
+    """BU 分发是否正确 = LLM 判「该不该本BU承接」与日志事实「分发BU是否=本BU」一致。
+
+    返回 True/False;judge 出错或缺字段返回 None(不计入统计)。
+    """
+    if not isinstance(judge, dict) or "_error" in judge or "should_dispatch_to_bu" not in judge:
+        return None
+    return bool(judge["should_dispatch_to_bu"]) == bool(sample.get("dispatched_to_bu"))
+
+
+# 非业务分类的占位值:模型对"不该本BU承接"的样本填这些,不算真实业务分类,
+# 统计切片时归为空(落到「(未分类)」),不污染各业务类型的解决率。
+_NON_BUSINESS_TYPES = {"非本BU", "拒识", "其他", ""}
+
+
+def _business_type(judge: dict) -> str:
+    """取模型返回的业务分类标签(字段名 business_type)。非业务分类占位值归空。"""
+    if not isinstance(judge, dict):
+        return ""
+    bt = (judge.get("business_type") or "").strip()
+    return "" if bt in _NON_BUSINESS_TYPES else bt
+
+
+def _dispatch_scene(sample: dict, judge: dict) -> str:
+    """按四象限给 BU 分发结果打场景标签(用 AI 判断 vs Excel 实际两个原始事实)。
+
+    should=AI 认为该不该本BU承接;actual=Excel 实际是否分给本BU。
+      正常    : should==actual(都该且分了 / 都不该且没分)
+      该拒未拒: 不该本BU接,却被分进来了(should=F, actual=T)
+      该分未分: 该本BU接,却没分进来(should=T, actual=F)
+    judge 出错/缺字段返回空串(不参与统计)。
+    """
+    if not isinstance(judge, dict) or "_error" in judge or "should_dispatch_to_bu" not in judge:
+        return ""
+    should = bool(judge["should_dispatch_to_bu"])
+    actual = bool(sample.get("dispatched_to_bu"))
+    if should == actual:
+        return "正常"
+    return "该拒未拒" if (actual and not should) else "该分未分"
+
+
+def assemble_row(sample: dict, judge: dict) -> dict:
+    """把一条样本 + judge 输出组装成明细行(抽出复用,供续跑场景也能调)。"""
+    gold = sample["gold"]
+    dispatch_correct = _dispatch_correct(sample, judge)
+    j_dispatch = "" if dispatch_correct is None else ("是" if dispatch_correct else "否")
+    j_resolved = _resolved_to_binary(judge)
+    row = {
+        "row_index": sample["row_index"],
+        "session": sample["session"],
+        "turn": sample["turn"],
+        "question": sample["question"],
+        "context": sample["context"],  # [{turn, user, ai}, ...] 含前文 AI 回答
+        "next_user_turn": sample["next_user_turn"],
+        "dispatched_intent": sample["dispatched_intent"],
+        "dispatched_to_bu": sample.get("dispatched_to_bu", False),
+        "answer_text": sample["answer_text"],
+        "judge": judge,
+        "j_intent": _business_type(judge),
+        "dispatch_correct": dispatch_correct,
+        "dispatch_scene": _dispatch_scene(sample, judge),  # 正常/该拒未拒/该分未分
+        "j_dispatch": j_dispatch,
+        "j_resolved": j_resolved,
+        "j_resolved_raw": judge.get("answer_resolved", "") if isinstance(judge, dict) else "",
+        "gold": gold,
+        "disagree_dispatch": gold["dispatch"] in ("是", "否") and gold["dispatch"] != j_dispatch,
+        "disagree_resolved": gold["resolved"] in ("是", "否") and gold["resolved"] != j_resolved,
+    }
+    row["is_disagreement"] = row["disagree_dispatch"] or row["disagree_resolved"]
+    return row
+
+
+async def _judge_with_persistence(samples, bu, on_progress, task_id, persist) -> list[dict]:
+    """跑 judge 并(可选)逐批落盘 + 断点续跑。
+
+    续跑:读已落盘的 row_index,只对未完成样本跑 judge;已完成的直接读回。
+    落盘:分批写入,避免 3万行跑一半中断后全部重来。
+    """
+    total = len(samples)
+    done_idx: set[int] = set()
+    cached: dict[int, dict] = {}
+    if persist and task_id:
+        done_idx = store.done_row_indices(task_id)
+        if done_idx:
+            cached = {r["row_index"]: r for r in store.load_rows(task_id)}
+
+    pending = [s for s in samples if s["row_index"] not in done_idx]
+    rows_by_idx: dict[int, dict] = dict(cached)
+    done_count = len(done_idx)
+
+    if on_progress:
+        on_progress("judging", done_count, total)
+
+    # 分批跑,每批落盘一次,兼顾进度可见与 IO 次数
+    batch_size = 200
+    for start in range(0, len(pending), batch_size):
+        batch = pending[start:start + batch_size]
+        judges = await judge_batch(batch, bu)
+        batch_rows = [assemble_row(s, j) for s, j in zip(batch, judges)]
+        for r in batch_rows:
+            rows_by_idx[r["row_index"]] = r
+        if persist and task_id:
+            store.save_rows(task_id, batch_rows)
+        done_count += len(batch_rows)
+        if on_progress:
+            on_progress("judging", done_count, total)
+
+    # 按原顺序还原
+    return [rows_by_idx[s["row_index"]] for s in samples]
+
+
+async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None, persist=False) -> dict:
+    """跑一次完整评测。bu 注入该 BU 的领域知识(意图体系/分组/专家身份)。
+
+    persist=True 时逐批落盘到 SQLite,并在重入时跳过已完成行(断点续跑);
+    task_id 为落盘/续跑的键。
+    """
+    if on_progress:
+        on_progress("loading", 0, 1)
+    df, m, filter_stats = load_and_prep(path)
+    gold_info = detect_gold(df, m)
+    mode = gold_info["mode"]
+    samples = build_all_samples(df, m, bu)
+    total = len(samples)
+    if on_progress:
+        on_progress("loaded", 1, 1)
+
+    rows = await _judge_with_persistence(samples, bu, on_progress, task_id, persist)
+
+    # 校准指标仅在 calibration 模式算;production 无金标则为空
+    metrics = _compute_metrics(rows) if mode == "calibration" else []
+    intent_dist = _intent_distribution(rows)
+    insights = compute_insights(rows)  # 业务洞察:两种模式都算
+    bu_dispatch = _bu_dispatch_stats(rows)
+    if on_progress:
+        on_progress("advising", 0, 1)
+    advice = await generate_advice(insights, bu, bu_dispatch)  # 优化建议(模型或规则)
+    if on_progress:
+        on_progress("advising", 1, 1)
+    disagreements = [r for r in rows if r["is_disagreement"]]
+    summary = {
+        "backend": active_backend(),
+        "bu": bu.code,
+        "bu_name": bu.name,
+        "mode": mode,
+        "total_samples": total,
+        "sessions": len(set(s["session"] for s in samples)),
+        "multi_turn_sessions": _count_multi_turn(samples),
+        "bu_dispatch": bu_dispatch,                                    # BU 分发漏斗(准确率+两类错误)
+        "end_to_end_resolved_rate": insights["overall"]["resolved_rate"],  # 漏斗口径解决率
+        "dispatch_accuracy": bu_dispatch["accuracy"],
+        "resolved_rate": insights["overall"]["resolved_rate"],
+        "needs_review": sum(
+            1 for r in rows if isinstance(r["judge"], dict) and r["judge"].get("needs_human_review")
+        ),
+        "disagreement_count": len(disagreements),
+        "errors": sum(1 for r in rows if isinstance(r["judge"], dict) and "_error" in r["judge"]),
+    }
+
+    return {
+        "summary": summary,
+        "bu": bu.code,
+        "bu_name": bu.name,
+        "mode": mode,
+        "gold_coverage": gold_info["gold_coverage"],
+        "filter_stats": filter_stats,
+        "metrics": metrics,
+        "intent_distribution": intent_dist,
+        "insights": insights,
+        "advice": advice,
+        "rows": rows,
+        "disagreements": disagreements,
+    }
+
+
+def _compute_metrics(rows: list[dict]) -> list[dict]:
+    """对三个二值金标分别算指标。无金标的维度跳过。"""
+    specs = [
+        ("分发是否正确", "dispatch", "j_dispatch"),
+        ("一键场景分发是否正确", "oneclick", "j_dispatch"),
+        ("答案是否解决客户问题", "resolved", "j_resolved"),
+    ]
+    out = []
+    for name, gold_key, j_key in specs:
+        y_true, y_pred = [], []
+        for r in rows:
+            gv = r["gold"].get(gold_key, "")
+            jv = r.get(j_key, "")
+            if gv in ("是", "否") and jv in ("是", "否"):
+                y_true.append(gv)
+                y_pred.append(jv)
+        if y_true:
+            out.append(binary_report(name, y_true, y_pred))
+    return out
+
+
+def _intent_distribution(rows: list[dict]) -> dict:
+    """业务分类分布(切片统计)。"""
+    intent_counter = Counter(r["j_intent"] for r in rows if r["j_intent"])
+    return {
+        "by_intent": [{"name": k, "count": v} for k, v in intent_counter.most_common()],
+    }
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    return round(numerator / denominator, 4) if denominator else 0.0
+
+
+def compute_insights(rows: list[dict]) -> dict:
+    """业务洞察:按业务分类切片算硬指标(生产模式核心产出)。
+
+    每个切片算:样本量、进漏斗数、端到端解决率、需复核占比、未解决典型问题。
+    这些是「代码算的硬指标」,后续喂给大模型生成优化建议。
+    """
+    by_intent: dict[str, list] = defaultdict(list)
+    for r in rows:
+        intent = r["j_intent"] or "(未分类)"
+        by_intent[intent].append(r)
+
+    def slice_stats(name: str, group_rows: list[dict]) -> dict:
+        n = len(group_rows)
+        # 解决率漏斗口径:分母只算「日志分发到本BU」的样本(拒识/未承接不计入)
+        in_bu = [r for r in group_rows if r.get("dispatched_to_bu")]
+        resolved_yes = sum(1 for r in in_bu if r["j_resolved_raw"] == "yes")
+        need_review = sum(
+            1 for r in group_rows
+            if isinstance(r["judge"], dict) and r["judge"].get("needs_human_review")
+        )
+        unresolved_examples = [
+            r["question"] for r in in_bu if r["j_resolved_raw"] in ("no", "partial")
+        ][:3]
+        return {
+            "name": name,
+            "count": n,
+            "in_bu_count": len(in_bu),            # 进入解决度漏斗的数量
+            "resolved_rate": _rate(resolved_yes, len(in_bu)),
+            "needs_review_rate": _rate(need_review, n),
+            "unresolved_examples": unresolved_examples,
+        }
+
+    intent_slices = sorted(
+        (slice_stats(k, v) for k, v in by_intent.items()),
+        key=lambda x: x["count"], reverse=True,
+    )
+
+    # 整体端到端解决率:分母 = 分发到本BU的样本(漏斗)
+    in_bu_total = [r for r in rows if r.get("dispatched_to_bu")]
+    resolved_yes_total = sum(1 for r in in_bu_total if r["j_resolved_raw"] == "yes")
+    dispatch_ok_total = sum(1 for r in rows if r.get("dispatch_correct") is True)
+    dispatch_scored = sum(1 for r in rows if r.get("dispatch_correct") is not None)
+    return {
+        "overall": {
+            "count": len(rows),
+            "in_bu_count": len(in_bu_total),
+            "resolved_rate": _rate(resolved_yes_total, len(in_bu_total)),
+            "dispatch_accuracy": _rate(dispatch_ok_total, dispatch_scored),
+        },
+        "by_intent": intent_slices,
+    }
+
+
+def _bu_dispatch_stats(rows: list[dict]) -> dict:
+    """BU 分发漏斗:准确率 + 两类错误(漏:该承接却拒识 / 误收:该拒识却承接)。"""
+    correct = miss = over = scored = 0
+    for r in rows:
+        dc = r.get("dispatch_correct")
+        if dc is None:
+            continue
+        scored += 1
+        should = bool(r["judge"].get("should_dispatch_to_bu")) if isinstance(r["judge"], dict) else False
+        actual = bool(r.get("dispatched_to_bu"))
+        if dc:
+            correct += 1
+        elif should and not actual:
+            miss += 1
+        elif not should and actual:
+            over += 1
+    return {
+        "scored": scored,
+        "correct": correct,
+        "wrong": scored - correct,
+        "accuracy": round(correct / scored, 4) if scored else 0.0,
+        "miss_should_accept_but_rejected": miss,
+        "over_should_reject_but_accepted": over,
+    }
+
+
+def _count_multi_turn(samples: list[dict]) -> int:
+    sess_turns: dict[str, int] = {}
+    for s in samples:
+        sess_turns[s["session"]] = max(sess_turns.get(s["session"], 0), s["turn"])
+    return sum(1 for v in sess_turns.values() if v > 1)

@@ -838,6 +838,54 @@ class DBManager:
         with self._session() as s:
             return EmbeddingRepository(s).load_batch(dataset_id, item_ids)
 
+    # ── AI 评测（t_eval_task / t_eval_task_row）────────────────────────────────
+
+    def eval_create_task(self, task_id: str, filename: str, file_path: str, bu: str,
+                         created_by: str = "system") -> None:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            EvalRepository(s).create_task(task_id, filename, file_path, bu, created_by=created_by)
+
+    def eval_update_task(self, task_id: str, updated_by: str = "system", **fields: Any) -> None:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            EvalRepository(s).update_task(task_id, updated_by=updated_by, **fields)
+
+    def eval_get_task(self, task_id: str) -> dict | None:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            return EvalRepository(s).get_task(task_id)
+
+    def eval_list_tasks(self) -> list[dict]:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            return EvalRepository(s).list_tasks()
+
+    def eval_save_rows(self, task_id: str, rows: list[dict], created_by: str = "system") -> None:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            EvalRepository(s).save_rows(task_id, rows, created_by=created_by)
+
+    def eval_done_row_indices(self, task_id: str) -> set[int]:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            return EvalRepository(s).done_row_indices(task_id)
+
+    def eval_load_rows(self, task_id: str) -> list[dict]:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            return EvalRepository(s).load_rows(task_id)
+
+    def eval_save_result(self, task_id: str, result: dict, updated_by: str = "system") -> None:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            EvalRepository(s).save_result(task_id, result, updated_by=updated_by)
+
+    def eval_load_result(self, task_id: str) -> dict | None:
+        from datapulse.repository.eval_repository import EvalRepository
+        with self._session() as s:
+            return EvalRepository(s).load_result(task_id)
+
 
 # ── 单例 ──────────────────────────────────────────────────────────────────────
 
