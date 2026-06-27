@@ -436,6 +436,14 @@ export const evalApi = {
     _downloadWithToken(`/eval/tasks/${taskId}/export/rows`, `评测明细_${taskId}.xlsx`),
   exportReport: (taskId) =>
     _downloadWithToken(`/eval/tasks/${taskId}/export/report`, `评估报告_${taskId}.xlsx`),
+
+  // 提示词管理（页面实时编辑，改后不重启即生效）
+  listPrompts: () => api.get('/eval/prompts'),
+  getPrompt:   (bu, name) => api.get(`/eval/prompts/${bu}/${encodeURIComponent(name)}`),
+  savePrompt:  (bu, name, content) =>
+    api.put(`/eval/prompts/${bu}/${encodeURIComponent(name)}`, { content }),
+  resetPrompt: (bu, name) =>
+    api.post(`/eval/prompts/${bu}/${encodeURIComponent(name)}/reset`),
 }
 
 export default api
