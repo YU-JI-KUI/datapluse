@@ -102,61 +102,88 @@ def detect_gold(df: pd.DataFrame, m: dict[str, str]) -> dict:
     }
 
 
-def build_sample(df: pd.DataFrame, i: int, m: dict[str, str], bu) -> dict:
-    """把第 i 行还原成一条评测样本:拼接同会话前文上下文 + 记录下一轮。
+def _sample_from_group(group: list[dict], pos: int, m: dict[str, str], bu) -> dict:
+    """从同会话已排序的行列表 group 中,把第 pos 条还原成一条评测样本。
 
-    bu:BUConfig,用 bu.matches_dispatch() 判断该行「分发BU」是否代表本 BU。
+    前后文不再回扫整个 df,而是在组内按 turn 比较切片(同会话规模远小于全表),
+    把会话重组从 O(N²) 降到 O(N)。bu 用 matches_dispatch() 判断分发BU是否代表本BU。
+    group 每个元素是预先抽好的轻量 dict(见 build_all_samples)。
     """
-    row = df.iloc[i]
-    sess = row[m["session"]]
-    prior = df[(df[m["session"]] == sess) & (df["_turn_n"] < row["_turn_n"])]
-    nxt = df[(df[m["session"]] == sess) & (df["_turn_n"] > row["_turn_n"])]
+    row = group[pos]
+    turn = row["_turn_n"]
 
     # 答案不做代码解析:格式无法穷举,硬解会崩(如 list/dict 结构不定)。
     # 直接把答案列原文(JSON+标签+一切)丢给 LLM,由模型自己读懂。
-    dispatched = (row.get(m["sys_intent"], "") if "sys_intent" in m else "") or "(未知)"
-    reason = row.get(m["dispatch_reason"], "") if "dispatch_reason" in m else ""
+    dispatched = row["sys_intent"] or "(未知)"
 
-    # 上下文 = 前文每一轮的「用户问 + AI 答原文」(答案原文,不解析)。
+    # 上下文 = 前文每一轮的「用户问 + AI 答原文」。用 turn 比较而非纯位置切片,
+    # 保持与原实现一致:同会话相同 turn 的脏数据行互不算作对方的前/后文。
     context = [
-        {
-            "turn": int(r["_turn_n"]),
-            "user": r[m["question"]],
-            "ai": r[m["answer"]],
-        }
-        for _, r in prior.iterrows()
+        {"turn": r["_turn_n"], "user": r["question"], "ai": r["answer"]}
+        for r in group if r["_turn_n"] < turn
     ]
+    nxt = next((r for r in group if r["_turn_n"] > turn), None)
 
-    _dbu = (row.get(m["dispatch_bu"], "") if "dispatch_bu" in m else "").strip()
+    return {
+        "row_index": row["row_index"],
+        "question": row["question"],
+        "session": row["session"],
+        "turn": turn,
+        "context": context,
+        "dispatched_intent": dispatched,
+        "dispatch_reason": row["dispatch_reason"],
+        # 日志「分发BU」是否代表本BU;是→系统承接了,否则→对本BU视为拒识
+        "dispatched_bu": row["dispatched_bu"],
+        "dispatched_to_bu": bu.matches_dispatch(row["dispatched_bu"]),
+        "target_bu": bu.name,
+        "answer_text": row["answer"],   # 答案原文,交给 LLM 读
+        "next_user_turn": (nxt["question"] if nxt else None),
+        "gold": row["gold"],   # 透传金标供校准
+    }
+
+
+def _extract_row(df: pd.DataFrame, i: int, m: dict[str, str]) -> dict:
+    """把第 i 行抽成轻量 dict(只取评测用到的列),供组内切片复用,避免重复 df.iloc。"""
+    row = df.iloc[i]
+
+    def col(key: str) -> str:
+        return row.get(m[key], "") if key in m else ""
 
     return {
         "row_index": int(i),
+        "session": row[m["session"]],
+        "_turn_n": int(row["_turn_n"]),
         "question": row[m["question"]],
-        "session": sess,
-        "turn": int(row["_turn_n"]),
-        "context": context,
-        "dispatched_intent": dispatched,
-        "dispatch_reason": reason,
-        # 日志「分发BU」是否代表本BU;是→系统承接了,否则→对本BU视为拒识
-        "dispatched_bu": _dbu,
-        "dispatched_to_bu": bu.matches_dispatch(_dbu),
-        "target_bu": bu.name,
-        "answer_text": row[m["answer"]],   # 答案原文,交给 LLM 读
-        "next_user_turn": (nxt.iloc[0][m["question"]] if len(nxt) else None),
-        # 透传金标供校准
+        "answer": row[m["answer"]],
+        "sys_intent": col("sys_intent"),
+        "dispatch_reason": col("dispatch_reason"),
+        "dispatched_bu": col("dispatch_bu").strip(),
         "gold": {
-            "dispatch": row.get(m.get("gold_dispatch", ""), "") if "gold_dispatch" in m else "",
-            "oneclick": row.get(m.get("gold_oneclick", ""), "") if "gold_oneclick" in m else "",
-            "resolved": row.get(m.get("gold_resolved", ""), "") if "gold_resolved" in m else "",
-            "qtype": row.get(m.get("gold_qtype", ""), "") if "gold_qtype" in m else "",
-            "module": row.get(m.get("gold_module", ""), "") if "gold_module" in m else "",
-            "unresolved_reason": (
-                row.get(m.get("unresolved_reason", ""), "") if "unresolved_reason" in m else ""
-            ),
+            "dispatch": col("gold_dispatch"),
+            "oneclick": col("gold_oneclick"),
+            "resolved": col("gold_resolved"),
+            "qtype": col("gold_qtype"),
+            "module": col("gold_module"),
+            "unresolved_reason": col("unresolved_reason"),
         },
     }
 
 
 def build_all_samples(df: pd.DataFrame, m: dict[str, str], bu) -> list[dict]:
-    """构造全部样本。bu(BUConfig)用于判断每行分发BU是否代表本BU。"""
-    return [build_sample(df, i, m, bu) for i in range(len(df))]
+    """构造全部样本。先按会话分组(一次),组内切片取前后文,整体 O(N)。
+
+    bu(BUConfig)用于判断每行分发BU是否代表本BU。
+    返回顺序按 row_index 升序,与落盘主键 (task_id, row_index) 对齐(续跑依赖)。
+    """
+    groups: dict[str, list[dict]] = {}
+    for i in range(len(df)):
+        r = _extract_row(df, i, m)
+        groups.setdefault(r["session"], []).append(r)
+
+    samples = [
+        _sample_from_group(group, pos, m, bu)
+        for group in groups.values()
+        for pos in range(len(group))
+    ]
+    samples.sort(key=lambda s: s["row_index"])
+    return samples
