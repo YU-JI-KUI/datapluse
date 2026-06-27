@@ -182,6 +182,13 @@ class EvalRepository:
         slim = {k: v for k, v in result.items() if k != "rows"}
         self.update_task(task_id, updated_by=updated_by, result_json=slim)
 
+    def load_result(self, task_id: str) -> dict | None:
+        """读回聚合结果。不再附带全量 rows（百万级 OOM）；逐条走 load_rows_paged。"""
+        t = self.get_task(task_id)
+        if not t or not t.get("result_json"):
+            return None
+        return dict(t["result_json"])
+
 
 def _prompt_to_dict(p: EvalPrompt) -> dict[str, Any]:
     return {
@@ -234,10 +241,3 @@ class EvalPromptRepository:
             EvalPrompt.bu == bu, EvalPrompt.name == name
         ).delete()
         return bool(n)
-
-    def load_result(self, task_id: str) -> dict | None:
-        """读回聚合结果。不再附带全量 rows（百万级 OOM）；逐条走 load_rows_paged。"""
-        t = self.get_task(task_id)
-        if not t or not t.get("result_json"):
-            return None
-        return dict(t["result_json"])
