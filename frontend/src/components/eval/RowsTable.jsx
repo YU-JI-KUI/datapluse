@@ -123,7 +123,7 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
               <TableHead className="w-40">会话 / 轮次</TableHead>
               <TableHead>客户问题</TableHead>
               <TableHead>业务分类</TableHead>
-              <TableHead>分发场景</TableHead>
+              <TableHead>分发判定（AI / 人工）</TableHead>
               <TableHead>解决（AI / 人工）</TableHead>
               <TableHead className="w-12"></TableHead>
             </TableRow>
@@ -150,9 +150,21 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
                 <TableCell className="max-w-xs truncate">{r.question}</TableCell>
                 <TableCell>{r.j_intent ? <EvalBadge tone="brand">{r.j_intent}</EvalBadge> : '—'}</TableCell>
                 <TableCell>
-                  {r.dispatch_scene
-                    ? <EvalBadge tone={SCENE_TONE[r.dispatch_scene] || 'slate'}>{r.dispatch_scene}</EvalBadge>
-                    : '—'}
+                  <div className="flex flex-col gap-1">
+                    <div className={cn('inline-flex items-center gap-2 rounded-md px-1.5 py-0.5 w-fit',
+                      r.disagree_dispatch && 'ring-1 ring-red-300')}>
+                      {r.j_dispatch === '是' || r.j_dispatch === '否'
+                        ? <YesNo value={r.j_dispatch} />
+                        : <span className="text-muted-foreground text-xs">—</span>}
+                      <span className="text-muted-foreground text-xs">/</span>
+                      {r.gold?.dispatch === '是' || r.gold?.dispatch === '否'
+                        ? <YesNo value={r.gold.dispatch} />
+                        : <span className="text-muted-foreground text-xs">—</span>}
+                    </div>
+                    {r.dispatch_scene && (
+                      <EvalBadge tone={SCENE_TONE[r.dispatch_scene] || 'slate'}>{r.dispatch_scene}</EvalBadge>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <div className={cn('inline-flex items-center gap-2 rounded-md px-1.5 py-0.5',
