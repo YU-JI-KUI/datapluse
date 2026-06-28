@@ -18,6 +18,7 @@ import Eval            from '@/pages/Eval'
 import EvalPrompts     from '@/pages/EvalPrompts'
 import EvalHistory     from '@/pages/EvalHistory'
 import EvalReport      from '@/pages/EvalReport'
+import EvalCategories  from '@/pages/EvalCategories'
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem('token')
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="eval/prompts"   element={<EvalPrompts />} />
           <Route path="eval/history"   element={<EvalHistory />} />
           <Route path="eval/report/:taskId" element={<EvalReport />} />
+          <Route path="eval/categories" element={<EvalCategories />} />
           <Route path="categories"    element={<Categories />} />
           <Route path="config"         element={<ConfigCenter />} />
           <Route path="export"         element={<Export />} />

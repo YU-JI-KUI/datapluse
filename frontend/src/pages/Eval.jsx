@@ -18,8 +18,6 @@ import EvalResult from '@/components/eval/EvalResult'
 const RESP = (r) => r?.data?.data ?? {}   // datapulse 统一响应：res.data.data
 
 export default function Eval() {
-  const [bus, setBus]           = useState([])
-  const [bu, setBu]             = useState('securities')
   const [backend, setBackend]   = useState('')
   const [view, setView]         = useState('upload')   // upload | running | result
   const [task, setTask]         = useState(null)
@@ -29,13 +27,8 @@ export default function Eval() {
   const [busy, setBusy]         = useState(false)
   const pollRef = useRef(null)
 
-  // 初始化：BU 列表 + 后端配置
+  // 初始化：后端配置（BU 由左侧全局选择器决定，上传时 evalApi 自动带当前 BU）
   useEffect(() => {
-    evalApi.bus().then(r => {
-      const list = RESP(r).bus || []
-      setBus(list)
-      if (list[0]) setBu(list[0].code)
-    }).catch(() => {})
     evalApi.config().then(r => setBackend(RESP(r).active_backend || '')).catch(() => {})
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [])
@@ -69,7 +62,7 @@ export default function Eval() {
   async function handleUpload(file) {
     setError(null); setResumable(null); setBusy(true)
     try {
-      const t = RESP(await evalApi.upload(file, bu))
+      const t = RESP(await evalApi.upload(file))   // bu 走全局当前 BU
       setTask(t)
       startPolling(t.task_id)
     } catch (e) {
@@ -79,10 +72,10 @@ export default function Eval() {
     }
   }
 
-  async function handleSample(buCode, kind) {
+  async function handleSample(kind) {
     setError(null); setResumable(null); setBusy(true)
     try {
-      const t = RESP(await evalApi.runSample(buCode, kind))
+      const t = RESP(await evalApi.runSample(undefined, kind))   // bu 走全局当前 BU
       setTask(t)
       startPolling(t.task_id)
     } catch (e) {
@@ -149,10 +142,7 @@ export default function Eval() {
 
       {/* 主体 */}
       {view === 'upload' && (
-        <EvalUploader
-          bus={bus} bu={bu} onBuChange={setBu}
-          onUpload={handleUpload} onSample={handleSample} busy={busy}
-        />
+        <EvalUploader onUpload={handleUpload} onSample={handleSample} busy={busy} />
       )}
       {view === 'running' && <EvalProgress task={task} />}
       {view === 'result' && <EvalResult taskId={task?.task_id} result={result} />}

@@ -40,6 +40,14 @@ export const setCurrentDatasetId = (id) => {
   }
 }
 
+// ── 当前 BU（AI 评测模块全局上下文，存 localStorage，字符串 code）──────────────
+
+export const getCurrentBu = () => localStorage.getItem('current_bu') || 'securities'
+
+export const setCurrentBu = (code) => {
+  if (code) localStorage.setItem('current_bu', code)
+}
+
 // dataset_id 为 null 时返回空响应，不发起请求
 const _empty = (defaultData = null) =>
   Promise.resolve({ data: { code: 0, data: defaultData } })
@@ -407,21 +415,27 @@ export const evalApi = {
   // 配置 / BU / 意图（meta）
   config:  ()   => api.get('/eval/meta/config'),
   bus:     ()   => api.get('/eval/meta/bus'),
-  intents: (bu) => api.get('/eval/meta/intents', { params: { bu } }),
+  intents: (bu = getCurrentBu()) => api.get('/eval/meta/intents', { params: { bu } }),
 
-  // 上传 Excel 起评测（仅存文件 + 建任务，立即返回 task_id）
-  upload: (file, bu = 'securities', onProgress) => {
+  // 上传 Excel 起评测（仅存文件 + 建任务，立即返回 task_id）。bu 默认当前全局 BU
+  upload: (file, bu = getCurrentBu(), onProgress) => {
     const form = new FormData()
     form.append('file', file)
     return api.post('/eval/upload', form, { params: { bu }, onUploadProgress: onProgress })
   },
   // 用内置样例起评测（kind: calib | prod）
-  runSample: (bu = 'securities', kind = 'calib') =>
+  runSample: (bu = getCurrentBu(), kind = 'calib') =>
     api.get('/eval/sample', { params: { bu, kind } }),
 
-  // 任务列表 / 状态 / 结果 / 续跑
-  listTasks: (page = 1, pageSize = 50) =>
-    api.get('/eval/tasks', { params: { page, page_size: pageSize } }),
+  // 业务分类管理（按 BU 增删改查）
+  listCategories:  (bu = getCurrentBu()) => api.get('/eval/categories', { params: { bu } }),
+  createCategory:  (data, bu = getCurrentBu()) => api.post('/eval/categories', data, { params: { bu } }),
+  updateCategory:  (id, data) => api.put(`/eval/categories/${id}`, data),
+  deleteCategory:  (id) => api.delete(`/eval/categories/${id}`),
+
+  // 任务列表 / 状态 / 结果 / 续跑。bu 默认当前全局 BU（传空字符串可查全部）
+  listTasks: (page = 1, pageSize = 50, bu = getCurrentBu()) =>
+    api.get('/eval/tasks', { params: { page, page_size: pageSize, bu } }),
   getTask:   (taskId) => api.get(`/eval/tasks/${taskId}`),
   getResult: (taskId) => api.get(`/eval/tasks/${taskId}/result`),
   // 逐条明细分页（百万级下不再随 result 返回全量 rows）。flag: all | review

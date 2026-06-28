@@ -47,6 +47,14 @@ export default function EvalHistory() {
 
   useEffect(load, [page, pageSize])
 
+  // 全局 BU 切换时刷新（列表已按当前 BU 过滤）
+  useEffect(() => {
+    const onBuChange = () => { setPage(1); load() }
+    window.addEventListener('buChanged', onBuChange)
+    return () => window.removeEventListener('buChanged', onBuChange)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   async function handleRerun(t) {
     try {
       await evalApi.rerun(t.task_id)
