@@ -314,13 +314,16 @@ def export_report(task_id: str) -> Path | None:
         ("需人工复核数", s.get("needs_review", 0)),
         ("评测出错数", s.get("errors", 0)),
     ]
+    _scored = disp.get("scored", 0) or 1   # 比例分母（参与评分数），防除零
+    _over = disp.get("over_should_reject_but_accepted", 0)
+    _miss = disp.get("miss_should_accept_but_rejected", 0)
     dispatch = [
         ("参与评分条数", disp.get("scored", 0)),
         ("分发判对(AI判该接与实际一致)", disp.get("correct", 0)),
         ("分发判错", disp.get("wrong", 0)),
         ("BU分发准确率", pct(disp.get("accuracy"))),
-        ("误收(该拒识却承接)", disp.get("over_should_reject_but_accepted", 0)),
-        ("漏收(该承接却拒识)", disp.get("miss_should_accept_but_rejected", 0)),
+        ("误收(该拒识却承接)", f"{_over}（{pct(_over / _scored)}）"),
+        ("漏收(该承接却拒识)", f"{_miss}（{pct(_miss / _scored)}）"),
     ]
     slices = [
         {

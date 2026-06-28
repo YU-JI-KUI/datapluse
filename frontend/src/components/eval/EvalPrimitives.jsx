@@ -36,12 +36,20 @@ export function EvalBadge({ children, tone = 'slate', className }) {
   )
 }
 
-export function StatCard({ label, value, sub, tone = 'brand', icon: Icon }) {
+export function StatCard({ label, value, sub, hint, tone = 'brand', icon: Icon }) {
   return (
     <Card>
       <CardContent className="p-4">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">{label}</span>
+          <span className="text-sm text-muted-foreground inline-flex items-center gap-1">
+            {label}
+            {hint && (
+              <span title={hint}
+                    className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-muted-foreground/40 text-[9px] text-muted-foreground cursor-help">
+                ?
+              </span>
+            )}
+          </span>
           {Icon && <Icon className={cn('w-4 h-4', TONE_FG[tone] || TONE_FG.brand)} />}
         </div>
         <div className={cn('mt-2 text-2xl font-bold', TONE_FG[tone] || TONE_FG.brand)}>

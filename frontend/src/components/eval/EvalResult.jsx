@@ -47,14 +47,22 @@ export default function EvalResult({ taskId, result }) {
         <StatCard label="评测样本" value={s.total_samples ?? 0}
           sub={`日志共 ${f.total ?? s.total_samples ?? 0} 条`} tone="brand" icon={Database} />
         <StatCard label="BU分发准确率" value={pct(s.dispatch_accuracy)}
-          sub="AI 判该接与实际是否一致" tone="info" icon={TrendingUp} />
+          sub="AI 判该接与实际是否一致"
+          hint={'BU分发准确率 = 判对数 / 参与评分数。判对 = AI 判断「该不该本BU承接」与日志事实「实际是否分给本BU」一致（该接且接了，或该拒且拒了）。'}
+          tone="info" icon={TrendingUp} />
         <StatCard label="问题解决率" value={pct(s.end_to_end_resolved_rate ?? s.resolved_rate)}
-          sub="仅分发到本BU的问题" tone="good" icon={CheckCircle2} />
+          sub="仅分发到本BU的问题"
+          hint={'问题解决率 = 已解决数 / 实际分发到本BU的样本数。仅统计真正进入本BU的问题（拒识的不计入分母）；Judge 判 answer_resolved=yes 才算已解决，partial/no 不算。'}
+          tone="good" icon={CheckCircle2} />
         {isCalib
           ? <StatCard label="不一致 case" value={s.disagreement_count ?? 0}
-              sub="Judge 与人工打标不一致" tone="bad" icon={AlertTriangle} />
+              sub="Judge 与人工打标不一致"
+              hint={'Judge 的判定与人工打标（金标）不一致的条数，用于校准 Judge 可信度。'}
+              tone="bad" icon={AlertTriangle} />
           : <StatCard label="需人工复核" value={s.needs_review ?? 0}
-              sub="Judge 标记低置信" tone="warn" icon={AlertTriangle} />}
+              sub="Judge 自判需复核"
+              hint={'由 Judge 自己判定为需人工复核的条数（非固定数值阈值）。满足任一即标记：置信度低、疑似合规风险、或 Judge 不确定该不该承接/是否解决。'}
+              tone="warn" icon={AlertTriangle} />}
       </div>
 
       {/* BU 分发漏斗信息条 */}
@@ -64,8 +72,11 @@ export default function EvalResult({ taskId, result }) {
             <TrendingUp className="w-4 h-4 text-blue-600 shrink-0" />
             <span>
               BU 分发：对 <b className="text-green-600">{disp.correct ?? 0}/{disp.scored ?? 0}</b> 条
+              （{pct(disp.accuracy)}）
               ·漏收（该承接却拒识）<b className="text-amber-600">{disp.miss_should_accept_but_rejected ?? 0}</b> 条
+              （{pct((disp.miss_should_accept_but_rejected ?? 0) / (disp.scored || 1))}）
               ·误收（该拒识却承接）<b className="text-red-600">{disp.over_should_reject_but_accepted ?? 0}</b> 条
+              （{pct((disp.over_should_reject_but_accepted ?? 0) / (disp.scored || 1))}）
             </span>
           </CardContent>
         </Card>
