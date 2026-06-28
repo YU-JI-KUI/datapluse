@@ -1,46 +1,64 @@
 /**
- * AI 评测 · 提示词管理：把原先散在文件里的提示词搬到数据库，页面实时编辑，
- * 保存后下次评测即生效，无需重启。左侧按作用域分组列模板，右侧编辑 + 保存 / 重置。
+ * AI 评测 · 提示词管理：按当前 BU 组织提示词，页面实时编辑、Markdown 实时预览，
+ * 保存后下次评测即生效，无需重启。左侧分「当前 BU 专属 / 通用（跨 BU 共享）」两组。
  */
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import ReactMarkdown from 'react-markdown'
 import { Loader2, Save, RotateCcw, FileText, CheckCircle2, ArrowLeft } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { EvalBadge } from '@/components/eval/EvalPrimitives'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { evalApi } from '@/lib/api'
+import { evalApi, getCurrentBu } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 
 const RESP = (r) => r?.data?.data ?? {}
 
-// 作用域展示名（与后端 t_eval_prompt.bu 约定一致）
-const SCOPE_LABEL = {
-  _root:       '通用（根）',
-  _default:    '通用兜底',
-  securities:  '证券',
-  life:        '寿险',
-}
+const SCOPE_LABEL = { _root: '通用（根）', _default: '通用兜底', securities: '证券', life: '寿险' }
 const scopeName = (bu) => SCOPE_LABEL[bu] || bu
+const SHARED = new Set(['_root', '_default'])   // 跨 BU 共享的作用域
+
+// Markdown 渲染样式（无 typography 插件，内联给关键元素，避免新增依赖）
+const MD = {
+  h1: (p) => <h1 className="text-lg font-bold mt-3 mb-2" {...p} />,
+  h2: (p) => <h2 className="text-base font-bold mt-3 mb-1.5" {...p} />,
+  h3: (p) => <h3 className="text-sm font-semibold mt-2 mb-1" {...p} />,
+  p:  (p) => <p className="my-1.5 leading-relaxed" {...p} />,
+  ul: (p) => <ul className="list-disc pl-5 my-1.5 space-y-0.5" {...p} />,
+  ol: (p) => <ol className="list-decimal pl-5 my-1.5 space-y-0.5" {...p} />,
+  li: (p) => <li className="leading-relaxed" {...p} />,
+  code: (p) => <code className="rounded bg-gray-200 px-1 py-0.5 text-[0.85em] font-mono" {...p} />,
+  pre: (p) => <pre className="rounded bg-gray-100 p-2 my-2 overflow-x-auto text-xs" {...p} />,
+  blockquote: (p) => <blockquote className="border-l-2 border-gray-300 pl-3 italic text-muted-foreground my-2" {...p} />,
+  table: (p) => <table className="border-collapse my-2 text-xs" {...p} />,
+  th: (p) => <th className="border border-gray-300 px-2 py-1 bg-gray-100 text-left" {...p} />,
+  td: (p) => <td className="border border-gray-300 px-2 py-1" {...p} />,
+  a:  (p) => <a className="text-blue-600 underline" {...p} />,
+}
 
 export default function EvalPrompts() {
+  const [bu, setBu]           = useState(getCurrentBu())
   const [list, setList]       = useState([])
   const [active, setActive]   = useState(null)   // { bu, name }
-  const [detail, setDetail]   = useState(null)   // 当前选中模板详情
+  const [detail, setDetail]   = useState(null)
   const [draft, setDraft]     = useState('')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving]   = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
 
-  // 按作用域分组，便于左侧渲染
-  const grouped = useMemo(() => {
-    const g = {}
-    for (const it of list) (g[it.bu] ||= []).push(it)
-    return g
-  }, [list])
-
   const dirty = detail && draft !== detail.content
+
+  // 只展示「当前 BU 专属」+「通用（共享）」，其它 BU 隐藏；分两组有序渲染
+  const groups = useMemo(() => {
+    const own = list.filter(it => it.bu === bu)
+    const shared = list.filter(it => SHARED.has(it.bu))
+    return [
+      { key: 'own', title: scopeName(bu), items: own },
+      { key: 'shared', title: '通用（跨 BU 共享）', items: shared },
+    ].filter(g => g.items.length > 0)
+  }, [list, bu])
 
   async function loadList() {
     try {
@@ -53,10 +71,10 @@ export default function EvalPrompts() {
     }
   }
 
-  async function openPrompt(bu, name) {
-    setActive({ bu, name }); setLoading(true)
+  async function openPrompt(b, name) {
+    setActive({ bu: b, name }); setLoading(true)
     try {
-      const d = RESP(await evalApi.getPrompt(bu, name))
+      const d = RESP(await evalApi.getPrompt(b, name))
       setDetail(d); setDraft(d.content || '')
     } catch (e) {
       toast.error(e.response?.data?.message || '加载提示词失败')
@@ -66,8 +84,18 @@ export default function EvalPrompts() {
     }
   }
 
+  // 首屏：选当前 BU 第一个，没有则选通用第一个
+  function openFirst(items) {
+    const cur = getCurrentBu()
+    const first = items.find(it => it.bu === cur) || items.find(it => SHARED.has(it.bu))
+    if (first) openPrompt(first.bu, first.name)
+  }
+
   useEffect(() => {
-    loadList().then(items => { if (items[0]) openPrompt(items[0].bu, items[0].name) })
+    loadList().then(openFirst)
+    const onBuChange = (e) => { setBu(e.detail?.bu || getCurrentBu()); setDetail(null); setActive(null) }
+    window.addEventListener('buChanged', onBuChange)
+    return () => window.removeEventListener('buChanged', onBuChange)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -104,8 +132,8 @@ export default function EvalPrompts() {
         <div>
           <h1 className="text-2xl font-bold">提示词管理</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            编辑 AI 评测各环节的提示词，保存后<strong>下次评测即生效，无需重启</strong>。
-            未编辑的模板使用代码内置的出厂默认。
+            编辑当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的提示词，
+            左侧编辑、右侧实时预览 Markdown，保存后<strong>下次评测即生效</strong>。
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>
@@ -113,20 +141,20 @@ export default function EvalPrompts() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-[300px_1fr] gap-6">
+      <div className="grid grid-cols-[260px_1fr] gap-6">
         {/* 左侧：分组列表 */}
         <Card className="h-fit">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">模板列表</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {Object.entries(grouped).map(([bu, items]) => (
-              <div key={bu}>
-                <div className="text-xs font-medium text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                  <EvalBadge tone="slate">{scopeName(bu)}</EvalBadge>
+            {groups.map(g => (
+              <div key={g.key}>
+                <div className="text-xs font-medium text-muted-foreground mb-1.5">
+                  <EvalBadge tone="slate">{g.title}</EvalBadge>
                 </div>
                 <div className="space-y-1">
-                  {items.map(it => {
+                  {g.items.map(it => {
                     const on = active?.bu === it.bu && active?.name === it.name
                     return (
                       <button
@@ -154,7 +182,7 @@ export default function EvalPrompts() {
           </CardContent>
         </Card>
 
-        {/* 右侧：编辑器 */}
+        {/* 右侧：编辑器 + Markdown 预览 */}
         <Card>
           {loading ? (
             <CardContent className="py-16 flex items-center justify-center text-muted-foreground">
@@ -194,17 +222,24 @@ export default function EvalPrompts() {
                 </div>
               </CardHeader>
               <CardContent>
-                <textarea
-                  value={draft}
-                  onChange={e => setDraft(e.target.value)}
-                  spellCheck={false}
-                  rows={22}
-                  className={[
-                    'w-full rounded-md border border-input bg-background px-3 py-2',
-                    'font-mono text-sm leading-relaxed resize-y',
-                    'focus:outline-none focus:ring-2 focus:ring-ring',
-                  ].join(' ')}
-                />
+                {/* 左编辑 / 右预览 */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col">
+                    <div className="text-xs text-muted-foreground mb-1">编辑（Markdown 源码）</div>
+                    <textarea
+                      value={draft}
+                      onChange={e => setDraft(e.target.value)}
+                      spellCheck={false}
+                      className="h-[560px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                  <div className="flex flex-col">
+                    <div className="text-xs text-muted-foreground mb-1">预览</div>
+                    <div className="h-[560px] overflow-y-auto rounded-md border border-input bg-muted/30 px-4 py-3 text-sm">
+                      <ReactMarkdown components={MD}>{draft || '_（空）_'}</ReactMarkdown>
+                    </div>
+                  </div>
+                </div>
                 <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
                   <span>{dirty ? '有未保存的修改' : '无改动'}</span>
                   <span>{draft.length} 字符</span>
