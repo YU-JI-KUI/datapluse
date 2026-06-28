@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from datapulse.modules.eval.answer_sanitizer import sanitize_answer
+
 # 逻辑键 -> 候选列名(按包含匹配,命中第一个)
 COLS: dict[str, list[str]] = {
     "question": ["客户问题"],
@@ -136,7 +138,8 @@ def _sample_from_group(group: list[dict], pos: int, m: dict[str, str], bu) -> di
         "dispatched_bu": row["dispatched_bu"],
         "dispatched_to_bu": bu.matches_dispatch(row["dispatched_bu"]),
         "target_bu": bu.name,
-        "answer_text": row["answer"],   # 答案原文,交给 LLM 读
+        # 答案先经净化器按规则预处理（如证券·小安只取 msgContent），再交给 LLM
+        "answer_text": sanitize_answer(row["answer"], bu.code),
         "next_user_turn": (nxt["question"] if nxt else None),
         "gold": row["gold"],   # 透传金标供校准
     }
