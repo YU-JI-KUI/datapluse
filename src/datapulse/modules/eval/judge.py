@@ -61,12 +61,18 @@ def build_messages(sample: dict, bu: BUConfig) -> list[dict]:
     # 各评测维度的判定规则按 BU 拆分(<bu_code>/ 优先,_default/ 回退),
     # 按 _TASK_PROMPTS 顺序拼进【任务】块。改某 BU 某维度只动对应文件。
     tasks = "\n\n".join(load_bu_prompt(bu.code, f).strip() for f in _TASK_PROMPTS)
+    # 动态数据用 XML 标签包裹再填入，把「待评数据」和「指令」清晰隔开，避免模型
+    # 把答案里的标签/相似问当成指令、或在长上下文里迷失关键部分。标签名取够独特，
+    # 降低与数据内容（答案常含 HTML/JSON）的冲突。占位符仍在模板里，用户不会误删标签。
+    def _wrap(tag: str, val: str) -> str:
+        return f"<{tag}>\n{val}\n</{tag}>"
+
     # 从外置模板填空(用 replace 而非 format,避免与模板内 JSON 的花括号冲突)
     fields = {
-        "{intents}": intents,
-        "{question}": str(sample["question"]),
-        "{ctx}": ctx,
-        "{answer_text}": str(sample.get("answer_text", "(空)")),
+        "{intents}": _wrap("business_categories", intents),
+        "{question}": _wrap("customer_question", str(sample["question"])),
+        "{ctx}": _wrap("conversation_context", ctx),
+        "{answer_text}": _wrap("ai_answer", str(sample.get("answer_text", "(空)"))),
         "{next_user_turn}": str(sample.get("next_user_turn") or "(无/会话结束)"),
         "{dispatched_flag}": (
             "是(进入解决度评测)" if sample.get("dispatched_to_bu")
