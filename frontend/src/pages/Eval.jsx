@@ -1,16 +1,16 @@
 /**
- * AI 对话评测：上传 Excel / 选样例 → 后台评测 → 轮询进度 → 结果报告。
+ * AI 评测：上传对话日志 Excel / 选样例 → 后台评测 → 轮询进度 → 结果报告。
  * 三态：upload（上传）/ running（评测中）/ result（结果）。
  */
 import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
-  AlertTriangle, RotateCcw, ArrowLeft, History, Clock, FileSpreadsheet, Loader2,
+  AlertTriangle, RotateCcw, ArrowLeft, History, Loader2,
 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { evalApi } from '@/lib/api'
-import { formatDate } from '@/lib/utils'
 import { EvalBadge } from '@/components/eval/EvalPrimitives'
 import EvalUploader from '@/components/eval/EvalUploader'
 import EvalProgress from '@/components/eval/EvalProgress'
@@ -28,8 +28,7 @@ export default function Eval() {
   const [error, setError]       = useState(null)
   const [resumable, setResumable] = useState(null)
   const [busy, setBusy]         = useState(false)
-  const [history, setHistory]   = useState([])
-  const [historyOpen, setHistoryOpen] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
   const pollRef = useRef(null)
 
   // 初始化：BU 列表 + 后端配置
@@ -42,6 +41,13 @@ export default function Eval() {
     evalApi.config().then(r => setBackend(RESP(r).active_backend || '')).catch(() => {})
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [])
+
+  // 从历史页跳转带 ?task=xxx 时，直接加载该任务的评测报告
+  useEffect(() => {
+    const tid = searchParams.get('task')
+    if (tid) loadTaskResult(tid)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   function startPolling(taskId) {
     setView('running')
@@ -107,24 +113,14 @@ export default function Eval() {
     }
   }
 
-  async function openHistory() {
-    setHistoryOpen(true)
-    try {
-      const data = RESP(await evalApi.listTasks(1, 100))
-      setHistory((data.list || []).filter(t => t.status === 'done'))
-    } catch {
-      setHistory([])
-    }
-  }
-
-  async function loadHistory(taskId) {
-    setHistoryOpen(false); setBusy(true)
+  async function loadTaskResult(taskId) {
+    setBusy(true)
     try {
       const t = RESP(await evalApi.getTask(taskId))
       const r = RESP(await evalApi.getResult(taskId))
       setTask(t); setResult(r); setView('result')
     } catch (e) {
-      toast.error(e.response?.data?.message || '加载历史评测失败')
+      toast.error(e.response?.data?.message || '加载评测报告失败')
     } finally {
       setBusy(false)
     }
@@ -133,6 +129,7 @@ export default function Eval() {
   function reset() {
     if (pollRef.current) clearInterval(pollRef.current)
     setTask(null); setResult(null); setError(null); setResumable(null); setView('upload')
+    if (searchParams.get('task')) setSearchParams({}, { replace: true })
   }
 
   return (
@@ -140,9 +137,9 @@ export default function Eval() {
       {/* 页头 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">AI 对话评测</h1>
+          <h1 className="text-2xl font-bold">AI 评测</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            上传对话日志 Excel，自动评测 BU 分发准确率、端到端解决率，产出业务洞察与优化建议
+            上传对话日志 Excel，自动评测 BU 分发准确率、问题解决率，产出业务洞察与优化建议
             {backend && <EvalBadge tone={backend === 'pingan' ? 'good' : 'slate'} className="ml-2">
               {backend === 'pingan' ? '平安大模型' : 'Mock 后端'}
             </EvalBadge>}
@@ -154,8 +151,8 @@ export default function Eval() {
               <ArrowLeft className="w-4 h-4 mr-1.5" />新评测
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={openHistory}>
-            <History className="w-4 h-4 mr-1.5" />历史
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/eval/history"><History className="w-4 h-4 mr-1.5" />历史评测</Link>
           </Button>
         </div>
       </div>
@@ -182,45 +179,6 @@ export default function Eval() {
       )}
       {view === 'running' && <EvalProgress task={task} />}
       {view === 'result' && <EvalResult taskId={task?.task_id} result={result} />}
-
-      {/* 历史面板 */}
-      {historyOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setHistoryOpen(false)}>
-          <div className="w-96 max-w-full h-full bg-background shadow-xl p-5 overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold">历史评测</h2>
-              <EvalBadge tone="slate">{history.length} 条</EvalBadge>
-            </div>
-            {history.length === 0 ? (
-              <div className="text-sm text-muted-foreground py-8 text-center">暂无已完成的评测记录</div>
-            ) : (
-              <div className="space-y-2">
-                {history.map(t => (
-                  <button
-                    key={t.task_id}
-                    onClick={() => loadHistory(t.task_id)}
-                    className="w-full rounded-lg border p-3 text-left hover:bg-accent transition-colors"
-                  >
-                    <div className="flex items-center gap-2 font-medium text-sm truncate">
-                      <FileSpreadsheet className="w-4 h-4 text-green-600 shrink-0" />
-                      <span className="truncate">{t.filename}</span>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground">
-                      <EvalBadge tone={t.mode === 'calibration' ? 'info' : 'good'}>
-                        {t.mode === 'calibration' ? '校准' : '生产'}
-                      </EvalBadge>
-                      <span>{t.bu_name}</span>
-                      <span className="ml-auto flex items-center gap-1">
-                        <Clock className="w-3 h-3" />{formatDate(t.finished_at || t.created_at)}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {busy && view !== 'running' && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">

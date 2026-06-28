@@ -33,7 +33,7 @@ def _iso(dt: datetime | None) -> str | None:
 # 任务元数据对外暴露的列（list_tasks 用，不含大字段 result_json）
 _TASK_PUBLIC_KEYS = (
     "id", "task_id", "filename", "bu", "status", "stage", "mode",
-    "progress_done", "progress_total", "error",
+    "progress_done", "progress_total", "error", "created_by",
 )
 
 

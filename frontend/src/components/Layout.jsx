@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard, Database, Search, Tag, AlertTriangle,
   Settings, Download, LogOut, Cpu, ChevronLeft, ChevronRight,
-  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen, BookOpen, Tags, Terminal, Gauge, FileText,
+  Users, ChevronDown, KeyRound, Eye, EyeOff, FolderOpen, BookOpen, Tags, Terminal, Gauge, FileText, History,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { datasetApi, authApi, getCurrentDatasetId, setCurrentDatasetId } from '@/lib/api'
@@ -36,7 +36,8 @@ const navGroups = [
     key: 'eval',
     group: 'AI 评测',
     items: [
-      { to: '/eval',           label: '对话评测',      icon: Gauge },
+      { to: '/eval',           label: '评测',          icon: Gauge },
+      { to: '/eval/history',   label: '历史评测',      icon: History },
       { to: '/eval/prompts',   label: '提示词管理',    icon: FileText },
     ],
   },

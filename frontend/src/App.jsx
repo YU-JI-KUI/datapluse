@@ -16,6 +16,7 @@ import Categories       from '@/pages/Categories'
 import AdminSQL        from '@/pages/AdminSQL'
 import Eval            from '@/pages/Eval'
 import EvalPrompts     from '@/pages/EvalPrompts'
+import EvalHistory     from '@/pages/EvalHistory'
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem('token')
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="conflicts"      element={<ConflictDetection />} />
           <Route path="eval"           element={<Eval />} />
           <Route path="eval/prompts"   element={<EvalPrompts />} />
+          <Route path="eval/history"   element={<EvalHistory />} />
           <Route path="categories"    element={<Categories />} />
           <Route path="config"         element={<ConfigCenter />} />
           <Route path="export"         element={<Export />} />
