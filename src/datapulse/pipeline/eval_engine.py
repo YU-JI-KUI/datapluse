@@ -325,11 +325,14 @@ def export_report(task_id: str) -> Path | None:
         ("误收(该拒识却承接)", f"{_over}（{pct(_over / _scored)}）"),
         ("漏收(该承接却拒识)", f"{_miss}（{pct(_miss / _scored)}）"),
     ]
+    _ins_total = sum(x["count"] for x in result["insights"]["by_intent"]) or 1
     slices = [
         {
             "业务分类": x["name"],
             "样本量": x["count"],
-            "进漏斗(分发到本BU)": x.get("in_bu_count", 0),
+            "样本占比": pct(x["count"] / _ins_total),
+            "实际分入本BU": x.get("in_bu_count", 0),
+            "分入占比": pct((x.get("in_bu_count", 0)) / (x["count"] or 1)),
             "问题解决率": pct(x.get("resolved_rate")),
             "需复核率": pct(x.get("needs_review_rate")),
             "典型未解决问题": "；".join(x.get("unresolved_examples", [])[:3]),

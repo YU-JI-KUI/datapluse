@@ -1,13 +1,16 @@
-/** 业务洞察：按业务分类切片的表格（样本量 / 进漏斗 / 解决率 / 复核率），可排序。 */
+/** 业务洞察：按业务分类切片的表格（样本量 / 实际分入本BU / 解决率 / 复核率），可排序。 */
 import { useState } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { RateBar, SectionTitle } from './EvalPrimitives'
 import { cn } from '@/lib/utils'
 
+const fmtPct = (n, d) => (d > 0 ? `${Math.round((n / d) * 1000) / 10}%` : '—')
+
 export default function InsightsPanel({ insights }) {
   const [sortKey, setSortKey] = useState('count')
   const rows = insights?.by_intent || []
+  const totalCount = rows.reduce((s, x) => s + (x.count || 0), 0)   // 全部样本数（占比分母）
 
   const sorted = [...rows].sort((a, b) => {
     if (sortKey === 'count') return (b.count || 0) - (a.count || 0)
@@ -37,8 +40,10 @@ export default function InsightsPanel({ insights }) {
           <TableHeader>
             <TableRow>
               <TableHead>业务分类</TableHead>
-              <Th k="count" className="text-right">样本量</Th>
-              <TableHead className="text-right">进漏斗</TableHead>
+              <Th k="count" className="text-right">样本量（占比）</Th>
+              <TableHead className="text-right" title="该分类中，系统日志实际把问题分给了本BU承接的条数（解决率的分母）">
+                实际分入本BU（占比）
+              </TableHead>
               <Th k="resolved">问题解决率</Th>
               <TableHead>需复核率</TableHead>
             </TableRow>
@@ -51,9 +56,13 @@ export default function InsightsPanel({ insights }) {
             ) : sorted.map((x, i) => (
               <TableRow key={i}>
                 <TableCell className="font-medium">{x.name}</TableCell>
-                <TableCell className="text-right tabular-nums">{x.count}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {x.count}
+                  <span className="ml-1.5 text-xs text-muted-foreground">{fmtPct(x.count, totalCount)}</span>
+                </TableCell>
                 <TableCell className="text-right tabular-nums text-muted-foreground">
                   {x.in_bu_count ?? '—'}
+                  <span className="ml-1.5 text-xs">{fmtPct(x.in_bu_count ?? 0, x.count)}</span>
                 </TableCell>
                 <TableCell><RateBar value={x.resolved_rate} /></TableCell>
                 <TableCell className={cn('tabular-nums', (x.needs_review_rate ?? 0) >= 0.4 && 'text-amber-600')}>
