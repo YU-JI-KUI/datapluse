@@ -39,7 +39,7 @@ export default function InsightsPanel({ insights }) {
               <TableHead>业务分类</TableHead>
               <Th k="count" className="text-right">样本量</Th>
               <TableHead className="text-right">进漏斗</TableHead>
-              <Th k="resolved">端到端解决率</Th>
+              <Th k="resolved">问题解决率</Th>
               <TableHead>需复核率</TableHead>
             </TableRow>
           </TableHeader>

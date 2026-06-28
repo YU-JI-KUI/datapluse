@@ -105,12 +105,12 @@ export default function MetricsPanel({ metrics }) {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <SectionTitle hint="人工金标 vs Judge 一致性，证明评测可信">校准指标</SectionTitle>
+        <SectionTitle hint="人工打标 vs Judge 一致性，证明评测可信">校准指标</SectionTitle>
       </CardHeader>
       <CardContent>
         {!metrics?.length ? (
           <div className="text-sm text-muted-foreground py-4 text-center">
-            当前数据没有可用的二值人工金标，无法计算校准指标。
+            当前数据没有可用的二值人工打标，无法计算校准指标。
           </div>
         ) : (
           <div className="grid md:grid-cols-2 gap-3">

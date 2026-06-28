@@ -1,4 +1,4 @@
-/** 单行详情：会话上下文 / AI 回答 / Judge 判断 / 人工金标对比。用 Dialog 承载。 */
+/** 单行详情：会话上下文 / AI 回答 / Judge 判断 / 人工打标对比。用 Dialog 承载。 */
 import { MessageSquare, Bot, Scale, ShieldCheck } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { EvalBadge, YesNo } from './EvalPrimitives'
@@ -44,7 +44,7 @@ function GoldCompare({ label, pred, gold }) {
       <div className="flex items-center gap-3 text-sm">
         <span>Judge：<YesNo value={pred} /></span>
         <span className={disagree ? 'text-red-500 font-bold' : 'text-green-600 font-bold'}>{disagree ? '≠' : '='}</span>
-        <span>金标：{has ? <YesNo value={gold} /> : <span className="text-muted-foreground">—</span>}</span>
+        <span>打标：{has ? <YesNo value={gold} /> : <span className="text-muted-foreground">—</span>}</span>
       </div>
     </div>
   )
@@ -63,7 +63,7 @@ export default function DetailDrawer({ row, open, onClose }) {
             <span className="font-mono text-xs text-muted-foreground">{row.session}</span>
             <EvalBadge tone="slate">第 {row.turn} 轮</EvalBadge>
             {row.j_intent && <EvalBadge tone="brand">{row.j_intent}</EvalBadge>}
-            {row.is_disagreement && <EvalBadge tone="bad">与金标不一致</EvalBadge>}
+            {row.is_disagreement && <EvalBadge tone="bad">与打标不一致</EvalBadge>}
           </div>
           <DialogTitle className="text-left mt-1">{row.question}</DialogTitle>
         </DialogHeader>
@@ -115,18 +115,18 @@ export default function DetailDrawer({ row, open, onClose }) {
             )}
           </Block>
 
-          {/* 人工金标对比 */}
+          {/* 人工打标对比 */}
           {(gold.dispatch || gold.resolved) && (
-            <Block icon={ShieldCheck} title="人工金标对比">
+            <Block icon={ShieldCheck} title="人工打标对比">
               <div className="space-y-2">
                 <GoldCompare label="分发是否正确" pred={row.j_dispatch} gold={gold.dispatch} />
                 <GoldCompare label="答案是否解决" pred={row.j_resolved} gold={gold.resolved} />
               </div>
               {gold.unresolved_reason && (
-                <div className="text-xs text-muted-foreground">金标未解决原因：{gold.unresolved_reason}</div>
+                <div className="text-xs text-muted-foreground">打标未解决原因：{gold.unresolved_reason}</div>
               )}
               {gold.qtype && (
-                <div className="text-xs text-muted-foreground">金标问题类型：{gold.qtype}</div>
+                <div className="text-xs text-muted-foreground">打标问题类型：{gold.qtype}</div>
               )}
             </Block>
           )}

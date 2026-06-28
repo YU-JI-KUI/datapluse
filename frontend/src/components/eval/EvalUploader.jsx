@@ -95,7 +95,7 @@ export default function EvalUploader({ bus, bu, onBuChange, onUpload, onSample, 
         >
           <ShieldCheck className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
           <div>
-            <div className="font-medium">校准样例（有人工金标）</div>
+            <div className="font-medium">校准样例（有人工打标）</div>
             <div className="text-xs text-muted-foreground">算 κ/F1 验证 Judge 可信度</div>
           </div>
         </button>

@@ -37,12 +37,12 @@ def build_advice_prompt(insights: dict, bu: BUConfig, bu_dispatch: dict | None =
     slices = [s for s in insights["by_intent"] if s.get("in_bu_count", 0) >= _MIN_SAMPLES]
     payload = {
         "BU分发": bu_dispatch or {},   # 准确率 + 两类错误(漏收/误收)
-        "整体端到端解决率": overall["resolved_rate"],
-        "各业务类型切片(端到端解决率,分母=分发到本BU的子集)": [
+        "整体问题解决率": overall["resolved_rate"],
+        "各业务类型切片(问题解决率,分母=分发到本BU的子集)": [
             {
                 "业务类型": s["name"],
                 "进漏斗样本量": s.get("in_bu_count", 0),
-                "端到端解决率": s["resolved_rate"],
+                "问题解决率": s["resolved_rate"],
                 "需复核率": s["needs_review_rate"],
                 "未解决典型问题": s["unresolved_examples"],
             }
@@ -156,7 +156,7 @@ def rule_based_advice(insights: dict, bu_dispatch: dict | None = None) -> list[d
             advice.append({
                 "scope": s["name"],
                 "severity": "medium",
-                "problem": f"『{s['name']}』端到端解决率仅 {s['resolved_rate']:.0%}",
+                "problem": f"『{s['name']}』问题解决率仅 {s['resolved_rate']:.0%}",
                 "root_cause": "答案问题",
                 "suggestion": "分发到本BU但没解决,排查答案质量:补该业务类型的知识库/标问答案,"
                               "或检查答案卡渲染是否完整。",
