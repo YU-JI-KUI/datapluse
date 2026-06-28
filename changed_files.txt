@@ -1,73 +1,27 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 10676c1e
+# 基于 origin/main @ fb987b2c
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   10676c1e 明细详情补展示「解决度依据」与「未解决原因」
-#   20aac4d3 明细表「分发场景」改「分发判定（AI / 人工）」
-#   80328b57 校准指标卡加口径 hover 说明
-#   334c4dda 提示词管理按 BU 分类，编辑器加 Markdown 实时预览
-#   4b6283c8 业务洞察表：进漏斗列名改清晰，样本/分入加占比
-#   8b3cbd6f 评测报告：补漏收/误收比例，指标口径说明清晰化
-#   9d57f22e 历史页：重测加确认、状态显进度、去业务单元列
-#   076bb097 AI 评测全局 BU 上下文 + 业务分类管理页
-#   5d7d9926 评测业务分类入库，分类改后不重启即生效
-#   a7a7ae20 新增评测报告独立页，历史页增操作列
-#   a6070da9 评测任务支持删除与重测，修复样本数
-#   75da70d2 历史评测独立成页，展示评测人/时间/BU
-#   33f38287 评测文案与指标说明优化
-#   2da84cfe 导航一级目录可折叠，数据集下拉按子系统显隐
-#   e98706f0 导航按子系统分组，AI 评测独立成区
-#   1b75fcae 评测 DB 访问层收口，与主体 DBManager 解耦
-#   80d61ca0 评测实体迁出主体，挂独立 EvalBase
-#   3ccffc29 Merge pull request #1 from YU-JI-KUI/fix/eval-load-result
-#   3e7bae2f 修复评测结果读取报错 AttributeError
-#   c72f0d21 新增评测提示词管理页
-#   24bd99f7 评测提示词入库，支持页面实时编辑
-#   b100785d 评测导出改流式写，支持大批量导出
-#   216b6cc6 评测聚合改流式累加，逐条结果分页查询
-#   9bb644af 评测会话重组从 O(N²) 优化到 O(N)
-frontend/src/components/eval/DetailDrawer.jsx
-frontend/src/components/eval/RowsTable.jsx
-frontend/src/components/eval/MetricsPanel.jsx
-frontend/package-lock.json
-frontend/package.json
-frontend/src/pages/EvalPrompts.jsx
-frontend/src/components/eval/InsightsPanel.jsx
-src/datapulse/pipeline/eval_engine.py
-frontend/src/components/eval/EvalPrimitives.jsx
-frontend/src/components/eval/EvalResult.jsx
-frontend/src/pages/EvalHistory.jsx
-frontend/src/App.jsx
-frontend/src/components/Layout.jsx
-frontend/src/components/eval/EvalUploader.jsx
-frontend/src/lib/api.js
-frontend/src/pages/Eval.jsx
-frontend/src/pages/EvalCategories.jsx
-db/arkpg/20260428_arkpgdata_init.sql
-db/arkpg/20260628_arkpgdata_add_eval_category.sql
-deploy_desc/SUPER-AGENT1.0.0.json
-src/datapulse/modules/eval/bu/base.py
-src/datapulse/modules/eval/bu/life_insurance.py
-src/datapulse/modules/eval/bu/registry.py
-src/datapulse/modules/eval/bu/securities.py
-src/datapulse/modules/eval/entities.py
-src/datapulse/modules/eval/eval_db.py
-src/datapulse/modules/eval/repository.py
-src/datapulse/router/eval.py
-tests/eval/test_categories_dynamic.py
-tests/eval/test_eval_contract.py
-frontend/src/pages/EvalReport.jsx
-src/datapulse/modules/eval/advisor.py
+#   fb987b2c 评测改独立后台 worker，不再拖垮整站
+#   872f1410 提示词动态数据用 XML 标签隔离
+#   e5bc2c93 修复模型布尔字段一致性判断错误
+#   b658314c 新增答案净化器，喂模型前按规则预处理答案
+#   f4f90ac3 历史页轮询改 10 秒并静默刷新，不重载整表
+#   8ca8ac35 评测明细表重构 + 提示词按 BU 全槽位
 src/datapulse/main.py
-src/datapulse/modules/eval/_store.py
-src/datapulse/modules/eval/prompt_loader.py
-src/datapulse/repository/base.py
-src/datapulse/model/entities.py
-db/arkpg/20260627_arkpgdata_add_eval_prompt.sql
-tests/eval/test_prompt_loader_db.py
-tests/eval/test_export_stream.py
-src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/metrics.py
-tests/eval/test_stream_aggregator.py
+src/datapulse/modules/eval/eval_worker.py
+src/datapulse/router/eval.py
+src/datapulse/modules/eval/judge.py
+tests/eval/test_bool_normalize.py
+src/datapulse/modules/eval/answer_sanitizer.py
 src/datapulse/modules/eval/pipeline.py
-[DEL] src/datapulse/repository/eval_repository.py
+tests/eval/test_answer_sanitizer.py
+frontend/src/pages/EvalHistory.jsx
+frontend/src/components/eval/EvalResult.jsx
+frontend/src/components/eval/RowsTable.jsx
+frontend/src/lib/api.js
+frontend/src/pages/EvalPrompts.jsx
+src/datapulse/modules/eval/eval_db.py
+src/datapulse/modules/eval/evaluator.py
+src/datapulse/modules/eval/repository.py
+src/datapulse/pipeline/eval_engine.py
