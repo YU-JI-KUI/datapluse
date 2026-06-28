@@ -110,6 +110,7 @@ export default function EvalResult({ taskId, result }) {
         disagreements={result.disagreements || []}
         totalSamples={s.total_samples || 0}
         reviewCount={s.needs_review || 0}
+        intentOptions={(result.intent_distribution?.by_intent || []).map(x => x.name)}
       />
     </div>
   )

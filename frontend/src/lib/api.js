@@ -439,8 +439,9 @@ export const evalApi = {
   getTask:   (taskId) => api.get(`/eval/tasks/${taskId}`),
   getResult: (taskId) => api.get(`/eval/tasks/${taskId}/result`),
   // 逐条明细分页（百万级下不再随 result 返回全量 rows）。flag: all | review
-  getRows:   (taskId, page = 1, pageSize = 20, flag = 'all') =>
-    api.get(`/eval/tasks/${taskId}/rows`, { params: { page, page_size: pageSize, flag } }),
+  // q=客户问题关键字，intent=业务分类（仅 flag=all 生效）
+  getRows:   (taskId, page = 1, pageSize = 20, flag = 'all', q = '', intent = '') =>
+    api.get(`/eval/tasks/${taskId}/rows`, { params: { page, page_size: pageSize, flag, q, intent } }),
   resume:    (taskId) => api.post(`/eval/tasks/${taskId}/resume`),
   rerun:     (taskId) => api.post(`/eval/tasks/${taskId}/rerun`),
   remove:    (taskId) => api.delete(`/eval/tasks/${taskId}`),
@@ -453,8 +454,8 @@ export const evalApi = {
   exportReport: (taskId) =>
     _downloadWithToken(`/eval/tasks/${taskId}/export/report`, `评估报告_${taskId}.xlsx`),
 
-  // 提示词管理（页面实时编辑，改后不重启即生效）
-  listPrompts: () => api.get('/eval/prompts'),
+  // 提示词管理（按 BU 列全部模板槽位，改后不重启即生效）
+  listPrompts: (bu = getCurrentBu()) => api.get('/eval/prompts', { params: { bu } }),
   getPrompt:   (bu, name) => api.get(`/eval/prompts/${bu}/${encodeURIComponent(name)}`),
   savePrompt:  (bu, name, content) =>
     api.put(`/eval/prompts/${bu}/${encodeURIComponent(name)}`, { content }),

@@ -18,7 +18,6 @@ const RESP = (r) => r?.data?.data ?? {}
 
 const SCOPE_LABEL = { _root: '通用（根）', _default: '通用兜底', securities: '证券', life: '寿险' }
 const scopeName = (bu) => SCOPE_LABEL[bu] || bu
-const SHARED = new Set(['_root', '_default'])   // 跨 BU 共享的作用域
 
 // Markdown 渲染样式（无 typography 插件，内联给关键元素，避免新增依赖）
 const MD = {
@@ -40,7 +39,7 @@ const MD = {
 
 export default function EvalPrompts() {
   const [bu, setBu]           = useState(getCurrentBu())
-  const [list, setList]       = useState([])
+  const [data, setData]       = useState({ own: [], shared: [] })
   const [active, setActive]   = useState(null)   // { bu, name }
   const [detail, setDetail]   = useState(null)
   const [draft, setDraft]     = useState('')
@@ -50,24 +49,19 @@ export default function EvalPrompts() {
 
   const dirty = detail && draft !== detail.content
 
-  // 只展示「当前 BU 专属」+「通用（共享）」，其它 BU 隐藏；分两组有序渲染
-  const groups = useMemo(() => {
-    const own = list.filter(it => it.bu === bu)
-    const shared = list.filter(it => SHARED.has(it.bu))
-    return [
-      { key: 'own', title: scopeName(bu), items: own },
-      { key: 'shared', title: '通用（跨 BU 共享）', items: shared },
-    ].filter(g => g.items.length > 0)
-  }, [list, bu])
+  const groups = useMemo(() => [
+    { key: 'own', title: `${scopeName(bu)} 专属`, items: data.own },
+    { key: 'shared', title: '通用（跨 BU 共享）', items: data.shared },
+  ].filter(g => g.items.length > 0), [data, bu])
 
   async function loadList() {
     try {
-      const data = RESP(await evalApi.listPrompts())
-      setList(data.prompts || [])
-      return data.prompts || []
+      const d = RESP(await evalApi.listPrompts())
+      setData({ own: d.own || [], shared: d.shared || [] })
+      return d
     } catch (e) {
       toast.error(e.response?.data?.message || '加载提示词清单失败')
-      return []
+      return { own: [], shared: [] }
     }
   }
 
@@ -84,16 +78,18 @@ export default function EvalPrompts() {
     }
   }
 
-  // 首屏：选当前 BU 第一个，没有则选通用第一个
-  function openFirst(items) {
-    const cur = getCurrentBu()
-    const first = items.find(it => it.bu === cur) || items.find(it => SHARED.has(it.bu))
+  function openFirst(d) {
+    const first = (d.own || [])[0] || (d.shared || [])[0]
     if (first) openPrompt(first.bu, first.name)
   }
 
   useEffect(() => {
     loadList().then(openFirst)
-    const onBuChange = (e) => { setBu(e.detail?.bu || getCurrentBu()); setDetail(null); setActive(null) }
+    const onBuChange = (e) => {
+      setBu(e.detail?.bu || getCurrentBu())
+      setDetail(null); setActive(null)
+      loadList().then(openFirst)   // BU 变了，列表与槽位状态全变
+    }
     window.addEventListener('buChanged', onBuChange)
     return () => window.removeEventListener('buChanged', onBuChange)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,10 +115,10 @@ export default function EvalPrompts() {
     try {
       const d = RESP(await evalApi.resetPrompt(detail.bu, detail.name))
       setDetail(d); setDraft(d.content || '')
-      toast.success('已重置为出厂默认')
+      toast.success('已删除本 BU 专属，恢复为继承通用')
       await loadList()
     } catch (e) {
-      toast.error(e.response?.data?.message || '重置失败')
+      toast.error(e.response?.data?.message || '操作失败')
     }
   }
 
@@ -167,12 +163,13 @@ export default function EvalPrompts() {
                       >
                         <div className="flex items-center gap-1.5">
                           <FileText className="w-3.5 h-3.5 shrink-0 opacity-60" />
-                          <span className="flex-1 truncate">{it.description || it.name}</span>
-                          {it.customized && (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-green-600 shrink-0" title="已自定义" />
-                          )}
+                          <span className="flex-1 truncate">{(it.description || it.name).split('：')[0]}</span>
+                          {it.source === 'own'
+                            ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600 shrink-0" title="本 BU 专属" />
+                            : it.source === 'inherited'
+                              ? <span className="text-[10px] text-muted-foreground shrink-0">继承</span>
+                              : null}
                         </div>
-                        <div className="text-[11px] text-muted-foreground mt-0.5 truncate pl-5">{it.name}</div>
                       </button>
                     )
                   })}
@@ -196,22 +193,27 @@ export default function EvalPrompts() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <CardTitle className="text-base flex items-center gap-2">
-                      {detail.description || detail.name}
-                      {detail.customized
-                        ? <EvalBadge tone="good">已自定义</EvalBadge>
-                        : <EvalBadge tone="slate">出厂默认</EvalBadge>}
+                      {(detail.description || detail.name).split('：')[0]}
+                      {detail.source === 'own'
+                        ? <EvalBadge tone="good">本 BU 专属</EvalBadge>
+                        : detail.source === 'inherited'
+                          ? <EvalBadge tone="slate">继承通用</EvalBadge>
+                          : <EvalBadge tone="brand">跨 BU 共享</EvalBadge>}
                     </CardTitle>
                     <div className="text-xs text-muted-foreground mt-1">
                       <span className="font-mono">{scopeName(detail.bu)} / {detail.name}</span>
+                      {detail.source === 'inherited' && (
+                        <span className="ml-3 text-amber-600">保存后将为 {scopeName(bu)} 创建专属版本</span>
+                      )}
                       {detail.customized && detail.updated_at && (
                         <span className="ml-3">最后修改：{detail.updated_by} · {formatDate(detail.updated_at)}</span>
                       )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {detail.customized && (
+                    {detail.source === 'own' && (
                       <Button variant="outline" size="sm" onClick={() => setResetOpen(true)}>
-                        <RotateCcw className="w-4 h-4 mr-1.5" />重置默认
+                        <RotateCcw className="w-4 h-4 mr-1.5" />恢复继承
                       </Button>
                     )}
                     <Button size="sm" onClick={handleSave} disabled={saving || !dirty}>
@@ -253,9 +255,9 @@ export default function EvalPrompts() {
       <ConfirmDialog
         open={resetOpen}
         onOpenChange={setResetOpen}
-        title="重置为出厂默认"
-        description="将删除你对该模板的自定义内容，恢复为代码内置的默认提示词。此操作不可撤销。"
-        confirmLabel="重置"
+        title="恢复继承通用"
+        description={`将删除「${scopeName(bu)}」对该模板的专属内容，恢复为继承通用版本。此操作不可撤销。`}
+        confirmLabel="恢复继承"
         onConfirm={handleReset}
       />
     </div>

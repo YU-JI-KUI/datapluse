@@ -79,13 +79,13 @@ def get_result(task_id: str) -> dict | None:
     return eval_db.load_result(task_id)
 
 
-def list_rows(task_id: str, page: int, page_size: int) -> list[dict]:
-    """分页读逐条评测明细（前端结果页表格用）。"""
-    return eval_db.load_rows_paged(task_id, page, page_size)
+def list_rows(task_id: str, page: int, page_size: int, q: str = "", intent: str = "") -> list[dict]:
+    """分页读逐条评测明细（前端结果页表格用），支持关键字/业务分类过滤。"""
+    return eval_db.load_rows_filtered(task_id, page, page_size, q=q, intent=intent)
 
 
-def count_rows(task_id: str) -> int:
-    return eval_db.count_rows(task_id)
+def count_rows(task_id: str, q: str = "", intent: str = "") -> int:
+    return eval_db.count_rows_filtered(task_id, q=q, intent=intent)
 
 
 def list_review_rows(task_id: str) -> list[dict]:
@@ -380,43 +380,72 @@ def _prompt_desc(name: str) -> str:
     return _PROMPT_DESC.get(name, "")
 
 
-def list_prompts() -> list[dict]:
-    """列出可编辑提示词清单：出厂模板叠加库里的自定义状态（不含全文，列表轻量）。"""
-    from datapulse.modules.eval import prompt_loader
+# BU 级模板槽位（每个 BU 都可单独覆盖；未覆盖则继承通用 _default/文件）
+_BU_SLOTS = (
+    "judge_system.md", "task_dispatch.md", "task_business_type.md",
+    "task_resolved.md", "task_review.md", "advice_system.md", "advice_user.md",
+)
+# 根共享模板槽位（跨 BU 共用，作用域 _root）
+_ROOT_SLOTS = ("judge_user.md",)
 
+DEFAULT_SCOPE = "_default"
+ROOT_SCOPE = "_root"
+
+
+def list_prompts(bu: str) -> dict:
+    """列出某 BU 的全部模板槽位 + 根共享槽位，标注每个的来源（专属/继承/根共享）。
+
+    不再只列文件系统已有文件——每个 BU 固定列出全部槽位，缺失的也能新建专属覆盖，
+    解决「某 BU 无法重写某模块」的问题。
+    """
     custom = {(r["bu"], r["name"]): r for r in eval_db.prompt_list()}
-    out = []
-    for it in prompt_loader.list_editable():
-        key = (it["bu"], it["name"])
-        c = custom.get(key)
-        out.append({
-            "bu": it["bu"],
-            "name": it["name"],
-            "description": _prompt_desc(it["name"]),
-            "customized": c is not None,           # 库里有记录=已被用户改过
-            "updated_at": c["updated_at"] if c else None,
-            "updated_by": c["updated_by"] if c else None,
-        })
-    return out
+
+    def slot(scope, name):
+        own = custom.get((scope, name))          # 该作用域是否有库记录
+        if scope == ROOT_SCOPE:
+            source = "shared"                    # 根共享
+        elif own:
+            source = "own"                       # BU 专属覆盖
+        else:
+            source = "inherited"                 # 继承通用（_default / 文件）
+        return {
+            "bu": scope, "name": name, "description": _prompt_desc(name),
+            "source": source,                    # own=专属 / inherited=继承通用 / shared=根共享
+            "customized": own is not None,
+            "updated_at": own["updated_at"] if own else None,
+            "updated_by": own["updated_by"] if own else None,
+        }
+
+    return {
+        "bu": bu,
+        "own": [slot(bu, n) for n in _BU_SLOTS],        # 当前 BU 的全部槽位
+        "shared": [slot(ROOT_SCOPE, n) for n in _ROOT_SLOTS],  # 跨 BU 共享
+    }
 
 
 def get_prompt(bu: str, name: str) -> dict | None:
-    """单条详情：当前有效内容 + 文件出厂默认（供对比/重置）+ 是否自定义。"""
+    """单条详情：当前有效内容（库优先、继承通用、文件兜底）+ 文件出厂默认 + 来源。"""
     from datapulse.modules.eval import prompt_loader
 
+    own = eval_db.prompt_get(bu, name)                 # 该 BU 的专属覆盖
     file_default = prompt_loader.file_default(bu, name)
-    rec = eval_db.prompt_get(bu, name)
-    if rec is None and file_default is None:
-        return None
+    if own:
+        content, source = own["content"], "own"
+    elif bu == ROOT_SCOPE:
+        content = file_default or prompt_loader.load_prompt(name)
+        source = "shared"
+    else:
+        # 未专属：显示当前生效内容（继承通用），编辑保存即为本 BU 创建专属覆盖
+        content = prompt_loader.load_bu_prompt(bu, name)
+        source = "inherited"
     return {
-        "bu": bu,
-        "name": name,
-        "description": _prompt_desc(name),
-        "content": rec["content"] if rec else file_default,
+        "bu": bu, "name": name, "description": _prompt_desc(name),
+        "content": content,
         "file_default": file_default,
-        "customized": rec is not None,
-        "updated_at": rec["updated_at"] if rec else None,
-        "updated_by": rec["updated_by"] if rec else None,
+        "source": source,
+        "customized": own is not None,
+        "updated_at": own["updated_at"] if own else None,
+        "updated_by": own["updated_by"] if own else None,
     }
 
 

@@ -129,11 +129,13 @@ async def task_rows(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
     flag: str = Query("all"),
+    q: str = Query("", description="按客户问题关键字过滤"),
+    intent: str = Query("", description="按业务分类过滤"),
 ):
     """分页查逐条评测明细（百万级下替代 /result 附带全量 rows）。
 
-    flag=all（默认）按 row_index 分页全量；flag=review 只取需复核子集（有限上限）。
-    「不一致」子集前端直接用 result.disagreements，不走此接口。
+    flag=all（默认）按 row_index 分页，支持 q（问题关键字）/ intent（业务分类）过滤；
+    flag=review 只取需复核子集（有限上限）。「不一致」子集前端直接用 result.disagreements。
     """
     task = eval_engine.get_task(task_id)
     if not task:
@@ -141,8 +143,8 @@ async def task_rows(
     if flag == "review":
         rows = eval_engine.list_review_rows(task_id)
         return success(page_data(rows, 1, len(rows), len(rows)))
-    rows = eval_engine.list_rows(task_id, page, page_size)
-    total = eval_engine.count_rows(task_id)
+    rows = eval_engine.list_rows(task_id, page, page_size, q=q, intent=intent)
+    total = eval_engine.count_rows(task_id, q=q, intent=intent)
     return success(page_data(rows, page, page_size, total))
 
 
@@ -232,9 +234,9 @@ class PromptSaveBody(BaseModel):
 
 
 @router.get("/prompts")
-async def list_prompts(user: CurrentUser):
-    """可编辑提示词清单（出厂模板 + 是否已自定义）。"""
-    return success({"prompts": eval_engine.list_prompts()})
+async def list_prompts(user: CurrentUser, bu: str = "securities"):
+    """某 BU 的全部模板槽位（专属/继承通用）+ 跨 BU 共享槽位。"""
+    return success(eval_engine.list_prompts(bu))
 
 
 @router.get("/prompts/{bu}/{name}")

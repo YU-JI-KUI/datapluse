@@ -80,6 +80,7 @@ def assemble_row(sample: dict, judge: dict) -> dict:
         "context": sample["context"],  # [{turn, user, ai}, ...] 含前文 AI 回答
         "next_user_turn": sample["next_user_turn"],
         "dispatched_intent": sample["dispatched_intent"],
+        "dispatched_bu": sample.get("dispatched_bu", ""),       # Excel「分发BU」列原值
         "dispatched_to_bu": sample.get("dispatched_to_bu", False),
         "answer_text": sample["answer_text"],
         "judge": judge,

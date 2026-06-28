@@ -149,6 +149,34 @@ class EvalRepository:
             select(func.count()).select_from(EvalTaskRow).where(EvalTaskRow.task_id == task_id)
         ).scalar() or 0)
 
+    def _row_filters(self, task_id: str, q: str = "", intent: str = ""):
+        """构造逐条结果的过滤条件：task_id + 关键字(问题) + 业务分类。"""
+        conds = [EvalTaskRow.task_id == task_id]
+        if q:
+            conds.append(EvalTaskRow.row_json["question"].astext.ilike(f"%{q}%"))
+        if intent:
+            conds.append(EvalTaskRow.row_json["j_intent"].astext == intent)
+        return conds
+
+    def load_rows_filtered(self, task_id: str, page: int, page_size: int,
+                           q: str = "", intent: str = "") -> list[dict]:
+        """分页 + 关键字(问题)/业务分类过滤读逐条结果。"""
+        offset = (page - 1) * page_size
+        rows = self.session.execute(
+            select(EvalTaskRow.row_json)
+            .where(*self._row_filters(task_id, q, intent))
+            .order_by(EvalTaskRow.row_index)
+            .offset(offset).limit(page_size)
+        ).scalars().all()
+        return list(rows)
+
+    def count_rows_filtered(self, task_id: str, q: str = "", intent: str = "") -> int:
+        from sqlalchemy import func
+        return int(self.session.execute(
+            select(func.count()).select_from(EvalTaskRow)
+            .where(*self._row_filters(task_id, q, intent))
+        ).scalar() or 0)
+
     def load_rows_after(self, task_id: str, after_index: int, limit: int) -> list[tuple[int, dict]]:
         """游标分页：取 row_index > after_index 的下一批，返回 [(row_index, row_json)]。
 

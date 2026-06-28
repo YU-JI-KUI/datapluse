@@ -131,6 +131,16 @@ def count_rows(task_id: str) -> int:
         return _repo(s).count_rows(task_id)
 
 
+def load_rows_filtered(task_id: str, page: int, page_size: int, q: str = "", intent: str = "") -> list[dict]:
+    with eval_session() as s:
+        return _repo(s).load_rows_filtered(task_id, page, page_size, q=q, intent=intent)
+
+
+def count_rows_filtered(task_id: str, q: str = "", intent: str = "") -> int:
+    with eval_session() as s:
+        return _repo(s).count_rows_filtered(task_id, q=q, intent=intent)
+
+
 def load_review_rows(task_id: str, limit: int = 500) -> list[dict]:
     with eval_session() as s:
         return _repo(s).load_review_rows(task_id, limit=limit)
