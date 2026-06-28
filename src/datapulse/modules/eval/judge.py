@@ -86,13 +86,43 @@ def build_messages(sample: dict, bu: BUConfig) -> list[dict]:
     ]
 
 
+# 模型输出里语义为布尔的字段。LLM 常把它们返回成字符串 "true"/"false"，
+# 而 Python bool("false") == True，会让分发/复核判定全反——必须统一归一成真 bool。
+_BOOL_FIELDS = ("should_dispatch_to_bu", "answer_relevant", "answer_complete", "needs_human_review")
+
+_TRUE_TOKENS = {"true", "1", "yes", "y", "是", "对"}
+_FALSE_TOKENS = {"false", "0", "no", "n", "否", "错", ""}
+
+
+def _to_bool(v) -> bool:
+    """把模型返回的布尔字段（可能是 bool / "true" / "false" / "是"…）归一成 bool。
+
+    无法识别的值默认 False（保守：不轻易判「该承接 / 需复核」）。
+    """
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str):
+        return v.strip().lower() in _TRUE_TOKENS
+    return False
+
+
 def parse_judge_output(text: str) -> dict:
-    """解析模型返回的文本为 dict。模型有时用 Markdown 围栏包裹 JSON,先剥掉。"""
+    """解析模型返回的文本为 dict。模型有时用 Markdown 围栏包裹 JSON,先剥掉。
+
+    解析后把布尔字段统一归一成真 bool，避免下游 bool("false")==True 的判定错误。
+    """
     fence = chr(96) * 3  # 三个反引号
     t = text.strip().replace(fence + "json", "").replace(fence, "")
     try:
-        return json.loads(t.strip())
+        out = json.loads(t.strip())
     except json.JSONDecodeError as e:
         # 给出可定位的错误,而非裸 JSONDecodeError;上层据此判断是「模型输出
         # 不符格式」而非「评测逻辑出错」,对应内网验收第 ④ 步。
         raise ValueError(f"模型输出不是有效 JSON(前120字): {t[:120]!r}") from e
+    if isinstance(out, dict):
+        for f in _BOOL_FIELDS:
+            if f in out:
+                out[f] = _to_bool(out[f])
+    return out
