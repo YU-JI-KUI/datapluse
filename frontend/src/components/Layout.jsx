@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -14,9 +14,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
 // 导航按子系统分组：标注平台 / AI 评测（独立子系统）/ 系统管理
+// datasetBound=true 的组才与「当前数据集」强绑定，其余子系统不展示数据集下拉框
 const navGroups = [
   {
+    key: 'annotation',
     group: '标注平台',
+    datasetBound: true,
     items: [
       { to: '/dashboard',      label: '首页',          icon: LayoutDashboard },
       { to: '/explorer',       label: '数据管理',      icon: Search },
@@ -30,6 +33,7 @@ const navGroups = [
     ],
   },
   {
+    key: 'eval',
     group: 'AI 评测',
     items: [
       { to: '/eval',           label: '对话评测',      icon: Gauge },
@@ -37,6 +41,7 @@ const navGroups = [
     ],
   },
   {
+    key: 'admin',
     group: '系统管理',
     items: [
       { to: '/datasets',       label: '数据集管理',    icon: FolderOpen, adminOnly: true },
@@ -45,6 +50,19 @@ const navGroups = [
     ],
   },
 ]
+
+// 当前路径属于哪个分组（用于判断数据集下拉框显隐）。最长前缀匹配避免 /eval 命中 /
+function groupOfPath(pathname) {
+  let best = null
+  for (const g of navGroups) {
+    for (const it of g.items) {
+      if (pathname === it.to || pathname.startsWith(it.to + '/')) {
+        if (!best || it.to.length > best.to.length) best = { ...it, _group: g }
+      }
+    }
+  }
+  return best?._group || null
+}
 
 // ── 修改密码弹窗 ───────────────────────────────────────────────────────────────
 
@@ -134,6 +152,26 @@ export default function Layout() {
     () => localStorage.getItem('sidebar-collapsed') === 'true'
   )
 
+  // 一级目录折叠状态：存被折叠的 group.key 集合，持久化
+  const [collapsedGroups, setCollapsedGroups] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('nav-collapsed-groups') || '[]')) }
+    catch { return new Set() }
+  })
+
+  const location = useLocation()
+  // 仅标注平台与「当前数据集」强绑定，其余子系统不展示数据集下拉框
+  const activeGroup = groupOfPath(location.pathname)
+  const showDatasetSelector = activeGroup?.datasetBound ?? false
+
+  function toggleGroup(key) {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      localStorage.setItem('nav-collapsed-groups', JSON.stringify([...next]))
+      return next
+    })
+  }
+
   const [datasets, setDatasets]           = useState([])
   const [currentDataset, setCurrentDataset] = useState(getCurrentDatasetId())
   const [dsOpen, setDsOpen]               = useState(false)
@@ -221,8 +259,8 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Dataset Selector */}
-        {!collapsed && (
+        {/* Dataset Selector — 仅标注平台（datasetBound）页面展示 */}
+        {!collapsed && showDatasetSelector && (
           <div className="px-3 py-3 border-b border-gray-700">
             <div className="text-xs text-gray-500 mb-1 px-1">当前数据集</div>
             <div className="relative">
@@ -261,22 +299,27 @@ export default function Layout() {
           </div>
         )}
 
-        {/* Navigation — 按子系统分组 */}
-        <nav className="flex-1 px-2 py-4 space-y-4 overflow-y-auto">
-          {navGroups.map(({ group, items }) => {
+        {/* Navigation — 按子系统分组，一级目录可折叠 */}
+        <nav className="flex-1 px-2 py-4 space-y-2 overflow-y-auto">
+          {navGroups.map(({ key, group, items }) => {
             const visible = items.filter(item => !item.adminOnly || isAdmin)
             if (visible.length === 0) return null
+            // 侧边栏整体收窄时不做分组折叠（无标题可点），用分隔线占位并全部展示
+            const groupCollapsed = !collapsed && collapsedGroups.has(key)
             return (
-              <div key={group} className="space-y-1">
-                {/* 分组标题：展开时显示文字，收起时用一条分隔线占位 */}
+              <div key={key} className="space-y-1">
                 {collapsed ? (
                   <div className="mx-2 my-2 border-t border-gray-700" />
                 ) : (
-                  <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
-                    {group}
-                  </div>
+                  <button
+                    onClick={() => toggleGroup(key)}
+                    className="w-full flex items-center justify-between px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-300 transition-colors"
+                  >
+                    <span>{group}</span>
+                    <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', groupCollapsed && '-rotate-90')} />
+                  </button>
                 )}
-                {visible.map(({ to, label, icon: Icon }) => (
+                {!groupCollapsed && visible.map(({ to, label, icon: Icon }) => (
                   <NavLink
                     key={to}
                     to={to}
