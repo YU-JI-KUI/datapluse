@@ -1,6 +1,7 @@
 /**
- * AI 评测 · 历史评测：表格展示全部评测记录，支持查看报告 / 重测 / 删除。
- * 每行展示「谁、何时开始/完成、评测了哪个 BU、什么文件、什么模式、多少样本、状态」。
+ * AI 评测 · 历史评测：表格展示当前 BU 的评测记录，支持查看报告 / 重测 / 删除。
+ * 每行展示「文件、模式、状态(评测中显示进度%)、样本数、评测人、开始/完成时间」。
+ * 列表按左侧全局 BU 过滤，故不再单列业务单元。
  */
 import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
@@ -32,6 +33,7 @@ export default function EvalHistory() {
   const [pageSize, setPageSize] = useState(10)
   const [loading, setLoading]   = useState(false)
   const [delTarget, setDelTarget] = useState(null)   // 待删除的任务
+  const [rerunTarget, setRerunTarget] = useState(null)   // 待重测的任务
 
   function load() {
     setLoading(true)
@@ -55,9 +57,18 @@ export default function EvalHistory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function handleRerun(t) {
+  // 有评测中的任务时轮询刷新，让进度百分比实时更新
+  useEffect(() => {
+    if (!list.some(t => t.status === 'running')) return
+    const timer = setInterval(load, 2000)
+    return () => clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list])
+
+  async function handleRerun() {
+    if (!rerunTarget) return
     try {
-      await evalApi.rerun(t.task_id)
+      await evalApi.rerun(rerunTarget.task_id)
       toast.success('已重新发起评测')
       load()
     } catch (e) {
@@ -96,9 +107,8 @@ export default function EvalHistory() {
             <TableHeader>
               <TableRow>
                 <TableHead>文件</TableHead>
-                <TableHead>业务单元</TableHead>
                 <TableHead>模式</TableHead>
-                <TableHead>状态</TableHead>
+                <TableHead className="w-44">状态</TableHead>
                 <TableHead className="text-right">样本数</TableHead>
                 <TableHead>评测人</TableHead>
                 <TableHead className="w-40 whitespace-nowrap">开始时间</TableHead>
@@ -109,13 +119,13 @@ export default function EvalHistory() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
                     <Loader2 className="w-5 h-5 animate-spin inline mr-2" />加载中…
                   </TableCell>
                 </TableRow>
               ) : list.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">暂无评测记录</TableCell>
+                  <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">暂无评测记录</TableCell>
                 </TableRow>
               ) : list.map(t => {
                 const st = STATUS[t.status] || STATUS.pending
@@ -123,7 +133,6 @@ export default function EvalHistory() {
                 return (
                   <TableRow key={t.task_id}>
                     <TableCell className="max-w-xs truncate font-medium">{t.filename}</TableCell>
-                    <TableCell><EvalBadge tone="brand">{t.bu_name}</EvalBadge></TableCell>
                     <TableCell>
                       {t.mode
                         ? <EvalBadge tone={t.mode === 'calibration' ? 'info' : 'good'}>
@@ -131,7 +140,22 @@ export default function EvalHistory() {
                           </EvalBadge>
                         : <span className="text-muted-foreground text-xs">—</span>}
                     </TableCell>
-                    <TableCell><EvalBadge tone={st.tone}>{st.label}</EvalBadge></TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <EvalBadge tone={st.tone}>{st.label}</EvalBadge>
+                        {t.status === 'running' && (
+                          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                            <div className="h-1.5 flex-1 rounded-full bg-gray-200 overflow-hidden min-w-[40px]">
+                              <div className="h-full bg-blue-500 transition-all"
+                                   style={{ width: `${t.progress_pct || 0}%` }} />
+                            </div>
+                            <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                              {t.progress_pct ?? 0}%
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">{t.progress_total || 0}</TableCell>
                     <TableCell>
                       <span className="inline-flex items-center gap-1 text-sm">
@@ -152,7 +176,7 @@ export default function EvalHistory() {
                         </button>
                         <button
                           title="重新评测"
-                          onClick={() => handleRerun(t)}
+                          onClick={() => setRerunTarget(t)}
                           className="p-1.5 rounded hover:bg-accent"
                         >
                           <RotateCcw className="w-4 h-4" />
@@ -188,6 +212,16 @@ export default function EvalHistory() {
         description={`将删除「${delTarget?.filename || ''}」的评测任务及全部逐条结果，不可恢复。`}
         confirmLabel="删除"
         onConfirm={handleDelete}
+      />
+
+      <ConfirmDialog
+        open={!!rerunTarget}
+        onOpenChange={v => { if (!v) setRerunTarget(null) }}
+        title="重新评测"
+        description={`将清空「${rerunTarget?.filename || ''}」已有结果，用当前提示词与业务分类从头重跑。重测会调用大模型，数据量大时较耗时，确认继续？`}
+        confirmLabel="开始重测"
+        confirmVariant="default"
+        onConfirm={handleRerun}
       />
     </div>
   )
