@@ -18,15 +18,46 @@ from pathlib import Path
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
-def load_categories(code: str) -> dict[str, str]:
-    """从 prompts/<code>/categories.json 读业务分类,返回 {分类名: definition}。
+def load_categories_from_file(code: str) -> dict[str, str]:
+    """从 prompts/<code>/categories.json 读业务分类（出厂默认），返回 {分类名: definition}。
 
-    业务分类是喂给模型的上下文,统一放 prompts 目录,内网调整分类只改 JSON。
-    JSON 结构:{"categories": {"分类名": {"definition": "..."}}}。
+    JSON 结构:{"categories": {"分类名": {"definition": "..."}}}。库为空时回退用它。
     """
     path = _PROMPTS_DIR / code / "categories.json"
+    if not path.exists():
+        return {}
     data = json.loads(path.read_text(encoding="utf-8"))
     return {name: c["definition"] for name, c in data["categories"].items()}
+
+
+# 业务分类缓存：以库为准、文件兜底；增删改时 bump_categories_version 失效。
+# 评测时 get_bu 每次按当前分类动态构造 BUConfig，故改了不重启即生效。
+_cat_cache: dict[str, dict[str, str]] = {}
+
+
+def bump_categories_version() -> None:
+    """业务分类增删改后调用，使缓存失效（下次评测/读取即拿到最新）。"""
+    _cat_cache.clear()
+
+
+def load_categories(code: str) -> dict[str, str]:
+    """读某 BU 的业务分类：库优先、文件兜底。返回 {分类名: definition}（有序）。
+
+    DB 不可用（如测试环境、import 期）时静默回退文件，保证离线可跑。
+    """
+    if code in _cat_cache:
+        return _cat_cache[code]
+    cats: dict[str, str] = {}
+    try:
+        from datapulse.modules.eval import eval_db
+        rows = eval_db.category_list(code)   # 已按 sort_order 排序
+        cats = {r["name"]: r["definition"] for r in rows}
+    except Exception:
+        cats = {}
+    if not cats:
+        cats = load_categories_from_file(code)
+    _cat_cache[code] = cats
+    return cats
 
 
 @dataclass(frozen=True)

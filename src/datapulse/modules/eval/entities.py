@@ -90,3 +90,27 @@ class EvalPrompt(EvalBase):
     __table_args__ = (
         UniqueConstraint("bu", "name", name="uk_t_eval_prompt_bu_name"),
     )
+
+
+class EvalCategory(EvalBase):
+    """t_eval_category — AI 评测业务分类（每个 BU 一套，支持页面增删改）
+
+    一条分类由 (bu, name) 唯一标识。评测时按当前 BU 取全部分类喂给模型判定。
+    库中无记录时加载层回退读 prompts/<bu>/categories.json（出厂默认）。
+    """
+
+    __tablename__ = "t_eval_category"
+
+    id          = Column(BigInteger, primary_key=True, autoincrement=True)
+    bu          = Column(String(64), nullable=False)    # 所属 BU code（securities / life）
+    name        = Column(String(128), nullable=False)   # 业务分类名
+    definition  = Column(Text, nullable=False, default="")   # 分类定义（喂给模型判定）
+    sort_order  = Column(Integer, nullable=False, default=0)
+    created_at  = Column(_TS, nullable=False)
+    created_by  = Column(String(100), nullable=False, default="")
+    updated_at  = Column(_TS, nullable=False)
+    updated_by  = Column(String(100), nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("bu", "name", name="uk_t_eval_category_bu_name"),
+    )

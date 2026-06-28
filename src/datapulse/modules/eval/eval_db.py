@@ -47,6 +47,25 @@ def init_eval_schema() -> None:
     """建 eval 自己的表（CREATE TABLE IF NOT EXISTS）。应用启动时调一次。"""
     from datapulse.repository.base import get_db
     EvalBase.metadata.create_all(get_db().engine)
+    _seed_categories_from_file()
+
+
+def _seed_categories_from_file() -> None:
+    """首次启动把各 BU 的文件出厂分类导入库（仅当该 BU 库中为空）。
+
+    让业务分类管理页一打开就有可编辑数据；已有数据的 BU 不动（用户改过的为准）。
+    """
+    from datapulse.modules.eval.bu.base import load_categories_from_file
+    from datapulse.modules.eval.bu.registry import bu_codes
+
+    for code in bu_codes():
+        if category_count(code) > 0:
+            continue
+        file_cats = load_categories_from_file(code)
+        if not file_cats:
+            continue
+        category_bulk_seed(code, [{"name": k, "definition": v} for k, v in file_cats.items()],
+                           created_by="system")
 
 
 # ── 任务 / 逐条结果 ───────────────────────────────────────────────────────────
@@ -158,3 +177,43 @@ def prompt_upsert(bu: str, name: str, content: str,
 def prompt_delete(bu: str, name: str) -> bool:
     with eval_session() as s:
         return _prompt_repo(s).delete(bu, name)
+
+
+# ── 业务分类 ──────────────────────────────────────────────────────────────────
+
+def _cat_repo(s: Session):
+    from datapulse.modules.eval.repository import EvalCategoryRepository
+    return EvalCategoryRepository(s)
+
+
+def category_list(bu: str) -> list[dict]:
+    with eval_session() as s:
+        return _cat_repo(s).list_by_bu(bu)
+
+
+def category_count(bu: str) -> int:
+    with eval_session() as s:
+        return _cat_repo(s).count_by_bu(bu)
+
+
+def category_create(bu: str, name: str, definition: str,
+                    sort_order: int = 0, created_by: str = "system") -> dict:
+    with eval_session() as s:
+        return _cat_repo(s).create(bu, name, definition, sort_order=sort_order, created_by=created_by)
+
+
+def category_update(cat_id: int, name: str | None = None, definition: str | None = None,
+                    sort_order: int | None = None, updated_by: str = "system") -> dict | None:
+    with eval_session() as s:
+        return _cat_repo(s).update(cat_id, name=name, definition=definition,
+                                   sort_order=sort_order, updated_by=updated_by)
+
+
+def category_delete(cat_id: int) -> bool:
+    with eval_session() as s:
+        return _cat_repo(s).delete(cat_id)
+
+
+def category_bulk_seed(bu: str, items: list[dict], created_by: str = "system") -> None:
+    with eval_session() as s:
+        _cat_repo(s).bulk_seed(bu, items, created_by=created_by)

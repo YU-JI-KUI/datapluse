@@ -90,8 +90,11 @@ async def list_tasks(
     user: CurrentUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
+    bu: str = Query("", description="按业务单元过滤；空则返回全部"),
 ):
     tasks = eval_engine.list_tasks()
+    if bu:
+        tasks = [t for t in tasks if t.get("bu") == bu]
     total = len(tasks)
     start = (page - 1) * page_size
     return success(page_data(tasks[start:start + page_size], page, page_size, total))
@@ -256,3 +259,43 @@ async def reset_prompt(bu: str, name: str, user: CurrentUser):
     """重置为文件出厂默认（删除库中自定义）。"""
     eval_engine.reset_prompt(bu, name)
     return success(eval_engine.get_prompt(bu, name))
+
+
+# ── 业务分类管理（按 BU，页面增删改，改后不重启即生效）────────────────────────
+
+class CategoryBody(BaseModel):
+    name: str
+    definition: str = ""
+
+
+@router.get("/categories")
+async def list_categories(user: CurrentUser, bu: str = "securities"):
+    """列出某 BU 的全部业务分类。"""
+    return success({"bu": bu, "categories": eval_engine.list_categories(bu)})
+
+
+@router.post("/categories")
+async def create_category(user: CurrentUser, body: CategoryBody, bu: str = "securities"):
+    """新增一个业务分类。"""
+    if not body.name.strip():
+        raise ParamError("分类名不能为空")
+    return success(eval_engine.create_category(bu, body.name.strip(), body.definition, operator=user.username))
+
+
+@router.put("/categories/{cat_id}")
+async def update_category(cat_id: int, body: CategoryBody, user: CurrentUser):
+    """更新业务分类名/定义。"""
+    if not body.name.strip():
+        raise ParamError("分类名不能为空")
+    rec = eval_engine.update_category(cat_id, body.name.strip(), body.definition, operator=user.username)
+    if not rec:
+        raise NotFoundError("分类不存在")
+    return success(rec)
+
+
+@router.delete("/categories/{cat_id}")
+async def delete_category(cat_id: int, user: CurrentUser):
+    """删除业务分类。"""
+    if not eval_engine.delete_category(cat_id):
+        raise NotFoundError("分类不存在")
+    return success({"deleted": True})

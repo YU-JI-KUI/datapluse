@@ -11,7 +11,11 @@ import json
 
 import pytest
 
-from datapulse.modules.eval.bu.securities import SECURITIES as SEC
+from datapulse.modules.eval.bu.registry import get_bu
+
+# 业务分类已动态注入（库优先、文件兜底）；用 get_bu 取到带 intents 的实例。
+# 无 DB 时 load_categories 回退读 categories.json，测试仍能拿到分类清单。
+SEC = get_bu("securities")
 from datapulse.modules.eval.judge import OUTPUT_SCHEMA, build_messages, parse_judge_output
 from datapulse.modules.eval.llm.judge_runner import judge_one
 from datapulse.modules.eval.metrics import binary_report

@@ -1,11 +1,19 @@
-"""BU 注册表:按 code 取 BUConfig。新增 BU 在这里登记即可。"""
+"""BU 注册表:按 code 取 BUConfig。
+
+BU 本体（code/name/描述/mock 规则/样例）仍是代码常量；业务分类（intents）改为
+按当前库/文件动态注入——get_bu 每次用 load_categories 取最新分类，replace 进
+BUConfig，故页面增删改分类后不重启即生效。
+"""
 from __future__ import annotations
 
-from datapulse.modules.eval.bu.base import BUConfig
+from dataclasses import replace
+
+from datapulse.modules.eval.bu.base import BUConfig, load_categories
 from datapulse.modules.eval.bu.life_insurance import LIFE
 from datapulse.modules.eval.bu.securities import SECURITIES
 
-_REGISTRY: dict[str, BUConfig] = {
+# 模板（不含 intents，intents 在 get_bu 动态注入）
+_TEMPLATES: dict[str, BUConfig] = {
     SECURITIES.code: SECURITIES,
     LIFE.code: LIFE,
 }
@@ -13,14 +21,22 @@ _REGISTRY: dict[str, BUConfig] = {
 DEFAULT_BU = SECURITIES.code
 
 
+def bu_codes() -> list[str]:
+    return list(_TEMPLATES.keys())
+
+
 def get_bu(code: str | None) -> BUConfig:
-    """按 code 取 BU 配置;未知或空则回默认(证券)。"""
-    return _REGISTRY.get(code or DEFAULT_BU, _REGISTRY[DEFAULT_BU])
+    """按 code 取 BU 配置（intents 注入当前库/文件中的分类）;未知或空回默认。"""
+    tpl = _TEMPLATES.get(code or DEFAULT_BU, _TEMPLATES[DEFAULT_BU])
+    return replace(tpl, intents=load_categories(tpl.code))
 
 
 def list_bus() -> list[dict]:
-    """列出所有可选 BU,供前端选择器。"""
-    return [
-        {"code": c.code, "name": c.name, "description": c.description, "intent_count": len(c.intents)}
-        for c in _REGISTRY.values()
-    ]
+    """列出所有可选 BU,供前端选择器（intent_count 按当前分类数）。"""
+    out = []
+    for tpl in _TEMPLATES.values():
+        out.append({
+            "code": tpl.code, "name": tpl.name,
+            "description": tpl.description, "intent_count": len(load_categories(tpl.code)),
+        })
+    return out

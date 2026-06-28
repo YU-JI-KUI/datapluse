@@ -432,3 +432,34 @@ def reset_prompt(bu: str, name: str) -> bool:
     if deleted:
         prompt_loader.bump_version()
     return deleted
+
+
+# ── 业务分类管理 ──────────────────────────────────────────────────────────────
+
+def _bump_categories():
+    from datapulse.modules.eval.bu.base import bump_categories_version
+    bump_categories_version()
+
+
+def list_categories(bu: str) -> list[dict]:
+    return eval_db.category_list(bu)
+
+
+def create_category(bu: str, name: str, definition: str, operator: str = "system") -> dict:
+    rec = eval_db.category_create(bu, name, definition, created_by=operator)
+    _bump_categories()
+    return rec
+
+
+def update_category(cat_id: int, name: str | None, definition: str | None,
+                    operator: str = "system") -> dict | None:
+    rec = eval_db.category_update(cat_id, name=name, definition=definition, updated_by=operator)
+    _bump_categories()
+    return rec
+
+
+def delete_category(cat_id: int) -> bool:
+    deleted = eval_db.category_delete(cat_id)
+    if deleted:
+        _bump_categories()
+    return deleted

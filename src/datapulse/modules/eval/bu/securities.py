@@ -6,9 +6,11 @@
 """
 from __future__ import annotations
 
-from datapulse.modules.eval.bu.base import BUConfig, load_categories
+from datapulse.modules.eval.bu.base import BUConfig
 
-_INTENTS = load_categories("securities")
+# intents 不在 import 期固化（那样改了分类要重启）：留空，由 registry.get_bu()
+# 每次按当前库/文件中的分类动态注入，确保增删改后不重启即生效。
+_INTENTS: dict = {}
 
 # Mock 规则桩:关键词→业务分类(顺序敏感,先具体后宽泛)。
 # 注:"拒识"非业务分类,是 mock 判「不该证券承接」的内部信号(驱动 should_dispatch_to_bu=False)。

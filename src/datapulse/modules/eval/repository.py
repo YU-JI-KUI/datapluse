@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from datapulse.modules.eval.entities import EvalPrompt, EvalTask, EvalTaskRow
+from datapulse.modules.eval.entities import EvalCategory, EvalPrompt, EvalTask, EvalTaskRow
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -251,3 +251,78 @@ class EvalPromptRepository:
             EvalPrompt.bu == bu, EvalPrompt.name == name
         ).delete()
         return bool(n)
+
+
+def _category_to_dict(c: EvalCategory) -> dict[str, Any]:
+    return {
+        "id": c.id, "bu": c.bu, "name": c.name,
+        "definition": c.definition, "sort_order": c.sort_order,
+        "updated_at": _iso(c.updated_at), "updated_by": c.updated_by,
+    }
+
+
+class EvalCategoryRepository:
+    """业务分类持久化层。(bu, name) 唯一；库中某 BU 无记录时由加载层回退读文件。"""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def list_by_bu(self, bu: str) -> list[dict]:
+        rows = self.session.execute(
+            select(EvalCategory).where(EvalCategory.bu == bu)
+            .order_by(EvalCategory.sort_order, EvalCategory.id)
+        ).scalars().all()
+        return [_category_to_dict(c) for c in rows]
+
+    def count_by_bu(self, bu: str) -> int:
+        from sqlalchemy import func
+        return int(self.session.execute(
+            select(func.count()).select_from(EvalCategory).where(EvalCategory.bu == bu)
+        ).scalar() or 0)
+
+    def get(self, cat_id: int) -> dict | None:
+        c = self.session.get(EvalCategory, cat_id)
+        return _category_to_dict(c) if c else None
+
+    def create(self, bu: str, name: str, definition: str,
+               sort_order: int = 0, created_by: str = "system") -> dict:
+        ts = _now()
+        c = EvalCategory(
+            bu=bu, name=name, definition=definition, sort_order=sort_order,
+            created_at=ts, created_by=created_by, updated_at=ts, updated_by=created_by,
+        )
+        self.session.add(c)
+        self.session.flush()
+        return _category_to_dict(c)
+
+    def update(self, cat_id: int, name: str | None = None, definition: str | None = None,
+               sort_order: int | None = None, updated_by: str = "system") -> dict | None:
+        c = self.session.get(EvalCategory, cat_id)
+        if not c:
+            return None
+        if name is not None:
+            c.name = name
+        if definition is not None:
+            c.definition = definition
+        if sort_order is not None:
+            c.sort_order = sort_order
+        c.updated_at = _now()
+        c.updated_by = updated_by
+        self.session.flush()
+        return _category_to_dict(c)
+
+    def delete(self, cat_id: int) -> bool:
+        n = self.session.query(EvalCategory).filter(EvalCategory.id == cat_id).delete()
+        return bool(n)
+
+    def bulk_seed(self, bu: str, items: list[dict], created_by: str = "system") -> None:
+        """把文件出厂分类一次性写入库（仅当该 BU 库中为空时调，用于首次落库）。"""
+        if not items:
+            return
+        ts = _now()
+        self.session.bulk_insert_mappings(EvalCategory, [
+            {"bu": bu, "name": it["name"], "definition": it["definition"],
+             "sort_order": i, "created_at": ts, "created_by": created_by,
+             "updated_at": ts, "updated_by": created_by}
+            for i, it in enumerate(items)
+        ])

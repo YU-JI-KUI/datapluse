@@ -5,9 +5,10 @@
 """
 from __future__ import annotations
 
-from datapulse.modules.eval.bu.base import BUConfig, load_categories
+from datapulse.modules.eval.bu.base import BUConfig
 
-_INTENTS = load_categories("life")
+# intents 不在 import 期固化，由 registry.get_bu() 按当前库/文件动态注入（见 securities.py 说明）。
+_INTENTS: dict = {}
 
 # Mock 规则桩:关键词→意图(顺序敏感,先具体后宽泛)
 _MOCK_RULES = [

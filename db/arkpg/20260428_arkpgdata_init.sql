@@ -652,6 +652,33 @@ COMMENT ON COLUMN t_eval_prompt.updated_by  IS '更新人';
 CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_prompt_bu_name ON t_eval_prompt(bu, name);
 DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_prompt'; END $$;
 
+-- 22. t_eval_category -- AI eval business categories per BU (DB-backed, editable)
+DO $$ BEGIN RAISE NOTICE '[DDL] 22/22 t_eval_category ...'; END $$;
+CREATE TABLE IF NOT EXISTS t_eval_category (
+    id          BIGSERIAL    NOT NULL,
+    bu          VARCHAR(64)  NOT NULL,
+    name        VARCHAR(128) NOT NULL,
+    definition  TEXT         NOT NULL DEFAULT '',
+    sort_order  INTEGER      NOT NULL DEFAULT 0,
+    created_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by  VARCHAR(100) NOT NULL DEFAULT '',
+    updated_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_by  VARCHAR(100) NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_eval_category PRIMARY KEY (id)
+);
+COMMENT ON TABLE  t_eval_category            IS 'AI对话评测业务分类表（每个BU一套，支持页面增删改，改后不重启即生效）';
+COMMENT ON COLUMN t_eval_category.id         IS '主键ID';
+COMMENT ON COLUMN t_eval_category.bu         IS '所属业务单元：securities=证券 / life=寿险';
+COMMENT ON COLUMN t_eval_category.name       IS '业务分类名';
+COMMENT ON COLUMN t_eval_category.definition IS '分类定义（含正例反例，喂给大模型判定）';
+COMMENT ON COLUMN t_eval_category.sort_order IS '排序序号（小在前）';
+COMMENT ON COLUMN t_eval_category.created_at IS '创建时间';
+COMMENT ON COLUMN t_eval_category.created_by IS '创建人';
+COMMENT ON COLUMN t_eval_category.updated_at IS '更新时间';
+COMMENT ON COLUMN t_eval_category.updated_by IS '更新人';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_category_bu_name ON t_eval_category(bu, name);
+DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_category'; END $$;
+
 DO $$ BEGIN RAISE NOTICE '======================================================================='; END $$;
 DO $$ BEGIN RAISE NOTICE '[DONE] 20260428_arkpgdata_init.sql done'; END $$;
 DO $$ BEGIN RAISE NOTICE '======================================================================='; END $$;
