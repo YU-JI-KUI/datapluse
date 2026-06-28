@@ -155,6 +155,23 @@ async def resume_task(task_id: str, user: CurrentUser, background_tasks: Backgro
     return success(eval_engine.get_task(task_id))
 
 
+@router.post("/tasks/{task_id}/rerun")
+async def rerun_task(task_id: str, user: CurrentUser, background_tasks: BackgroundTasks):
+    """重新评测：清空已落盘结果，用当前提示词从头重跑。"""
+    if not eval_engine.rerun_task(task_id):
+        raise NotFoundError("任务不存在")
+    background_tasks.add_task(eval_engine.run_eval_sync, task_id, False, user.username)
+    return success(eval_engine.get_task(task_id))
+
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(task_id: str, user: CurrentUser):
+    """删除评测任务（连逐条结果一起硬删）。"""
+    if not eval_engine.delete_task(task_id):
+        raise NotFoundError("任务不存在")
+    return success({"deleted": True})
+
+
 @router.get("/tasks/{task_id}/export")
 async def export_disagreements(task_id: str, user: CurrentUser):
     path = eval_engine.export_disagreements(task_id)

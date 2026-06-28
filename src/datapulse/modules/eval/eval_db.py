@@ -77,6 +77,16 @@ def list_tasks() -> list[dict]:
         return _repo(s).list_tasks()
 
 
+def delete_task(task_id: str) -> bool:
+    with eval_session() as s:
+        return _repo(s).delete_task(task_id)
+
+
+def clear_rows(task_id: str) -> None:
+    with eval_session() as s:
+        _repo(s).clear_rows(task_id)
+
+
 def save_rows(task_id: str, rows: list[dict], created_by: str = "system") -> None:
     with eval_session() as s:
         _repo(s).save_rows(task_id, rows, created_by=created_by)

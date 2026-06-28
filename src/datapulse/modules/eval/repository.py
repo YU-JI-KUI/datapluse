@@ -87,6 +87,16 @@ class EvalRepository:
         ).scalars().all()
         return [_task_to_dict(t) for t in rows]
 
+    def delete_task(self, task_id: str) -> bool:
+        """硬删任务主记录 + 逐条结果。返回是否删到了主记录。"""
+        self.session.query(EvalTaskRow).filter(EvalTaskRow.task_id == task_id).delete()
+        n = self.session.query(EvalTask).filter(EvalTask.task_id == task_id).delete()
+        return bool(n)
+
+    def clear_rows(self, task_id: str) -> None:
+        """清空某任务的逐条结果（重测前调，让评测从头跑）。"""
+        self.session.query(EvalTaskRow).filter(EvalTaskRow.task_id == task_id).delete()
+
     # ── 逐条结果 ──────────────────────────────────────────────────────────────
 
     def save_rows(self, task_id: str, rows: list[dict], created_by: str = "system") -> None:

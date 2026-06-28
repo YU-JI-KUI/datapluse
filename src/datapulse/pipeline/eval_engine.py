@@ -116,9 +116,13 @@ async def run_eval(task_id: str, resume: bool = False, operator: str = "eval") -
             t["file_path"], bu, on_progress=on_progress, task_id=task_id, persist=True,
         )
         eval_db.save_result(task_id, result, updated_by=operator)
+        # 进度在 advising 阶段最后上报的是 (1,1)，会把 progress_total 覆盖成 1；
+        # 完成时回填真实样本数，列表才能显示正确的样本量。
+        total_samples = result["summary"]["total_samples"]
         eval_db.update_task(
             task_id, updated_by=operator,
             status="done", stage="done", mode=result["mode"], finished_at=_now(),
+            progress_done=total_samples, progress_total=total_samples,
         )
         _log.info("eval.done", task_id=task_id, samples=result["summary"]["total_samples"])
     except Exception as e:
@@ -130,6 +134,27 @@ async def run_eval(task_id: str, resume: bool = False, operator: str = "eval") -
 def run_eval_sync(task_id: str, resume: bool = False, operator: str = "eval") -> None:
     """同步入口，供 FastAPI BackgroundTasks.add_task 使用（内部 asyncio.run）。"""
     asyncio.run(run_eval(task_id, resume=resume, operator=operator))
+
+
+def delete_task(task_id: str) -> bool:
+    """删除评测任务（连逐条结果一起硬删）。返回是否删到了记录。"""
+    return eval_db.delete_task(task_id)
+
+
+def rerun_task(task_id: str) -> bool:
+    """重测：清空已落盘结果并把任务重置为 pending，调用方再起后台跑。
+
+    返回任务是否存在。重跑用当前提示词（提示词可能已被改过）。
+    """
+    t = eval_db.get_task(task_id)
+    if not t:
+        return False
+    eval_db.clear_rows(task_id)
+    eval_db.update_task(
+        task_id, status="pending", stage="", mode="",
+        progress_done=0, progress_total=0, error=None,
+    )
+    return True
 
 
 # ── 导出 ──────────────────────────────────────────────────────────────────────
