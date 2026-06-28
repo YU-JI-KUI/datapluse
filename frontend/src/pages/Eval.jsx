@@ -3,8 +3,7 @@
  * 三态：upload（上传）/ running（评测中）/ result（结果）。
  */
 import { useEffect, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { toast } from 'sonner'
+import { Link } from 'react-router-dom'
 import {
   AlertTriangle, RotateCcw, ArrowLeft, History, Loader2,
 } from 'lucide-react'
@@ -28,7 +27,6 @@ export default function Eval() {
   const [error, setError]       = useState(null)
   const [resumable, setResumable] = useState(null)
   const [busy, setBusy]         = useState(false)
-  const [searchParams, setSearchParams] = useSearchParams()
   const pollRef = useRef(null)
 
   // 初始化：BU 列表 + 后端配置
@@ -41,13 +39,6 @@ export default function Eval() {
     evalApi.config().then(r => setBackend(RESP(r).active_backend || '')).catch(() => {})
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [])
-
-  // 从历史页跳转带 ?task=xxx 时，直接加载该任务的评测报告
-  useEffect(() => {
-    const tid = searchParams.get('task')
-    if (tid) loadTaskResult(tid)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
 
   function startPolling(taskId) {
     setView('running')
@@ -113,23 +104,9 @@ export default function Eval() {
     }
   }
 
-  async function loadTaskResult(taskId) {
-    setBusy(true)
-    try {
-      const t = RESP(await evalApi.getTask(taskId))
-      const r = RESP(await evalApi.getResult(taskId))
-      setTask(t); setResult(r); setView('result')
-    } catch (e) {
-      toast.error(e.response?.data?.message || '加载评测报告失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   function reset() {
     if (pollRef.current) clearInterval(pollRef.current)
     setTask(null); setResult(null); setError(null); setResumable(null); setView('upload')
-    if (searchParams.get('task')) setSearchParams({}, { replace: true })
   }
 
   return (

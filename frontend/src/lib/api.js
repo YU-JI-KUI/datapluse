@@ -428,6 +428,8 @@ export const evalApi = {
   getRows:   (taskId, page = 1, pageSize = 20, flag = 'all') =>
     api.get(`/eval/tasks/${taskId}/rows`, { params: { page, page_size: pageSize, flag } }),
   resume:    (taskId) => api.post(`/eval/tasks/${taskId}/resume`),
+  rerun:     (taskId) => api.post(`/eval/tasks/${taskId}/rerun`),
+  remove:    (taskId) => api.delete(`/eval/tasks/${taskId}`),
 
   // 三种导出（带 token 的 blob 下载）
   exportDisagreements: (taskId) =>
