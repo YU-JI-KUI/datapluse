@@ -66,6 +66,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # AI 评测子系统：用独立 EvalBase 建自己的表（主体 create_all 不含 eval 表）
     from datapulse.modules.eval.eval_db import init_eval_schema
     init_eval_schema()
+    # 启动评测后台 worker（独立线程串行跑评测，不占 web 请求线程池）
+    from datapulse.modules.eval.eval_worker import start_worker
+    start_worker()
 
     start_scheduler()   # 启动定时任务（每天 02:00 上海时间全量向量化）
     _log.info("datapulse ready")
