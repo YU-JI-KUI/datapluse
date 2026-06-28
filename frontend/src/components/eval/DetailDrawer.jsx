@@ -110,6 +110,12 @@ export default function DetailDrawer({ row, open, onClose }) {
             {j.dispatch_reason && (
               <div className="rounded-md bg-gray-50 px-3 py-2 text-xs">分发理由：{j.dispatch_reason}</div>
             )}
+            {j.resolved_reason && (
+              <div className="rounded-md bg-gray-50 px-3 py-2 text-xs">解决度依据：{j.resolved_reason}</div>
+            )}
+            {j.unresolved_cause && (
+              <div className="rounded-md bg-gray-50 px-3 py-2 text-xs">未解决原因：{j.unresolved_cause}</div>
+            )}
             {j.review_reason && (
               <div className="rounded-md bg-gray-50 px-3 py-2 text-xs">复核原因：{j.review_reason}</div>
             )}
