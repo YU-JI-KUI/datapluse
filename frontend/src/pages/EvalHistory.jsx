@@ -35,19 +35,20 @@ export default function EvalHistory() {
   const [delTarget, setDelTarget] = useState(null)   // 待删除的任务
   const [rerunTarget, setRerunTarget] = useState(null)   // 待重测的任务
 
-  function load() {
-    setLoading(true)
+  // silent=true：轮询静默刷新，不显示「加载中」遮罩，只更新数据（状态列随之变化）
+  function load(silent = false) {
+    if (!silent) setLoading(true)
     evalApi.listTasks(page, pageSize)
       .then(res => {
         const d = RESP(res)
         setList(d.list || [])
         setTotal(d.pagination?.total || 0)
       })
-      .catch(e => toast.error(e.response?.data?.message || '加载历史评测失败'))
-      .finally(() => setLoading(false))
+      .catch(e => { if (!silent) toast.error(e.response?.data?.message || '加载历史评测失败') })
+      .finally(() => { if (!silent) setLoading(false) })
   }
 
-  useEffect(load, [page, pageSize])
+  useEffect(() => { load() }, [page, pageSize])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // 全局 BU 切换时刷新（列表已按当前 BU 过滤）
   useEffect(() => {
@@ -57,10 +58,10 @@ export default function EvalHistory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 有评测中的任务时轮询刷新，让进度百分比实时更新
+  // 有评测中的任务时每 10 秒静默刷新（不重载整表，只更新状态/进度）
   useEffect(() => {
     if (!list.some(t => t.status === 'running')) return
-    const timer = setInterval(load, 2000)
+    const timer = setInterval(() => load(true), 10000)
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list])
