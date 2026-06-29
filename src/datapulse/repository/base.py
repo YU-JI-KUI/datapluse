@@ -170,6 +170,7 @@ class DBManager:
             db_url,
             connect_args=_ca,
             pool_pre_ping=True,   # 连接前 ping，自动剔除失效连接（故障切换后连接池自愈）
+            pool_recycle=1800,    # 连接存活超 30min 主动回收，避免用到被内网中间层悄悄超时切断的连接
             pool_size=5,
             max_overflow=10,
             echo=False,

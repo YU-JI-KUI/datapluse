@@ -96,6 +96,11 @@ def list_tasks() -> list[dict]:
         return _repo(s).list_tasks()
 
 
+def find_unfinished() -> list[dict]:
+    with eval_session() as s:
+        return _repo(s).find_unfinished()
+
+
 def delete_task(task_id: str) -> bool:
     with eval_session() as s:
         return _repo(s).delete_task(task_id)
@@ -106,9 +111,29 @@ def clear_rows(task_id: str) -> None:
         _repo(s).clear_rows(task_id)
 
 
+# 单次 insert 的子批大小：row_json 含答案原文/多轮上下文，单条可能数 KB~数十 KB。
+# 内网 PG 中间层对单次大数据传输有连接超时，过大的 insert 会被切断
+# （server closed the connection unexpectedly）。切小子批，每批独立短事务。
+_SAVE_SUB_BATCH = 50
+_SAVE_RETRIES = 3
+
+
 def save_rows(task_id: str, rows: list[dict], created_by: str = "system") -> None:
-    with eval_session() as s:
-        _repo(s).save_rows(task_id, rows, created_by=created_by)
+    """逐条结果落盘。切成小子批、每批独立事务并自动重试，抗内网连接被切断。"""
+    import time as _time
+
+    for start in range(0, len(rows), _SAVE_SUB_BATCH):
+        sub = rows[start:start + _SAVE_SUB_BATCH]
+        for attempt in range(_SAVE_RETRIES):
+            try:
+                with eval_session() as s:          # 每批独立连接（pre_ping 探活）+ 独立事务
+                    _repo(s).save_rows(task_id, sub, created_by=created_by)
+                break
+            except Exception:
+                if attempt < _SAVE_RETRIES - 1:
+                    _time.sleep(0.5 * (2 ** attempt))   # 退避后重连重试（下次 with 取新连接）
+                    continue
+                raise   # 重试耗尽，向上抛（评测引擎会 resume，已落盘子批不重做）
 
 
 def done_row_indices(task_id: str) -> set[int]:

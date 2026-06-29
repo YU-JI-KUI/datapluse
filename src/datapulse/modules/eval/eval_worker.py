@@ -56,6 +56,18 @@ def submit(task_id: str, resume: bool = False, operator: str = "eval") -> None:
     _log.info("eval.worker.submitted", task_id=task_id, qsize=_queue.qsize())
 
 
+def schedule_resume(task_id: str, delay: float, operator: str = "eval") -> None:
+    """延迟 delay 秒后把任务重新入队续跑（限流暂停后自动恢复用）。"""
+    def _fire():
+        _log.info("eval.worker.resume_fired", task_id=task_id)
+        submit(task_id, resume=True, operator=operator)
+
+    timer = threading.Timer(delay, _fire)
+    timer.daemon = True
+    timer.start()
+    _log.info("eval.worker.resume_scheduled", task_id=task_id, delay=delay)
+
+
 def pending_count() -> int:
     """队列中等待执行的任务数（不含正在跑的）。"""
     return _queue.qsize()

@@ -69,6 +69,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 启动评测后台 worker（独立线程串行跑评测，不占 web 请求线程池）
     from datapulse.modules.eval.eval_worker import start_worker
     start_worker()
+    # 自动恢复进程重启前未完成的评测任务（断点续跑，跳过已落盘行）
+    from datapulse.pipeline.eval_engine import recover_tasks
+    recover_tasks()
 
     start_scheduler()   # 启动定时任务（每天 02:00 上海时间全量向量化）
     _log.info("datapulse ready")

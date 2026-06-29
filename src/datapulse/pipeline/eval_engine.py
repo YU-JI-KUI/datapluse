@@ -23,9 +23,13 @@ from datapulse.config.settings import get_settings
 from datapulse.modules.eval import eval_db
 from datapulse.modules.eval.bu.registry import get_bu
 from datapulse.modules.eval.evaluator import run_evaluation
+from datapulse.modules.eval.llm.judge_runner import RateLimitedError
 
 _log = structlog.get_logger(__name__)
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+# 限流暂停后，延迟多久自动重新入队续跑（秒）
+_RATE_LIMIT_RESUME_DELAY = 120
 
 
 def _now() -> datetime:
@@ -93,10 +97,21 @@ def list_review_rows(task_id: str) -> list[dict]:
     return eval_db.load_review_rows(task_id)
 
 
+_RESUMABLE_STATUS = {"failed", "paused", "interrupted"}
+
+
 def can_resume(task_id: str) -> bool:
-    """failed 且已有部分落盘 → 可续跑。"""
+    """未到 done 的中断态（failed/paused/interrupted）→ 可续跑。
+
+    paused/interrupted 即使还没落盘行也允许续跑（从头跑）；failed 沿用原口径
+    （需有已落盘行才有续跑意义）。
+    """
     t = eval_db.get_task(task_id)
-    return bool(t and t["status"] == "failed" and eval_db.done_row_indices(task_id))
+    if not t or t["status"] not in _RESUMABLE_STATUS:
+        return False
+    if t["status"] == "failed":
+        return bool(eval_db.done_row_indices(task_id))
+    return True
 
 
 async def run_eval(task_id: str, resume: bool = False, operator: str = "eval") -> None:
@@ -125,6 +140,13 @@ async def run_eval(task_id: str, resume: bool = False, operator: str = "eval") -
             progress_done=total_samples, progress_total=total_samples,
         )
         _log.info("eval.done", task_id=task_id, samples=result["summary"]["total_samples"])
+    except RateLimitedError as e:
+        # 大模型限流：暂停任务（已落盘行不丢），延迟后自动重新入队续跑，不跑成全垃圾
+        _log.warning("eval.paused.rate_limited", task_id=task_id, err=str(e))
+        eval_db.update_task(task_id, updated_by=operator,
+                            status="paused", stage="paused", error=f"大模型限流，已暂停自动重试：{e}")
+        from datapulse.modules.eval import eval_worker
+        eval_worker.schedule_resume(task_id, delay=_RATE_LIMIT_RESUME_DELAY, operator=operator)
     except Exception as e:
         _log.exception("eval.failed", task_id=task_id)
         eval_db.update_task(task_id, updated_by=operator,
@@ -134,6 +156,27 @@ async def run_eval(task_id: str, resume: bool = False, operator: str = "eval") -
 def run_eval_sync(task_id: str, resume: bool = False, operator: str = "eval") -> None:
     """同步入口，供 FastAPI BackgroundTasks.add_task 使用（内部 asyncio.run）。"""
     asyncio.run(run_eval(task_id, resume=resume, operator=operator))
+
+
+def recover_tasks() -> int:
+    """启动时自动恢复未完成任务：把 running/paused/interrupted/pending 重新入队续跑。
+
+    进程重启时，原来在跑的任务（running）和内存队列里没跑的（pending）都会遗留为
+    「未完成」。这里统一转 interrupted 标记后重新入队（resume=True，跳过已落盘行），
+    实现「进程崩溃/重启后任务自动接着跑」。返回恢复的任务数。
+    """
+    from datapulse.modules.eval import eval_worker
+
+    tasks = eval_db.find_unfinished()
+    for t in tasks:
+        tid, op = t["task_id"], t.get("created_by") or "system"
+        eval_db.update_task(tid, status="interrupted", stage="",
+                            error="进程重启，已自动恢复续跑")
+        eval_worker.submit(tid, resume=True, operator=op)
+        _log.info("eval.recovered", task_id=tid, prev_status=t["status"])
+    if tasks:
+        _log.info("eval.recover.done", count=len(tasks))
+    return len(tasks)
 
 
 def delete_task(task_id: str) -> bool:

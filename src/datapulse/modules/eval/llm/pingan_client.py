@@ -46,7 +46,7 @@ async def call_bigmodel_api(
     app_key: str,
     app_secret: str,
     timeout: int = 30,
-    max_retries: int = 3,
+    max_retries: int = 5,
     **kwargs,
 ) -> dict[Any, Any] | None:
     """调用平安大模型服务接口。
@@ -88,34 +88,50 @@ async def call_bigmodel_api(
     }
     logger.info("调用大模型 request_id=%s scene_id=%s", request_id, scene_id)
 
+    # 可重试的 HTTP 状态：429 限流 + 5xx 网关/服务端暂时性故障
+    retryable_status = {429, 500, 502, 503, 504}
+
+    async def _backoff(attempt: int, retry_after: float | None) -> None:
+        # 限流优先用服务端 Retry-After，否则指数退避（带上限，避免等太久）。
+        # 必须 asyncio.sleep，time.sleep 会卡住整个 event loop。
+        delay = retry_after if retry_after else min(2 ** attempt, 30)
+        await asyncio.sleep(delay)
+
     for attempt in range(max_retries):
+        last_err = ""
+        rate_limited = False
         try:
-            try:
-                response = await _get_client().post(
-                    url=settings.open_ai_url,
-                    headers=headers,
-                    json=payload,
-                    timeout=timeout,
-                )
-                response.raise_for_status()
+            response = await _get_client().post(
+                url=settings.open_ai_url, headers=headers, json=payload, timeout=timeout,
+            )
+            if response.status_code == 200:
                 return response.json()
-            except httpx.RequestError:
-                # 网络层错误抛给外层做指数退避
-                raise
-            except Exception as e:  # 非网络错误(如 4xx/5xx)
-                logger.error("大模型调用失败: %s", e)
+            # 限流 / 暂时性故障 → 退避重试
+            if response.status_code in retryable_status:
+                rate_limited = response.status_code == 429
+                ra = response.headers.get("Retry-After")
+                retry_after = float(ra) if ra and ra.replace(".", "").isdigit() else None
+                last_err = f"HTTP {response.status_code}"
+                logger.warning("大模型可重试错误 %s (attempt %d/%d, 限流=%s)",
+                               last_err, attempt + 1, max_retries, rate_limited)
                 if attempt < max_retries - 1:
+                    await _backoff(attempt, retry_after)
                     continue
-                return {"error": str(e)}
+                return {"error": f"{last_err}，已重试 {max_retries} 次", "rate_limited": rate_limited}
+            # 其它 4xx：不可重试，直接失败（鉴权/参数错误，重试也没用）
+            response.raise_for_status()
+            return response.json()
         except httpx.RequestError as e:
-            logger.warning("第 %d 次请求失败: %s", attempt + 1, e)
+            # 网络层错误（连接失败/超时）→ 退避重试
+            last_err = str(e)
+            logger.warning("大模型网络错误 (attempt %d/%d): %s", attempt + 1, max_retries, e)
             if attempt < max_retries - 1:
-                # 必须 asyncio.sleep,time.sleep 会卡住整个 event loop
-                await asyncio.sleep(1 * (2 ** attempt))
-            else:
-                # 返回带 error 的 dict 而非 None,保留「网络失败」信息,
-                # 便于上层与「JSON 解析失败」区分排查
-                return {"error": f"网络失败,已重试 {max_retries} 次: {e}"}
+                await _backoff(attempt, None)
+                continue
+            return {"error": f"网络失败，已重试 {max_retries} 次: {e}"}
+        except Exception as e:  # noqa: BLE001  解析/不可重试错误
+            logger.error("大模型调用失败（不可重试）: %s", e)
+            return {"error": str(e)}
     return {"error": "未知失败"}
 
 

@@ -28,6 +28,10 @@ def active_backend() -> str:
     return "mock"
 
 
+class RateLimitedError(Exception):
+    """大模型限流/重试耗尽。上层据此暂停整个评测、退避后再继续，而不是跑成全垃圾。"""
+
+
 async def _judge_strong(sample: dict, bu: BUConfig) -> dict:
     """调强模型(平安大模型)做精判。"""
     messages = build_messages(sample, bu)
@@ -40,8 +44,10 @@ async def _judge_strong(sample: dict, bu: BUConfig) -> dict:
         max_retries=settings.llm_max_retries,
         response_format={"type": "json_object"},
     )
+    # 重试后仍被限流 → 抛限流信号，让上层暂停评测（区别于「单条脏格式」）
+    if isinstance(resp, dict) and resp.get("rate_limited"):
+        raise RateLimitedError(resp.get("error", "rate limited"))
     content = extract_content(resp)
-    # 打印模型解析前的最原始返回,便于排查脏格式/截断(开 DEBUG 级别可见)
     logger.debug("模型原始返回 row=%s: %s", sample.get("row_index"), content)
     return parse_judge_output(content)
 
@@ -49,13 +55,14 @@ async def _judge_strong(sample: dict, bu: BUConfig) -> dict:
 async def judge_one(sample: dict, bu: BUConfig) -> dict:
     """对单条样本跑 Judge,返回结构化结果。失败时返回带 _error 的结果。
 
-    不分层:pingan 后端每条都走真实大模型精判(要的是准确性,不为省 token 妥协);
-    mock 后端走规则桩,仅用于本地无模型时端到端跑通。
+    限流异常向上抛（整批暂停）；其它单条失败补 _error，不中断整批。
     """
     try:
         if active_backend() == "pingan":
             return await _judge_strong(sample, bu)
         return mock_judge(sample, bu)
+    except RateLimitedError:
+        raise   # 限流信号必须上抛，由评测引擎暂停处理
     except Exception as e:  # 单条失败不应中断整批
         logger.error("judge 单条失败 row=%s: %s", sample.get("row_index"), e)
         return {"_error": str(e), "needs_human_review": True}
@@ -84,6 +91,9 @@ async def judge_batch(samples: list[dict], bu: BUConfig, on_progress=None) -> li
         *(worker(i, s) for i, s in enumerate(samples)),
         return_exceptions=True,
     )
+    # 本批出现限流 → 整批上抛，让评测引擎暂停（已完成的批已落盘，不重做）
+    if any(isinstance(o, RateLimitedError) for o in outcomes):
+        raise RateLimitedError("本批触发大模型限流")
     for idx, o in enumerate(outcomes):
         if isinstance(o, Exception) and results[idx] is None:
             results[idx] = {"_error": str(o), "needs_human_review": True}

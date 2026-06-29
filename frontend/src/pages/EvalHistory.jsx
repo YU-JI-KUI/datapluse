@@ -14,15 +14,17 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
 import { EvalBadge } from '@/components/eval/EvalPrimitives'
 import { evalApi } from '@/lib/api'
-import { formatDate } from '@/lib/utils'
+import { formatDate, cn } from '@/lib/utils'
 
 const RESP = (r) => r?.data?.data ?? {}
 
 const STATUS = {
-  pending: { label: '待执行', tone: 'slate' },
-  running: { label: '评测中', tone: 'info' },
-  done:    { label: '已完成', tone: 'good' },
-  failed:  { label: '失败',   tone: 'bad' },
+  pending:     { label: '待执行',   tone: 'slate' },
+  running:     { label: '评测中',   tone: 'info' },
+  paused:      { label: '限流暂停', tone: 'warn' },
+  interrupted: { label: '恢复中',   tone: 'warn' },
+  done:        { label: '已完成',   tone: 'good' },
+  failed:      { label: '失败',     tone: 'bad' },
 }
 
 export default function EvalHistory() {
@@ -58,9 +60,10 @@ export default function EvalHistory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 有评测中的任务时每 10 秒静默刷新（不重载整表，只更新状态/进度）
+  // 有进行中/暂停/恢复中的任务时每 10 秒静默刷新（这些状态会自动流转）
   useEffect(() => {
-    if (!list.some(t => t.status === 'running')) return
+    const active = new Set(['running', 'paused', 'interrupted'])
+    if (!list.some(t => active.has(t.status))) return
     const timer = setInterval(() => load(true), 10000)
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -144,10 +147,10 @@ export default function EvalHistory() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <EvalBadge tone={st.tone}>{st.label}</EvalBadge>
-                        {t.status === 'running' && (
+                        {['running', 'paused', 'interrupted'].includes(t.status) && (
                           <div className="flex items-center gap-1.5 flex-1 min-w-0">
                             <div className="h-1.5 flex-1 rounded-full bg-gray-200 overflow-hidden min-w-[40px]">
-                              <div className="h-full bg-blue-500 transition-all"
+                              <div className={cn('h-full transition-all', t.status === 'paused' ? 'bg-amber-500' : 'bg-blue-500')}
                                    style={{ width: `${t.progress_pct || 0}%` }} />
                             </div>
                             <span className="text-xs text-muted-foreground tabular-nums shrink-0">

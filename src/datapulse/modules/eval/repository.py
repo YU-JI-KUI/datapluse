@@ -87,6 +87,15 @@ class EvalRepository:
         ).scalars().all()
         return [_task_to_dict(t) for t in rows]
 
+    def find_unfinished(self) -> list[dict]:
+        """找未到终态(done/failed)的任务，供启动时自动恢复。返回 [{task_id, status, created_by}]。"""
+        rows = self.session.execute(
+            select(EvalTask.task_id, EvalTask.status, EvalTask.created_by)
+            .where(EvalTask.status.in_(("running", "paused", "interrupted", "pending")))
+            .order_by(EvalTask.created_at)
+        ).all()
+        return [{"task_id": tid, "status": st, "created_by": cb} for tid, st, cb in rows]
+
     def delete_task(self, task_id: str) -> bool:
         """硬删任务主记录 + 逐条结果。返回是否删到了主记录。"""
         self.session.query(EvalTaskRow).filter(EvalTaskRow.task_id == task_id).delete()
