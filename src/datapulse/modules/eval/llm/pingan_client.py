@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -87,6 +88,10 @@ async def call_bigmodel_api(
         **kwargs,
     }
     logger.info("调用大模型 request_id=%s scene_id=%s", request_id, scene_id)
+    # 调用前打完整 request payload（仅 DEBUG）。isEnabledFor 守卫避免非 DEBUG 时白做 json 序列化
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("大模型请求 payload request_id=%s: %s",
+                     request_id, json.dumps(payload, ensure_ascii=False))
 
     # 可重试的 HTTP 状态：429 限流 + 5xx 网关/服务端暂时性故障
     retryable_status = {429, 500, 502, 503, 504}
