@@ -1,27 +1,15 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ fb987b2c
+# 基于 origin/main @ 0b04e661
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   fb987b2c 评测改独立后台 worker，不再拖垮整站
-#   872f1410 提示词动态数据用 XML 标签隔离
-#   e5bc2c93 修复模型布尔字段一致性判断错误
-#   b658314c 新增答案净化器，喂模型前按规则预处理答案
-#   f4f90ac3 历史页轮询改 10 秒并静默刷新，不重载整表
-#   8ca8ac35 评测明细表重构 + 提示词按 BU 全槽位
-src/datapulse/main.py
-src/datapulse/modules/eval/eval_worker.py
-src/datapulse/router/eval.py
-src/datapulse/modules/eval/judge.py
-tests/eval/test_bool_normalize.py
-src/datapulse/modules/eval/answer_sanitizer.py
-src/datapulse/modules/eval/pipeline.py
-tests/eval/test_answer_sanitizer.py
+#   0b04e661 评测稳定可靠：限流退避暂停、崩溃自动续跑、落盘抗断连
 frontend/src/pages/EvalHistory.jsx
-frontend/src/components/eval/EvalResult.jsx
-frontend/src/components/eval/RowsTable.jsx
-frontend/src/lib/api.js
-frontend/src/pages/EvalPrompts.jsx
+src/datapulse/main.py
 src/datapulse/modules/eval/eval_db.py
-src/datapulse/modules/eval/evaluator.py
+src/datapulse/modules/eval/eval_worker.py
+src/datapulse/modules/eval/llm/judge_runner.py
+src/datapulse/modules/eval/llm/pingan_client.py
 src/datapulse/modules/eval/repository.py
 src/datapulse/pipeline/eval_engine.py
+src/datapulse/repository/base.py
+tests/eval/test_reliability.py
