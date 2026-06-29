@@ -1,15 +1,21 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 0b04e661
+# 基于 origin/main @ 1e0cd306
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   0b04e661 评测稳定可靠：限流退避暂停、崩溃自动续跑、落盘抗断连
-frontend/src/pages/EvalHistory.jsx
-src/datapulse/main.py
-src/datapulse/modules/eval/eval_db.py
-src/datapulse/modules/eval/eval_worker.py
-src/datapulse/modules/eval/llm/judge_runner.py
-src/datapulse/modules/eval/llm/pingan_client.py
-src/datapulse/modules/eval/repository.py
+#   1e0cd306 1 bool 归一化补全(T/F) 2 展示净化 3 多路径净化器
+#   f9feef41 模型超参与提示词调优（Qwen3.5 122B）
+src/datapulse/modules/eval/answer_sanitizer.py
+src/datapulse/modules/eval/judge.py
+src/datapulse/modules/eval/prompts/_default/task_dispatch.md
+src/datapulse/modules/eval/prompts/judge_user.md
+src/datapulse/modules/eval/prompts/securities/categories.json
 src/datapulse/pipeline/eval_engine.py
-src/datapulse/repository/base.py
-tests/eval/test_reliability.py
+tests/eval/test_answer_sanitizer.py
+tests/eval/test_bool_normalize.py
+src/datapulse/config/settings.py
+src/datapulse/modules/eval/llm/judge_runner.py
+src/datapulse/modules/eval/prompts/_default/judge_system.md
+src/datapulse/modules/eval/prompts/_default/task_business_type.md
+src/datapulse/modules/eval/prompts/_default/task_resolved.md
+src/datapulse/modules/eval/prompts/life/judge_system.md
+src/datapulse/modules/eval/prompts/securities/judge_system.md
