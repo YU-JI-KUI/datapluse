@@ -79,13 +79,35 @@ def list_tasks() -> list[dict]:
     return [_public(t) for t in eval_db.list_tasks()]
 
 
+def _display_sanitize(rows: list[dict], bu: str) -> list[dict]:
+    """展示前对每条 answer_text 兜底净化（用与喂模型相同的规则，幂等）。
+
+    新任务落盘时 answer_text 已净化、再跑无变化；老任务（净化器上线前评的）落的是
+    原文，这里把它净化成模型口径，详情页就不再展示整坨 JSON。原地改 row。
+    """
+    from datapulse.modules.eval.answer_sanitizer import sanitize_answer
+    for r in rows:
+        if isinstance(r, dict) and isinstance(r.get("answer_text"), str):
+            r["answer_text"] = sanitize_answer(r["answer_text"], bu)
+    return rows
+
+
+def _task_bu(task_id: str) -> str:
+    t = eval_db.get_task(task_id)
+    return (t or {}).get("bu") or ""
+
+
 def get_result(task_id: str) -> dict | None:
-    return eval_db.load_result(task_id)
+    result = eval_db.load_result(task_id)
+    if result and result.get("disagreements"):
+        _display_sanitize(result["disagreements"], _task_bu(task_id))
+    return result
 
 
 def list_rows(task_id: str, page: int, page_size: int, q: str = "", intent: str = "") -> list[dict]:
     """分页读逐条评测明细（前端结果页表格用），支持关键字/业务分类过滤。"""
-    return eval_db.load_rows_filtered(task_id, page, page_size, q=q, intent=intent)
+    rows = eval_db.load_rows_filtered(task_id, page, page_size, q=q, intent=intent)
+    return _display_sanitize(rows, _task_bu(task_id))
 
 
 def count_rows(task_id: str, q: str = "", intent: str = "") -> int:
@@ -94,7 +116,8 @@ def count_rows(task_id: str, q: str = "", intent: str = "") -> int:
 
 def list_review_rows(task_id: str) -> list[dict]:
     """需复核子集（有限上限），供前端「需复核」过滤。"""
-    return eval_db.load_review_rows(task_id)
+    rows = eval_db.load_review_rows(task_id)
+    return _display_sanitize(rows, _task_bu(task_id))
 
 
 _RESUMABLE_STATUS = {"failed", "paused", "interrupted"}

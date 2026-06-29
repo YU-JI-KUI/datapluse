@@ -4,7 +4,30 @@
 而 Python bool("false")==True，导致分发/复核判定全反。parse_judge_output 须把
 布尔字段统一归一成真 bool。
 """
+import json
+
+import pytest
+
 from datapulse.modules.eval.judge import parse_judge_output
+
+
+# 覆盖所有可能写法：true/false、True/False、T/F、Y/N、yes/no、1/0、是/否、对/错
+@pytest.mark.parametrize("raw_true", [
+    "true", "True", "TRUE", "T", "t", "yes", "Yes", "YES", "y", "Y",
+    "是", "对", "1", 1, True, "√",
+])
+def test_all_truthy_forms(raw_true):
+    out = parse_judge_output(json.dumps({"should_dispatch_to_bu": raw_true}))
+    assert out["should_dispatch_to_bu"] is True
+
+
+@pytest.mark.parametrize("raw_false", [
+    "false", "False", "FALSE", "F", "f", "no", "No", "NO", "n", "N",
+    "否", "错", "0", 0, False, "", "×",
+])
+def test_all_falsy_forms(raw_false):
+    out = parse_judge_output(json.dumps({"should_dispatch_to_bu": raw_false}))
+    assert out["should_dispatch_to_bu"] is False
 
 
 def test_string_false_becomes_bool_false():

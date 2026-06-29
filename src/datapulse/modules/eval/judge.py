@@ -12,10 +12,13 @@ judge_fn 解耦。
 from __future__ import annotations
 
 import json
+import logging
 
 from datapulse.modules.eval.answer_sanitizer import sanitize_answer
 from datapulse.modules.eval.bu.base import BUConfig
 from datapulse.modules.eval.prompt_loader import load_bu_prompt, load_prompt
+
+logger = logging.getLogger(__name__)
 
 # 上下文管理：只保留最近 N 轮历史，历史 AI 答截断到 M 字符（防长会话稀释关键信息）
 _MAX_CONTEXT_TURNS = 3
@@ -110,21 +113,31 @@ def build_messages(sample: dict, bu: BUConfig) -> list[dict]:
 # 而 Python bool("false") == True，会让分发/复核判定全反——必须统一归一成真 bool。
 _BOOL_FIELDS = ("should_dispatch_to_bu", "answer_relevant", "answer_complete", "needs_human_review")
 
-_TRUE_TOKENS = {"true", "1", "yes", "y", "是", "对"}
-_FALSE_TOKENS = {"false", "0", "no", "n", "否", "错", ""}
+# 模型布尔字段的各种写法 → 统一归一。覆盖：true/false、True/False、T/F、Y/N、
+# yes/no、1/0、是/否、对/错（大小写不敏感）。
+_TRUE_TOKENS = {"true", "t", "1", "yes", "y", "是", "对", "√", "✓"}
+_FALSE_TOKENS = {"false", "f", "0", "no", "n", "否", "错", "×", "✗", ""}
 
 
 def _to_bool(v) -> bool:
-    """把模型返回的布尔字段（可能是 bool / "true" / "false" / "是"…）归一成 bool。
+    """把模型返回的布尔字段（bool / "true" / "T" / "是" / 1 …）归一成真 bool。
 
-    无法识别的值默认 False（保守：不轻易判「该承接 / 需复核」）。
+    识别不了的值（如 typo "ture"）记一条警告并保守判 False——评测要的是确定性，
+    宁可保守也不让脏值悄悄通过；警告日志便于发现模型输出异常。
     """
     if isinstance(v, bool):
         return v
     if isinstance(v, (int, float)):
         return v != 0
     if isinstance(v, str):
-        return v.strip().lower() in _TRUE_TOKENS
+        s = v.strip().lower()
+        if s in _TRUE_TOKENS:
+            return True
+        if s in _FALSE_TOKENS:
+            return False
+        logger.warning("布尔字段无法识别的取值，保守判 False: %r", v)
+        return False
+    logger.warning("布尔字段非预期类型，保守判 False: %r", v)
     return False
 
 
