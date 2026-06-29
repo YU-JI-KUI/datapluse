@@ -109,8 +109,8 @@ class Settings(BaseSettings):
     llm_app_key:       str = ""
     llm_app_secret:    str = ""
     llm_scene_id:      str = ""
-    llm_timeout:       int = 30
-    llm_max_retries:   int = 3
+    llm_timeout:       int = 60   # 复杂多轮+长答案在 122B 上可能 20s+，放宽避免本可成功却超时
+    llm_max_retries:   int = 5    # 限流/网络抖动多试几次，配合指数退避
 
     # ── 计算属性 ──────────────────────────────────────────────────────────────────
 

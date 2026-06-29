@@ -13,8 +13,13 @@ from __future__ import annotations
 
 import json
 
+from datapulse.modules.eval.answer_sanitizer import sanitize_answer
 from datapulse.modules.eval.bu.base import BUConfig
 from datapulse.modules.eval.prompt_loader import load_bu_prompt, load_prompt
+
+# 上下文管理：只保留最近 N 轮历史，历史 AI 答截断到 M 字符（防长会话稀释关键信息）
+_MAX_CONTEXT_TURNS = 3
+_MAX_CTX_AI_LEN = 500
 
 # 各评测维度的判定规则文件,按此顺序拼进【任务】块。调某维度只改对应文件。
 _TASK_PROMPTS = (
@@ -27,18 +32,21 @@ _TASK_PROMPTS = (
 # Judge 必须输出的字段及其含义(也作为 prompt 里给模型的输出契约)。
 # 新口径:BU 分发漏斗。分发对错由代码算(should_dispatch_to_bu vs 日志分发BU),
 # 不要模型直接给 dispatch_correct。
+# 字段顺序 = 模型生成顺序：每个结论字段前先写「依据」，让模型「先想后判」。
+# 我们关了 thinking（省 token），靠这个 inline 依据补偿推理空间，显著降低草率误判。
+# 严禁打乱顺序：reason 必须在对应结论之前。
 OUTPUT_SCHEMA = {
-    "should_dispatch_to_bu": "true/false:该问题该不该由本BU承接(该承接true,该拒识false);只看当前问题+上下文,不看下一轮",
-    "dispatch_reason": "一句话依据:为什么该/不该本BU承接",
-    "business_type": "业务类型标签(从意图清单选一个;不该本BU承接的填'非本BU')",
-    "business_type_reason": "为什么打这个业务类型标签",
-    "answer_relevant": "true/false",
-    "answer_complete": "true/false",
-    "answer_resolved": "yes/partial/no/unknown:仅当该问题被分到本BU时判,否则填unknown",
-    "resolved_reason": "依据:基于相关性/完整性/下游轨迹(用户下一轮),不靠业务对错",
+    "dispatch_reason": "先写依据:为什么该/不该本BU承接(只看当前问题+上下文,不看下一轮)",
+    "should_dispatch_to_bu": "据上面依据给结论 true/false:该承接true,该拒识false",
+    "business_type_reason": "先写依据:为什么打这个业务类型标签",
+    "business_type": "据上面依据给结论:从意图清单选一个;不该本BU承接的填'非本BU'",
+    "answer_relevant": "true/false:答案是否答到了用户的问题",
+    "answer_complete": "true/false:答案是否给全了所需信息",
+    "resolved_reason": "先写依据:基于相关性/完整性/下游轨迹(用户下一轮),不靠业务对错",
+    "answer_resolved": "据上面依据给结论 yes/partial/no/unknown:仅当被分到本BU时判,否则unknown",
     "unresolved_cause": "没解决时的原因归类(答非所问/信息不全/事实存疑/分发错误),解决了填空串",
-    "needs_human_review": "true/false",
-    "review_reason": "原因或空串",
+    "review_reason": "先写依据:为什么需要/不需要人工复核;不需要填空串",
+    "needs_human_review": "据上面依据给结论 true/false",
 }
 
 
@@ -49,13 +57,19 @@ def build_messages(sample: dict, bu: BUConfig) -> list[dict]:
     bu 提供意图清单与评测专家身份(证券/寿险不同)。
     """
     intents = bu.intents_block()
-    # 上下文按轮次展开;context 是 [{turn, user, ai}, ...],含 AI 上一轮回答,
-    # 以便判断「第二个的走势」这类指代上一轮答案的多轮问题。
+    # 上下文:只保留最近 _MAX_CONTEXT_TURNS 轮(更早的对判当前问题帮助小，反而稀释
+    # 关键信息、撑长 prompt)。历史 AI 答也过净化器并截断(历史只需大意，不需全文)。
+    full_ctx = sample.get("context", [])
+    recent = full_ctx[-_MAX_CONTEXT_TURNS:]
     ctx_lines = []
-    for c in sample.get("context", []):
+    if len(full_ctx) > len(recent):
+        ctx_lines.append(f"    (省略更早 {len(full_ctx) - len(recent)} 轮，只保留最近 {len(recent)} 轮)")
+    for c in recent:
         ctx_lines.append(f"    第{c['turn']}轮 用户:{c['user']}")
-        ai = (c.get("ai") or "").strip()
+        ai = sanitize_answer((c.get("ai") or "").strip(), bu.code)
         if ai:
+            if len(ai) > _MAX_CTX_AI_LEN:
+                ai = ai[:_MAX_CTX_AI_LEN] + "…(历史答案已截断)"
             ctx_lines.append(f"         AI答:{ai}")
     ctx = "\n".join(ctx_lines) or "    (无前文,这是首轮)"
     # 各评测维度的判定规则按 BU 拆分(<bu_code>/ 优先,_default/ 回退),

@@ -43,6 +43,9 @@ async def _judge_strong(sample: dict, bu: BUConfig) -> dict:
         timeout=settings.llm_timeout,
         max_retries=settings.llm_max_retries,
         response_format={"type": "json_object"},
+        # 输出固定为 11 字段 JSON，几百 token 足够；设上限防偶发话痨撑爆响应/变慢，
+        # 又留足空间不截断 JSON（截断会导致解析失败）
+        max_tokens=2048,
     )
     # 重试后仍被限流 → 抛限流信号，让上层暂停评测（区别于「单条脏格式」）
     if isinstance(resp, dict) and resp.get("rate_limited"):
