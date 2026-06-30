@@ -40,9 +40,17 @@ class RateLimitedError(Exception):
         self.partial = partial or []
 
 
-async def _judge_strong(sample: dict, bu: BUConfig) -> dict:
-    """调强模型(平安大模型)做精判。"""
-    messages = build_messages(sample, bu)
+# 输出是 11 字段 JSON，每个结论前还带一句依据，复杂 case 偏长；3072 留足空间不被
+# 截断（截断会导致 JSON 不闭合、解析失败）。
+_JUDGE_MAX_TOKENS = 3072
+# 解析失败时的升温重试：temp=0 是确定性的，重试只会得到同样的坏输出，必须升温打破。
+# 换 seed 进一步增加多样性。约 1% 偶发坏 JSON 经此一次重试绝大多数能救回。
+_RETRY_TEMPERATURE = 0.3
+_RETRY_SEED = 1234
+
+
+async def _call_judge(messages: list, temperature: float, seed: int) -> str:
+    """调一次模型并取出文本内容。限流向上抛，其余异常交给调用方。"""
     resp = await call_bigmodel_api(
         query=messages,
         scene_id=settings.llm_scene_id,
@@ -51,16 +59,35 @@ async def _judge_strong(sample: dict, bu: BUConfig) -> dict:
         timeout=settings.llm_timeout,
         max_retries=settings.llm_max_retries,
         response_format={"type": "json_object"},
-        # 输出固定为 11 字段 JSON，几百 token 足够；设上限防偶发话痨撑爆响应/变慢，
-        # 又留足空间不截断 JSON（截断会导致解析失败）
-        max_tokens=2048,
+        max_tokens=_JUDGE_MAX_TOKENS,
+        temperature=temperature,
+        seed=seed,
     )
-    # 重试后仍被限流 → 抛限流信号，让上层暂停评测（区别于「单条脏格式」）
     if isinstance(resp, dict) and resp.get("rate_limited"):
+        # 重试后仍被限流 → 抛限流信号，让上层暂停评测（区别于「单条脏格式」）
         raise RateLimitedError(resp.get("error", "rate limited"))
-    content = extract_content(resp)
-    logger.debug("模型原始返回 row=%s: %s", sample.get("row_index"), content)
-    return parse_judge_output(content)
+    return extract_content(resp)
+
+
+async def _judge_strong(sample: dict, bu: BUConfig) -> dict:
+    """调强模型(平安大模型)做精判。
+
+    首跑 temp=0(确定性、可复现);若模型偶发吐出非法 JSON(约 1%),升温换 seed
+    重试一次再解析。限流不在这里重试(由 call_bigmodel_api 内部退避 + 上层暂停)。
+    """
+    messages = build_messages(sample, bu)
+    row = sample.get("row_index")
+
+    content = await _call_judge(messages, temperature=0.0, seed=42)
+    logger.debug("模型原始返回 row=%s: %s", row, content)
+    try:
+        return parse_judge_output(content)
+    except ValueError as e:
+        # 坏 JSON：升温重试一次。temp=0 重试无意义,必须升温打破确定性死循环。
+        logger.warning("judge 输出非法 JSON,升温重试 row=%s: %s", row, e)
+        content = await _call_judge(messages, temperature=_RETRY_TEMPERATURE, seed=_RETRY_SEED)
+        logger.debug("模型重试返回 row=%s: %s", row, content)
+        return parse_judge_output(content)   # 仍失败则抛 ValueError,由 judge_one 转 _error
 
 
 async def judge_one(sample: dict, bu: BUConfig) -> dict:

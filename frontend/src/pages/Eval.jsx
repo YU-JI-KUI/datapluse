@@ -17,6 +17,11 @@ import EvalResult from '@/components/eval/EvalResult'
 
 const RESP = (r) => r?.data?.data ?? {}   // datapulse 统一响应：res.data.data
 
+// 进度轮询间隔。后端每 50 条一批上报进度，按并发 10 × 单条约 2 秒算，一批约 10 秒
+// 才推进一次——轮询比这更快只会反复查到同一个进度值，白给 t_eval_task 加查询压力
+// （5万条任务跑几小时 × 多用户同时看进度，压力线性叠加）。10 秒刚好匹配进度变化节奏。
+const _POLL_INTERVAL_MS = 10000
+
 export default function Eval() {
   const [backend, setBackend]   = useState('')
   const [view, setView]         = useState('upload')   // upload | running | result
@@ -56,7 +61,7 @@ export default function Eval() {
         setError(e.response?.data?.message || '轮询任务状态失败')
         setView('upload')
       }
-    }, 1000)
+    }, _POLL_INTERVAL_MS)
   }
 
   async function handleUpload(file) {

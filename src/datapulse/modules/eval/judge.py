@@ -140,15 +140,33 @@ def parse_judge_output(text: str) -> dict:
     解析后把布尔字段统一归一成真 bool，避免下游 bool("false")==True 的判定错误。
     """
     fence = chr(96) * 3  # 三个反引号
-    t = text.strip().replace(fence + "json", "").replace(fence, "")
+    t = text.strip().replace(fence + "json", "").replace(fence, "").strip()
+    out = None
     try:
-        out = json.loads(t.strip())
-    except json.JSONDecodeError as e:
+        out = json.loads(t)
+    except json.JSONDecodeError:
+        out = _salvage_json_object(t)   # 容错:剥前后缀文字 / 修尾逗号再解析
+    if not isinstance(out, dict):
         # 给出可定位的错误,而非裸 JSONDecodeError;上层据此判断是「模型输出
         # 不符格式」而非「评测逻辑出错」,对应内网验收第 ④ 步。
-        raise ValueError(f"模型输出不是有效 JSON(前120字): {t[:120]!r}") from e
-    if isinstance(out, dict):
-        for f in _BOOL_FIELDS:
-            if f in out:
-                out[f] = _to_bool(out[f])
+        raise ValueError(f"模型输出不是有效 JSON(前120字): {t[:120]!r}")
+    for f in _BOOL_FIELDS:
+        if f in out:
+            out[f] = _to_bool(out[f])
     return out
+
+
+def _salvage_json_object(t: str) -> dict | None:
+    """模型在 JSON 前后掺了解释文字 / 留了尾逗号时的兜底救捞:截取首个 { 到末个 }
+    的对象体,去掉对象/数组前的尾逗号(", }" / ", ]")再解析一次。救不回返回 None。"""
+    import re
+    start, end = t.find("{"), t.rfind("}")
+    if not (0 <= start < end):
+        return None
+    body = t[start : end + 1]
+    body = re.sub(r",\s*([}\]])", r"\1", body)   # 去尾逗号(Qwen 常见)
+    try:
+        obj = json.loads(body)
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        return None

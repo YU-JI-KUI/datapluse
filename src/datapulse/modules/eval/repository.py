@@ -408,13 +408,18 @@ class EvalCategoryRepository:
         return bool(n)
 
     def bulk_seed(self, bu: str, items: list[dict], created_by: str = "system") -> None:
-        """把文件出厂分类一次性写入库（仅当该 BU 库中为空时调，用于首次落库）。"""
+        """把文件出厂分类写入库（库中该 BU 为空时首次落库）。
+
+        ON CONFLICT DO NOTHING 保证幂等:多 POD 同时启动可能都看到「库为空」而并发
+        seed,靠 (bu, name) 唯一约束 + 忽略冲突,避免第二个 POD 撞唯一约束报错、启动失败。
+        """
         if not items:
             return
         ts = _now()
-        self.session.bulk_insert_mappings(EvalCategory, [
+        stmt = pg_insert(EvalCategory).values([
             {"bu": bu, "name": it["name"], "definition": it["definition"],
              "sort_order": i, "created_at": ts, "created_by": created_by,
              "updated_at": ts, "updated_by": created_by}
             for i, it in enumerate(items)
-        ])
+        ]).on_conflict_do_nothing(index_elements=["bu", "name"])
+        self.session.execute(stmt)

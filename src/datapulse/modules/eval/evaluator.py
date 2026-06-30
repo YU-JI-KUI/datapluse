@@ -289,7 +289,11 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
     if on_progress:
         on_progress("judging", done_count, total)
 
-    batch_size = 200
+    # 批大小 = 并发窗口 + 落盘/进度上报粒度。整批跑完才落盘,所以它也是「崩溃后最多
+    # 重跑多少条」的上界:50 条一批,挂了最多重做 49 条(原 200 会白跑近 200 条)。
+    # 50 > judge_concurrency(并发 10)能喂满并发,不损吞吐;LLM 调用是瓶颈,多几次
+    # 落盘(5万条约 1000 次)代价远小于省下的重复 LLM 调用。
+    batch_size = 50
     for start in range(0, len(pending), batch_size):
         batch = pending[start:start + batch_size]
         try:
