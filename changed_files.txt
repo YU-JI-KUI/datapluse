@@ -1,7 +1,6 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ bbb03a52
+# 基于 origin/main @ 2a1aeec1
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   bbb03a52 修复落盘 Infinity/NaN 导致 insert 失败
-src/datapulse/modules/eval/repository.py
-tests/eval/test_clean_json.py
+#   2a1aeec1 调 LLM 前打 DEBUG 日志记录完整 request payload
+src/datapulse/modules/eval/llm/pingan_client.py
