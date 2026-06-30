@@ -1,24 +1,20 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 122766fe
+# 基于 origin/main @ ebf294f2
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   122766fe 评测新增活动标问过滤：写死按钮问题整条跳过
+#   ebf294f2 评测明细新增人工复核：覆盖AI判定并按最终值重算指标
 db/arkpg/20260428_arkpgdata_init.sql
-db/arkpg/20260630_arkpgdata_add_eval_activity.sql
+db/arkpg/20260701_arkpgdata_add_eval_review.sql
 deploy_desc/SUPER-AGENT1.0.0.json
-frontend/src/App.jsx
-frontend/src/components/Layout.jsx
+frontend/src/components/eval/DetailDrawer.jsx
 frontend/src/components/eval/EvalResult.jsx
+frontend/src/components/eval/RowsTable.jsx
 frontend/src/lib/api.js
-frontend/src/pages/EvalActivity.jsx
-src/datapulse/modules/eval/bu/base.py
-src/datapulse/modules/eval/bu/registry.py
 src/datapulse/modules/eval/entities.py
 src/datapulse/modules/eval/eval_db.py
 src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/pipeline.py
+src/datapulse/modules/eval/prompts/_default/task_review.md
 src/datapulse/modules/eval/repository.py
 src/datapulse/pipeline/eval_engine.py
 src/datapulse/router/eval.py
-tests/eval/test_activity.py
-tests/eval/test_pipeline.py
+tests/eval/test_review.py
