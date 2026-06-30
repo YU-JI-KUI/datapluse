@@ -1,8 +1,13 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 499a31ff
+# 基于 origin/main @ 5e8ba29b
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   2d9bd3ad 修复重启后旧 running 任务不再续跑
-#   499a31ff 修复网关返回半截 JSON 被当不可重试直接放弃
-src/datapulse/modules/eval/repository.py
-src/datapulse/modules/eval/llm/pingan_client.py
+#   5e8ba29b 评测列规范收口：移除冗余金标 + 分发BU必需 + 公式说明
+frontend/src/components/eval/EvalResult.jsx
+frontend/src/components/eval/EvalUploader.jsx
+src/datapulse/modules/eval/evaluator.py
+src/datapulse/modules/eval/metrics.py
+src/datapulse/modules/eval/pipeline.py
+tests/eval/test_modes_and_insights.py
+tests/eval/test_pipeline.py
+tests/eval/test_stream_aggregator.py
