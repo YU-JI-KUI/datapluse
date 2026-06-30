@@ -152,15 +152,21 @@ class EvalRepository:
 
     def reclaim_stale(self, stale_before: datetime) -> int:
         """回收僵尸任务:running 但心跳早于 stale_before(持有它的 POD 已死)→ 退回
-        pending,等待重新抢占续跑。返回回收条数。"""
+        pending,等待重新抢占续跑。返回回收条数。
+
+        heartbeat_at IS NULL 的 running 也算僵尸:要么是加心跳列之前的历史任务(进程
+        重启后会一直卡 running、谁都抢不到),要么是抢占后还没写第一次心跳就崩了——
+        两种都没有活着的 worker,必须回收。注意 SQL 里 NULL < x 结果是 NULL(非 true),
+        不显式 OR IS NULL 就会漏掉这些行(这正是「重启后旧任务不再续跑」的根因)。"""
+        from sqlalchemy import or_
         n = self.session.query(EvalTask).filter(
             EvalTask.status == "running",
-            EvalTask.heartbeat_at < stale_before,
+            or_(EvalTask.heartbeat_at.is_(None), EvalTask.heartbeat_at < stale_before),
         ).update({
             "status": "pending", "claimed_by": None,
             "stage": "", "updated_at": _now(),
             "error": "worker 心跳超时,已回收重跑",
-        })
+        }, synchronize_session=False)
         return n
 
     def requeue_idle(self) -> int:
