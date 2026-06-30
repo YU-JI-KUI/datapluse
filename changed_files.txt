@@ -1,6 +1,28 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 2a1aeec1
+# 基于 origin/main @ 5d3e6f4b
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   2a1aeec1 调 LLM 前打 DEBUG 日志记录完整 request payload
+#   9376f8d4 修复 AI 评测多任务稳定性与多 POD 一致性
+#   5d3e6f4b 评测可靠性微调：减小重跑代价 + 加固 JSON 解析
+db/arkpg/20260428_arkpgdata_init.sql
+db/arkpg/20260630_arkpgdata_eval_worker_claim.sql
+deploy_desc/SUPER-AGENT1.0.0.json
+src/datapulse/modules/eval/_store.py
+src/datapulse/modules/eval/advisor.py
+src/datapulse/modules/eval/answer_sanitizer.py
+src/datapulse/modules/eval/bu/base.py
+src/datapulse/modules/eval/entities.py
+src/datapulse/modules/eval/eval_db.py
+src/datapulse/modules/eval/eval_worker.py
+src/datapulse/modules/eval/evaluator.py
+src/datapulse/modules/eval/judge.py
+src/datapulse/modules/eval/llm/judge_runner.py
 src/datapulse/modules/eval/llm/pingan_client.py
+src/datapulse/modules/eval/pipeline.py
+src/datapulse/modules/eval/prompt_loader.py
+src/datapulse/modules/eval/repository.py
+src/datapulse/pipeline/eval_engine.py
+src/datapulse/router/eval.py
+tests/eval/test_reliability.py
+frontend/src/pages/Eval.jsx
+src/datapulse/modules/eval/prompts/judge_user.md
