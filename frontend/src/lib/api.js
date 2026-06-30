@@ -451,6 +451,12 @@ export const evalApi = {
   rerun:     (taskId) => api.post(`/eval/tasks/${taskId}/rerun`),
   remove:    (taskId) => api.delete(`/eval/tasks/${taskId}`),
 
+  // 人工复核：提交/撤销某条明细的复核覆盖（指标按最终值重算，重进结果页生效）
+  submitReview: (taskId, rowIndex, data) =>
+    api.put(`/eval/tasks/${taskId}/rows/${rowIndex}/review`, data),
+  deleteReview: (taskId, rowIndex) =>
+    api.delete(`/eval/tasks/${taskId}/rows/${rowIndex}/review`),
+
   // 三种导出（带 token 的 blob 下载）
   exportDisagreements: (taskId) =>
     _downloadWithToken(`/eval/tasks/${taskId}/export`, `不一致case_${taskId}.xlsx`),

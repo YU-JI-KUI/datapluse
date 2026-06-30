@@ -1,6 +1,11 @@
-/** 单行详情：会话上下文 / AI 回答 / Judge 判断 / 人工打标对比。用 Dialog 承载。 */
-import { MessageSquare, Bot, Scale, ShieldCheck } from 'lucide-react'
+/** 单行详情：会话上下文 / AI 回答 / Judge 判断 / 人工打标对比 / 人工复核。用 Dialog 承载。 */
+import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
+import { MessageSquare, Bot, Scale, ShieldCheck, UserCheck, Loader2, RotateCcw } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { evalApi } from '@/lib/api'
 import { EvalBadge, YesNo } from './EvalPrimitives'
 
 function Block({ icon: Icon, title, children }) {
@@ -50,10 +55,85 @@ function GoldCompare({ label, pred, gold }) {
   )
 }
 
-export default function DetailDrawer({ row, open, onClose }) {
+// 三态选择：维持 AI（''）/ 是 / 否
+function TriSelect({ label, aiValue, value, onChange }) {
+  const opts = [
+    { v: '', label: `维持AI（${aiValue || '—'}）` },
+    { v: '是', label: '是' },
+    { v: '否', label: '否' },
+  ]
+  return (
+    <div className="space-y-1.5">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="flex gap-1.5">
+        {opts.map(o => (
+          <button
+            key={o.v}
+            type="button"
+            onClick={() => onChange(o.v)}
+            className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${
+              value === o.v ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium' : 'border-border hover:bg-accent'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export default function DetailDrawer({ row, open, onClose, taskId, intentOptions = [], onReviewed }) {
+  const rv = row?.review || null
+  const [dispatch, setDispatch] = useState('')
+  const [resolved, setResolved] = useState('')
+  const [intent, setIntent]     = useState('')
+  const [comment, setComment]   = useState('')
+  const [saving, setSaving]     = useState(false)
+
+  // 切换到不同行时，用该行已有的复核值回填表单
+  useEffect(() => {
+    setDispatch(rv?.reviewed_dispatch || '')
+    setResolved(rv?.reviewed_resolved || '')
+    setIntent(rv?.reviewed_intent || '')
+    setComment(rv?.comment || '')
+  }, [row?.row_index, rv?.reviewed_dispatch, rv?.reviewed_resolved, rv?.reviewed_intent, rv?.comment])
+
   if (!row) return null
   const j = row.judge && typeof row.judge === 'object' ? row.judge : {}
   const gold = row.gold || {}
+  const canReview = !!taskId && row.row_index != null
+
+  async function handleSubmitReview() {
+    setSaving(true)
+    try {
+      await evalApi.submitReview(taskId, row.row_index, {
+        reviewed_dispatch: dispatch, reviewed_resolved: resolved,
+        reviewed_intent: intent, comment,
+      })
+      toast.success('复核已提交（结果页指标重进生效）')
+      onReviewed?.()
+      onClose()
+    } catch (e) {
+      toast.error(e.response?.data?.message || '复核提交失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRevokeReview() {
+    setSaving(true)
+    try {
+      await evalApi.deleteReview(taskId, row.row_index)
+      toast.success('已撤销复核（该条恢复 AI 判定）')
+      onReviewed?.()
+      onClose()
+    } catch (e) {
+      toast.error(e.response?.data?.message || '撤销失败')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
@@ -64,6 +144,8 @@ export default function DetailDrawer({ row, open, onClose }) {
             <EvalBadge tone="slate">第 {row.turn} 轮</EvalBadge>
             {row.j_intent && <EvalBadge tone="brand">{row.j_intent}</EvalBadge>}
             {row.is_disagreement && <EvalBadge tone="bad">与打标不一致</EvalBadge>}
+            {j.needs_human_review && <EvalBadge tone="warn">需复核</EvalBadge>}
+            {rv && <EvalBadge tone="good">已复核</EvalBadge>}
           </div>
           <DialogTitle className="text-left mt-1">{row.question}</DialogTitle>
         </DialogHeader>
@@ -134,6 +216,49 @@ export default function DetailDrawer({ row, open, onClose }) {
               {gold.qtype && (
                 <div className="text-xs text-muted-foreground">打标问题类型：{gold.qtype}</div>
               )}
+            </Block>
+          )}
+
+          {/* 人工复核：覆盖 AI 判定，指标按最终值重算（重进结果页生效）*/}
+          {canReview && (
+            <Block icon={UserCheck} title="人工复核">
+              <p className="text-xs text-muted-foreground">
+                复核结论将覆盖 AI 判定，并计入 BU 分发准确率 / 问题解决率（最终值口径）。
+                「维持AI」表示该维度不改、沿用 AI 结论。
+              </p>
+              <div className="grid sm:grid-cols-2 gap-3 rounded-md border p-3">
+                <TriSelect label="分发是否正确" aiValue={row.j_dispatch} value={dispatch} onChange={setDispatch} />
+                <TriSelect label="答案是否解决" aiValue={row.j_resolved} value={resolved} onChange={setResolved} />
+                <div className="space-y-1.5 sm:col-span-2">
+                  <div className="text-[11px] text-muted-foreground">业务分类（可选，留空=维持 AI「{row.j_intent || '—'}」）</div>
+                  <Input value={intent} onChange={e => setIntent(e.target.value)}
+                    placeholder="如需修正业务分类，填入正确分类名" list="eval-intent-options" />
+                  <datalist id="eval-intent-options">
+                    {intentOptions.map(o => <option key={o} value={o} />)}
+                  </datalist>
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <div className="text-[11px] text-muted-foreground">复核评论（可选）</div>
+                  <textarea value={comment} onChange={e => setComment(e.target.value)} rows={2}
+                    placeholder="记录复核判断的依据或备注…"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring" />
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted-foreground">
+                  {rv ? `已由 ${rv.reviewer || '—'} 复核` : '尚未复核'}
+                </div>
+                <div className="flex gap-2">
+                  {rv && (
+                    <Button variant="secondary" size="sm" onClick={handleRevokeReview} disabled={saving}>
+                      <RotateCcw className="w-4 h-4 mr-1.5" />撤销复核
+                    </Button>
+                  )}
+                  <Button size="sm" onClick={handleSubmitReview} disabled={saving}>
+                    {saving && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}提交复核
+                  </Button>
+                </div>
+              </div>
             </Block>
           )}
         </div>

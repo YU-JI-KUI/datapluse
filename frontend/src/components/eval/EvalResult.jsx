@@ -71,8 +71,8 @@ export default function EvalResult({ taskId, result }) {
               hint={'Judge 的判定与人工打标（金标）不一致的条数，用于校准 Judge 可信度。'}
               tone="bad" icon={AlertTriangle} />
           : <StatCard label="需人工复核" value={s.needs_review ?? 0}
-              sub="Judge 自判需复核"
-              hint={'由 Judge 自己判定为需人工复核的条数（非固定数值阈值）。满足任一即标记：置信度低、疑似合规风险、或 Judge 不确定该不该承接/是否解决。'}
+              sub={s.reviewed_count ? `已复核 ${s.reviewed_count} 条` : 'Judge 自判需复核'}
+              hint={'剩余需人工复核的条数（已被人工复核的不再计入）。Judge 自判需复核的触发：疑似合规风险、信息严重不足无法判定、或明显自相矛盾。指标按复核后的最终值重算，复核后重进本页生效。'}
               tone="warn" icon={AlertTriangle} />}
       </div>
 

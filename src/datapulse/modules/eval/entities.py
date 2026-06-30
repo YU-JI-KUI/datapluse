@@ -143,3 +143,32 @@ class EvalActivityQuestion(EvalBase):
     __table_args__ = (
         UniqueConstraint("bu", "question", name="uk_t_eval_activity_bu_question"),
     )
+
+
+class EvalReview(EvalBase):
+    """t_eval_review — 人工复核覆盖（每条评测明细可被人工复核覆盖 AI 判定）
+
+    AI 原始判定存在 t_eval_task_row（只读不改）；人工复核结论存这里，读取时叠加：
+    有复核用复核值、无复核用 AI 值。指标基于「最终值」重算（人工优先）。
+    (task_id, row_index) 唯一——同一条可反复复核（upsert 覆盖）。
+    """
+
+    __tablename__ = "t_eval_review"
+
+    id               = Column(BigInteger, primary_key=True, autoincrement=True)
+    task_id          = Column(String(64), nullable=False)
+    row_index        = Column(BigInteger, nullable=False)
+    # 复核后的「分发是否正确」/「是否解决」：'是' | '否' | ''（''=该维度不改，沿用AI）
+    reviewed_dispatch = Column(String(8), nullable=False, default="")
+    reviewed_resolved = Column(String(8), nullable=False, default="")
+    reviewed_intent   = Column(String(128), nullable=False, default="")  # 复核改的业务分类（空=不改）
+    comment           = Column(Text, nullable=False, default="")          # 复核评论
+    reviewer          = Column(String(100), nullable=False, default="")
+    created_at        = Column(_TS, nullable=False)
+    created_by        = Column(String(100), nullable=False, default="")
+    updated_at        = Column(_TS, nullable=False)
+    updated_by        = Column(String(100), nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "row_index", name="uk_t_eval_review_task_row"),
+    )

@@ -31,6 +31,13 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
   const [serverTotal, setServerTotal] = useState(0)
   const [reviewRows, setReviewRows] = useState([])
   const [loading, setLoading] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)   // 复核提交/撤销后自增，触发明细重拉
+
+  // 复核成功后：刷新当前明细 + 提示上层结果页指标需重进生效
+  function onReviewed() {
+    setReviewRows([])          // 清需复核缓存，下次切入重拉
+    setReloadKey(k => k + 1)   // 触发「全部」视图重拉，拉到最新 review 字段
+  }
 
   const isAll = filter === 'all'
 
@@ -56,7 +63,7 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
       })
       .finally(() => !cancelled && setLoading(false))
     return () => { cancelled = true }
-  }, [isAll, taskId, page, pageSize, kw, intent])
+  }, [isAll, taskId, page, pageSize, kw, intent, reloadKey])
 
   // 「需复核」视图：首次切入拉回有限子集
   useEffect(() => {
@@ -211,7 +218,8 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
         />
       </CardContent>
 
-      <DetailDrawer row={active} open={!!active} onClose={() => setActive(null)} />
+      <DetailDrawer row={active} open={!!active} onClose={() => setActive(null)}
+        taskId={taskId} intentOptions={intentOptions} onReviewed={onReviewed} />
     </Card>
   )
 }

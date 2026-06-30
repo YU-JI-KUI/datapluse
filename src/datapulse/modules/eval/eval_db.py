@@ -217,6 +217,11 @@ def load_rows_after(task_id: str, after_index: int, limit: int) -> list[tuple[in
         return _repo(s).load_rows_after(task_id, after_index, limit)
 
 
+def load_rows_by_indices(task_id: str, indices: list[int]) -> dict[int, dict]:
+    with eval_session() as s:
+        return _repo(s).load_rows_by_indices(task_id, indices)
+
+
 def save_result(task_id: str, result: dict, updated_by: str = "system") -> None:
     with eval_session() as s:
         _repo(s).save_result(task_id, result, updated_by=updated_by)
@@ -320,3 +325,35 @@ def activity_create(bu: str, question: str, note: str = "", created_by: str = "s
 def activity_delete(act_id: int) -> bool:
     with eval_session() as s:
         return _act_repo(s).delete(act_id)
+
+
+# ── 人工复核 ──────────────────────────────────────────────────────────────────
+
+def _review_repo(s: Session):
+    from datapulse.modules.eval.repository import EvalReviewRepository
+    return EvalReviewRepository(s)
+
+
+def review_upsert(task_id: str, row_index: int, *, reviewed_dispatch: str = "",
+                  reviewed_resolved: str = "", reviewed_intent: str = "",
+                  comment: str = "", reviewer: str = "system") -> dict:
+    with eval_session() as s:
+        return _review_repo(s).upsert(
+            task_id, row_index, reviewed_dispatch=reviewed_dispatch,
+            reviewed_resolved=reviewed_resolved, reviewed_intent=reviewed_intent,
+            comment=comment, reviewer=reviewer)
+
+
+def review_get(task_id: str, row_index: int) -> dict | None:
+    with eval_session() as s:
+        return _review_repo(s).get(task_id, row_index)
+
+
+def review_list(task_id: str) -> list[dict]:
+    with eval_session() as s:
+        return _review_repo(s).list_by_task(task_id)
+
+
+def review_delete(task_id: str, row_index: int) -> bool:
+    with eval_session() as s:
+        return _review_repo(s).delete(task_id, row_index)

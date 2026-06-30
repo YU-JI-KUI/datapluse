@@ -101,15 +101,43 @@ def _task_bu(task_id: str) -> str:
 
 def get_result(task_id: str) -> dict | None:
     result = eval_db.load_result(task_id)
-    if result and result.get("disagreements"):
+    if not result:
+        return None
+    # 叠加人工复核：把复核覆盖应用到指标上（最终值口径），实时重算分发准确率/解决率/需复核数。
+    # 复核是小集合，只按其 row_index 批量取 AI 原判做增量，不重扫全量 rows。
+    result = _apply_reviews(task_id, result)
+    if result.get("disagreements"):
         _display_sanitize(result["disagreements"], _task_bu(task_id))
     return result
+
+
+def _apply_reviews(task_id: str, result: dict) -> dict:
+    from datapulse.modules.eval.evaluator import apply_reviews_to_result
+    reviews = eval_db.review_list(task_id)
+    if not reviews:
+        result["summary"]["reviewed_count"] = 0
+        return result
+    ai_rows = eval_db.load_rows_by_indices(task_id, [r["row_index"] for r in reviews])
+    return apply_reviews_to_result(result, reviews, ai_rows)
+
+
+def _attach_reviews(task_id: str, rows: list[dict]) -> list[dict]:
+    """给明细行附 review 字段（该行的人工复核覆盖），供详情页显示已复核状态与复核值。
+    只按当前页 row_index 批量取，不全量加载。原地改 row。"""
+    if not rows:
+        return rows
+    # 复核是少量子集，全量取一次建索引即可（远小于明细总量）
+    review_map = {rv["row_index"]: rv for rv in eval_db.review_list(task_id)}
+    for r in rows:
+        r["review"] = review_map.get(r["row_index"])   # 无复核则 None
+    return rows
 
 
 def list_rows(task_id: str, page: int, page_size: int, q: str = "", intent: str = "") -> list[dict]:
     """分页读逐条评测明细（前端结果页表格用），支持关键字/业务分类过滤。"""
     rows = eval_db.load_rows_filtered(task_id, page, page_size, q=q, intent=intent)
-    return _display_sanitize(rows, _task_bu(task_id))
+    rows = _display_sanitize(rows, _task_bu(task_id))
+    return _attach_reviews(task_id, rows)
 
 
 def count_rows(task_id: str, q: str = "", intent: str = "") -> int:
@@ -119,7 +147,21 @@ def count_rows(task_id: str, q: str = "", intent: str = "") -> int:
 def list_review_rows(task_id: str) -> list[dict]:
     """需复核子集（有限上限），供前端「需复核」过滤。"""
     rows = eval_db.load_review_rows(task_id)
-    return _display_sanitize(rows, _task_bu(task_id))
+    rows = _display_sanitize(rows, _task_bu(task_id))
+    return _attach_reviews(task_id, rows)
+
+
+def submit_review(task_id: str, row_index: int, *, reviewed_dispatch: str = "",
+                  reviewed_resolved: str = "", reviewed_intent: str = "",
+                  comment: str = "", reviewer: str = "system") -> dict:
+    return eval_db.review_upsert(
+        task_id, row_index, reviewed_dispatch=reviewed_dispatch,
+        reviewed_resolved=reviewed_resolved, reviewed_intent=reviewed_intent,
+        comment=comment, reviewer=reviewer)
+
+
+def delete_review(task_id: str, row_index: int) -> bool:
+    return eval_db.review_delete(task_id, row_index)
 
 
 _RESUMABLE_STATUS = {"failed", "paused", "interrupted"}

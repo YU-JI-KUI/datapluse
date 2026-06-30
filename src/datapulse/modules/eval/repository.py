@@ -22,6 +22,7 @@ from datapulse.modules.eval.entities import (
     EvalActivityQuestion,
     EvalCategory,
     EvalPrompt,
+    EvalReview,
     EvalTask,
     EvalTaskRow,
 )
@@ -190,14 +191,19 @@ class EvalRepository:
         return n
 
     def delete_task(self, task_id: str) -> bool:
-        """硬删任务主记录 + 逐条结果。返回是否删到了主记录。"""
+        """硬删任务主记录 + 逐条结果 + 人工复核。返回是否删到了主记录。"""
         self.session.query(EvalTaskRow).filter(EvalTaskRow.task_id == task_id).delete()
+        self.session.query(EvalReview).filter(EvalReview.task_id == task_id).delete()
         n = self.session.query(EvalTask).filter(EvalTask.task_id == task_id).delete()
         return bool(n)
 
     def clear_rows(self, task_id: str) -> None:
-        """清空某任务的逐条结果（重测前调，让评测从头跑）。"""
+        """清空某任务的逐条结果 + 人工复核（重测前调，让评测从头跑）。
+
+        重测后 AI 判定会变，旧复核针对的是旧结果，留着会张冠李戴，一并清掉。
+        """
         self.session.query(EvalTaskRow).filter(EvalTaskRow.task_id == task_id).delete()
+        self.session.query(EvalReview).filter(EvalReview.task_id == task_id).delete()
 
     # ── 逐条结果 ──────────────────────────────────────────────────────────────
 
@@ -252,6 +258,20 @@ class EvalRepository:
             select(func.count()).select_from(EvalTaskRow)
             .where(*self._row_filters(task_id, q, intent))
         ).scalar() or 0)
+
+    def load_rows_by_indices(self, task_id: str, indices: list[int]) -> dict[int, dict]:
+        """按 row_index 集合批量取 row_json，返回 {row_index: row_json}。
+
+        复核指标重算用：只取「被复核的那几条」的 AI 原判，集合很小，1 次 IN 查询，
+        不扫全表。空集合直接返回空 dict（不发查询）。
+        """
+        if not indices:
+            return {}
+        rows = self.session.execute(
+            select(EvalTaskRow.row_index, EvalTaskRow.row_json)
+            .where(EvalTaskRow.task_id == task_id, EvalTaskRow.row_index.in_(indices))
+        ).all()
+        return {int(idx): rj for idx, rj in rows}
 
     def load_rows_after(self, task_id: str, after_index: int, limit: int) -> list[tuple[int, dict]]:
         """游标分页：取 row_index > after_index 的下一批，返回 [(row_index, row_json)]。
@@ -486,3 +506,65 @@ class EvalActivityRepository:
             EvalActivityQuestion.id == act_id
         ).delete()
         return bool(n)
+
+
+def _review_to_dict(r: EvalReview) -> dict[str, Any]:
+    return {
+        "task_id": r.task_id, "row_index": r.row_index,
+        "reviewed_dispatch": r.reviewed_dispatch, "reviewed_resolved": r.reviewed_resolved,
+        "reviewed_intent": r.reviewed_intent, "comment": r.comment,
+        "reviewer": r.reviewer, "updated_at": _iso(r.updated_at),
+    }
+
+
+class EvalReviewRepository:
+    """人工复核覆盖持久化层。(task_id, row_index) 唯一，同一条可反复复核（upsert）。"""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, task_id: str, row_index: int, *, reviewed_dispatch: str = "",
+               reviewed_resolved: str = "", reviewed_intent: str = "",
+               comment: str = "", reviewer: str = "system") -> dict:
+        ts = _now()
+        stmt = pg_insert(EvalReview).values(
+            task_id=task_id, row_index=row_index,
+            reviewed_dispatch=reviewed_dispatch, reviewed_resolved=reviewed_resolved,
+            reviewed_intent=reviewed_intent, comment=comment, reviewer=reviewer,
+            created_at=ts, created_by=reviewer, updated_at=ts, updated_by=reviewer,
+        ).on_conflict_do_update(
+            index_elements=["task_id", "row_index"],
+            set_={
+                "reviewed_dispatch": reviewed_dispatch, "reviewed_resolved": reviewed_resolved,
+                "reviewed_intent": reviewed_intent, "comment": comment, "reviewer": reviewer,
+                "updated_at": ts, "updated_by": reviewer,
+            },
+        )
+        self.session.execute(stmt)
+        return self.get(task_id, row_index)
+
+    def get(self, task_id: str, row_index: int) -> dict | None:
+        r = self.session.execute(
+            select(EvalReview).where(
+                EvalReview.task_id == task_id, EvalReview.row_index == row_index
+            )
+        ).scalars().first()
+        return _review_to_dict(r) if r else None
+
+    def list_by_task(self, task_id: str) -> list[dict]:
+        """某任务的全部复核（用于指标重算 + 明细叠加）。复核是少量子集，全量返回无碍。"""
+        rows = self.session.execute(
+            select(EvalReview).where(EvalReview.task_id == task_id)
+        ).scalars().all()
+        return [_review_to_dict(r) for r in rows]
+
+    def delete(self, task_id: str, row_index: int) -> bool:
+        """撤销复核（删除覆盖，该行恢复用 AI 判定）。"""
+        n = self.session.query(EvalReview).filter(
+            EvalReview.task_id == task_id, EvalReview.row_index == row_index
+        ).delete()
+        return bool(n)
+
+    def delete_all(self, task_id: str) -> None:
+        """删任务时清理其复核（连带删除）。"""
+        self.session.query(EvalReview).filter(EvalReview.task_id == task_id).delete()

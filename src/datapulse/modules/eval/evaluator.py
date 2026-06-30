@@ -381,6 +381,88 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
     }
 
 
+# ── 人工复核：把复核覆盖叠加到评测结果上，重算受影响的指标 ────────────────────
+
+def apply_reviews_to_result(result: dict, reviews: list[dict], ai_rows: dict[int, dict]) -> dict:
+    """把人工复核覆盖叠加到评测 result 上，重算 BU分发准确率 / 问题解决率 / 需复核数。
+
+    设计（与讨论一致）：
+      - 复核「直接改 AI 结论」，指标按「最终值」（人工优先、AI 兜底）重算。
+      - 只增量修正受影响的计数，不重扫全量 rows：基数来自 result.summary，复核是小集合。
+      - 分发准确率只改 correct/scored 口径；漏收/误收两类细分数保持 AI 原值不变。
+      - 解决率分母 = 实际分到本BU的样本（漏斗）；复核「是否解决」仅对进漏斗的行生效。
+      - 被复核的行视为「已人工确认」，从需复核数中扣除（无论复核改没改判定）。
+
+    参数：
+      result    评测结果（含 summary / bu_dispatch / insights）
+      reviews   该任务全部复核 [{row_index, reviewed_dispatch, reviewed_resolved, ...}]
+      ai_rows   {row_index: ai_row}，ai_row 含 j_dispatch / j_resolved / dispatched_to_bu /
+                judge.needs_human_review，用于取 AI 原判做对比
+    返回新的 result（原对象不变），summary 已按最终值重算，并附 reviewed_count。
+    """
+    import copy
+    if not reviews:
+        out = copy.deepcopy(result)
+        out["summary"]["reviewed_count"] = 0
+        return out
+
+    out = copy.deepcopy(result)
+    s = out["summary"]
+    disp = s.get("bu_dispatch") or {}
+
+    scored = int(disp.get("scored", 0))
+    correct = int(disp.get("correct", 0))
+    in_bu = int((out.get("insights") or {}).get("overall", {}).get("in_bu_count", 0))
+    base_rate = float((out.get("insights") or {}).get("overall", {}).get("resolved_rate", 0.0))
+    resolved_yes = round(base_rate * in_bu)        # 从 rate × 分母 还原解决数绝对值
+    needs_review = int(s.get("needs_review", 0))
+    reviewed_count = 0
+
+    for rv in reviews:
+        ai = ai_rows.get(rv["row_index"])
+        if ai is None:
+            continue                                # 复核指向的行已不存在（重测过），跳过
+        reviewed_count += 1
+
+        # 需复核数：被复核的行视为已确认，若原本 needs_review 则扣 1
+        judge = ai.get("judge") if isinstance(ai.get("judge"), dict) else {}
+        if judge.get("needs_human_review"):
+            needs_review = max(0, needs_review - 1)
+
+        # 分发：复核值非空且与 AI 值不同 → 修正 correct（scored 不变，仍是参与评分总数）
+        rd = (rv.get("reviewed_dispatch") or "").strip()
+        if rd in ("是", "否"):
+            ai_d = ai.get("j_dispatch", "")
+            if ai_d in ("是", "否") and rd != ai_d:
+                correct += 1 if rd == "是" else -1
+
+        # 解决：仅对进漏斗（实际分到本BU）的行生效，复核值非空且与 AI 不同 → 修正 resolved_yes
+        rr = (rv.get("reviewed_resolved") or "").strip()
+        if rr in ("是", "否") and ai.get("dispatched_to_bu"):
+            ai_r = ai.get("j_resolved", "")
+            if ai_r in ("是", "否") and rr != ai_r:
+                resolved_yes += 1 if rr == "是" else -1
+
+    correct = max(0, min(correct, scored))
+    resolved_yes = max(0, min(resolved_yes, in_bu))
+    new_acc = round(correct / scored, 4) if scored else 0.0
+    new_rate = round(resolved_yes / in_bu, 4) if in_bu else 0.0
+
+    disp["correct"] = correct
+    disp["wrong"] = scored - correct
+    disp["accuracy"] = new_acc
+    s["bu_dispatch"] = disp
+    s["dispatch_accuracy"] = new_acc
+    s["resolved_rate"] = new_rate
+    s["end_to_end_resolved_rate"] = new_rate
+    s["needs_review"] = needs_review
+    s["reviewed_count"] = reviewed_count
+    if out.get("insights", {}).get("overall"):
+        out["insights"]["overall"]["resolved_rate"] = new_rate
+        out["insights"]["overall"]["dispatch_accuracy"] = new_acc
+    return out
+
+
 # ── 纯函数:全量 rows 一次算出指标 ────────────────────────────────────────────
 # 仅供 tests/eval 做「增量(_StreamAggregator) == 全量」等价校验,不在生产路径调用
 # (生产走 _StreamAggregator 流式聚合,百万级不全量驻留)。勿在生产代码引用。

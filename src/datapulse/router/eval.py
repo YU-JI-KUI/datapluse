@@ -142,6 +142,37 @@ async def task_rows(
     return success(page_data(rows, page, page_size, total))
 
 
+class ReviewBody(BaseModel):
+    reviewed_dispatch: str = ""   # 是 / 否 / ''(不改)
+    reviewed_resolved: str = ""   # 是 / 否 / ''(不改)
+    reviewed_intent: str = ""     # 改后的业务分类('' 不改)
+    comment: str = ""
+
+
+@router.put("/tasks/{task_id}/rows/{row_index}/review")
+async def submit_review(task_id: str, row_index: int, body: ReviewBody, user: CurrentUser):
+    """提交/更新某条明细的人工复核（覆盖 AI 判定，指标按最终值重算）。"""
+    if not eval_engine.get_task(task_id):
+        raise NotFoundError("任务不存在")
+    for field, val in (("reviewed_dispatch", body.reviewed_dispatch),
+                       ("reviewed_resolved", body.reviewed_resolved)):
+        if val not in ("", "是", "否"):
+            raise ParamError(f"{field} 只能是 是 / 否 / 空")
+    rec = eval_engine.submit_review(
+        task_id, row_index,
+        reviewed_dispatch=body.reviewed_dispatch, reviewed_resolved=body.reviewed_resolved,
+        reviewed_intent=body.reviewed_intent.strip(), comment=body.comment,
+        reviewer=user.username)
+    return success(rec)
+
+
+@router.delete("/tasks/{task_id}/rows/{row_index}/review")
+async def delete_review(task_id: str, row_index: int, user: CurrentUser):
+    """撤销某条明细的人工复核（该行恢复用 AI 判定，指标随之还原）。"""
+    eval_engine.delete_review(task_id, row_index)
+    return success({"deleted": True})
+
+
 @router.post("/tasks/{task_id}/resume")
 async def resume_task(task_id: str, user: CurrentUser):
     """断点续跑：对中断的任务，跳过已完成行继续。"""
