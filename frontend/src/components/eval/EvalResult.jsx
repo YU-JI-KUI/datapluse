@@ -48,7 +48,13 @@ export default function EvalResult({ taskId, result }) {
           sub={`日志共 ${f.total ?? s.total_samples ?? 0} 条`} tone="brand" icon={Database} />
         <StatCard label="BU分发准确率" value={pct(s.dispatch_accuracy)}
           sub="AI 判该接与实际是否一致"
-          hint={'BU分发准确率 = 判对数 / 参与评分数。判对 = AI 判断「该不该本BU承接」与日志事实「实际是否分给本BU」一致（该接且接了，或该拒且拒了）。'}
+          hint={
+            'BU分发准确率 = 判对数 ÷ 参与评分数。\n' +
+            '· 判对：AI 判断「该不该本BU承接」(should_dispatch_to_bu) 与日志事实「实际是否分给本BU」(分发BU 列) 一致——即「该接且接了」或「该拒且拒了」。\n' +
+            '· 参与评分数：AI 给出了有效分发判定的样本数（模型调用出错/缺字段的样本不计入分母）。\n' +
+            '· 两类判错：漏收 = 该接却被拒（AI 判该接，实际没分到本BU）；误收 = 该拒却收下（AI 判该拒，实际分到了本BU）。\n' +
+            '该指标用 AI 判断 vs 日志客观事实比对，不依赖人工金标，故生产模式同样可算。'
+          }
           tone="info" icon={TrendingUp} />
         <StatCard label="问题解决率" value={pct(s.end_to_end_resolved_rate ?? s.resolved_rate)}
           sub="仅分发到本BU的问题"

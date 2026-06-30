@@ -31,7 +31,6 @@ COLS: dict[str, list[str]] = {
     "dispatch_reason": ["分发BU理由", "分发理由"],
     # 人工金标
     "gold_dispatch": ["分发是否正确"],
-    "gold_oneclick": ["一键场景分发是否正确"],
     "gold_resolved": ["答案是否解决客户问题"],
     "gold_qtype": ["问题类型"],
     "gold_module": ["常规意图识别模块"],
@@ -60,9 +59,14 @@ def resolve_columns(df: pd.DataFrame) -> dict[str, str]:
                     break
         if hit is not None:
             m[key] = hit
-    miss = [k for k in ("question", "session", "turn", "answer") if k not in m]
+    # dispatch_bu 也必需:分发准确率、解决率漏斗都以「实际是否分给本BU」为事实侧,
+    # 缺它会让这些核心指标静默失真(全部样本被当作未分到本BU),故缺列直接报错而非放行。
+    miss = [k for k in ("question", "session", "turn", "answer", "dispatch_bu") if k not in m]
     if miss:
-        raise KeyError(f"缺少关键列: {miss}(请确认上传的是日志导出+人工标注的标准表)")
+        cn = {"question": "客户问题", "session": "应用会话ID", "turn": "客户咨询轮次",
+              "answer": "答案", "dispatch_bu": "分发BU"}
+        names = [cn.get(k, k) for k in miss]
+        raise KeyError(f"缺少必需列: {names}(请确认上传的是日志导出+人工标注的标准表)")
     return m
 
 
@@ -83,7 +87,7 @@ def load_and_prep(path: str) -> tuple[pd.DataFrame, dict[str, str], dict]:
 
 
 # 用于判定模式的二值金标列(任一列含「是/否」即算有金标)
-_GOLD_BINARY_KEYS = ("gold_dispatch", "gold_oneclick", "gold_resolved")
+_GOLD_BINARY_KEYS = ("gold_dispatch", "gold_resolved")
 
 
 def detect_gold(df: pd.DataFrame, m: dict[str, str]) -> dict:
@@ -177,7 +181,6 @@ def _extract_row(df: pd.DataFrame, i: int, m: dict[str, str]) -> dict:
         "dispatched_bu": col("dispatch_bu").strip(),
         "gold": {
             "dispatch": col("gold_dispatch"),
-            "oneclick": col("gold_oneclick"),
             "resolved": col("gold_resolved"),
             "qtype": col("gold_qtype"),
             "module": col("gold_module"),

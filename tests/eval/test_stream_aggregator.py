@@ -19,7 +19,7 @@ def _sample(row_index, **kw):
         "row_index": row_index, "session": f"s{row_index}", "turn": 1, "question": f"q{row_index}",
         "context": [], "next_user_turn": "", "dispatched_intent": "",
         "dispatched_to_bu": True, "answer_text": "a",
-        "gold": {"dispatch": "", "oneclick": "", "resolved": ""},
+        "gold": {"dispatch": "", "resolved": ""},
     }
     base.update(kw)
     return base

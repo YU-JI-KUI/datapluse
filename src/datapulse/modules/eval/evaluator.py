@@ -108,10 +108,9 @@ def assemble_row(sample: dict, judge: dict) -> dict:
 _MAX_DISAGREEMENTS = 500
 _MAX_UNRESOLVED_EXAMPLES = 3
 
-# _compute_metrics 的三个二值维度规格(与纯函数版本保持一致)
+# 二值校准维度规格(与纯函数版本保持一致):分发是否正确 + 答案是否解决
 _METRIC_SPECS = (
     ("分发是否正确", "dispatch", "j_dispatch"),
-    ("一键场景分发是否正确", "oneclick", "j_dispatch"),
     ("答案是否解决客户问题", "resolved", "j_resolved"),
 )
 
@@ -387,10 +386,9 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
 
 
 def _compute_metrics(rows: list[dict]) -> list[dict]:
-    """对三个二值金标分别算指标。无金标的维度跳过。"""
+    """对二值金标分别算指标。无金标的维度跳过。"""
     specs = [
         ("分发是否正确", "dispatch", "j_dispatch"),
-        ("一键场景分发是否正确", "oneclick", "j_dispatch"),
         ("答案是否解决客户问题", "resolved", "j_resolved"),
     ]
     out = []
