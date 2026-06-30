@@ -1,8 +1,9 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ ebf294f2
+# 基于 origin/main @ b28151d4
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
 #   ebf294f2 评测明细新增人工复核：覆盖AI判定并按最终值重算指标
+#   b28151d4 评测详情页改右侧抽屉 + 头尾固定，复核操作常驻可见
 db/arkpg/20260428_arkpgdata_init.sql
 db/arkpg/20260701_arkpgdata_add_eval_review.sql
 deploy_desc/SUPER-AGENT1.0.0.json
@@ -18,3 +19,4 @@ src/datapulse/modules/eval/repository.py
 src/datapulse/pipeline/eval_engine.py
 src/datapulse/router/eval.py
 tests/eval/test_review.py
+frontend/src/components/ui/dialog.jsx
