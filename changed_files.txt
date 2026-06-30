@@ -1,13 +1,24 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 5e8ba29b
+# 基于 origin/main @ 122766fe
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   5e8ba29b 评测列规范收口：移除冗余金标 + 分发BU必需 + 公式说明
+#   122766fe 评测新增活动标问过滤：写死按钮问题整条跳过
+db/arkpg/20260428_arkpgdata_init.sql
+db/arkpg/20260630_arkpgdata_add_eval_activity.sql
+deploy_desc/SUPER-AGENT1.0.0.json
+frontend/src/App.jsx
+frontend/src/components/Layout.jsx
 frontend/src/components/eval/EvalResult.jsx
-frontend/src/components/eval/EvalUploader.jsx
+frontend/src/lib/api.js
+frontend/src/pages/EvalActivity.jsx
+src/datapulse/modules/eval/bu/base.py
+src/datapulse/modules/eval/bu/registry.py
+src/datapulse/modules/eval/entities.py
+src/datapulse/modules/eval/eval_db.py
 src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/metrics.py
 src/datapulse/modules/eval/pipeline.py
-tests/eval/test_modes_and_insights.py
+src/datapulse/modules/eval/repository.py
+src/datapulse/pipeline/eval_engine.py
+src/datapulse/router/eval.py
+tests/eval/test_activity.py
 tests/eval/test_pipeline.py
-tests/eval/test_stream_aggregator.py
