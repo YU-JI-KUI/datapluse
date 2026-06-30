@@ -94,20 +94,88 @@ class EvalRepository:
         t = self.session.query(EvalTask).filter(EvalTask.task_id == task_id).first()
         return _task_to_dict(t, full=True) if t else None
 
-    def list_tasks(self) -> list[dict]:
-        rows = self.session.execute(
-            select(EvalTask).order_by(EvalTask.created_at.desc())
-        ).scalars().all()
-        return [_task_to_dict(t) for t in rows]
+    def list_tasks_paged(self, page: int, page_size: int, bu: str = "") -> tuple[list[dict], int]:
+        """分页查任务列表(SQL 层 ORDER BY + LIMIT/OFFSET + COUNT)。
 
-    def find_unfinished(self) -> list[dict]:
-        """找未到终态(done/failed)的任务，供启动时自动恢复。返回 [{task_id, status, created_by}]。"""
+        替代「全量查出来再 Python 切片」:任务表只增不减,全量加载迟早拖慢列表页。
+        bu 非空则按业务单元过滤。返回 (当前页任务, 总数)。
+        """
+        from sqlalchemy import func
+        conds = [EvalTask.bu == bu] if bu else []
+        total = int(self.session.execute(
+            select(func.count()).select_from(EvalTask).where(*conds)
+        ).scalar() or 0)
         rows = self.session.execute(
-            select(EvalTask.task_id, EvalTask.status, EvalTask.created_by)
-            .where(EvalTask.status.in_(("running", "paused", "interrupted", "pending")))
+            select(EvalTask).where(*conds)
+            .order_by(EvalTask.created_at.desc())
+            .offset((page - 1) * page_size).limit(page_size)
+        ).scalars().all()
+        return [_task_to_dict(t) for t in rows], total
+
+    # ── 多 POD 抢占式调度 ─────────────────────────────────────────────────────
+
+    def claim_next_task(self, worker_id: str) -> dict | None:
+        """抢占下一个待跑任务(原子):取最早的 pending 行,FOR UPDATE SKIP LOCKED 锁定,
+        置 running + claimed_by/claimed_at/heartbeat,返回该任务。无可抢返回 None。
+
+        SKIP LOCKED 保证多 POD 并发抢占时各拿不同行、互不阻塞;同一行只会被一个 POD 抢到。
+        """
+        ts = _now()
+        row = self.session.execute(
+            select(EvalTask)
+            .where(EvalTask.status == "pending")
             .order_by(EvalTask.created_at)
-        ).all()
-        return [{"task_id": tid, "status": st, "created_by": cb} for tid, st, cb in rows]
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        ).scalars().first()
+        if row is None:
+            return None
+        row.status = "running"
+        row.claimed_by = worker_id
+        row.claimed_at = ts
+        row.heartbeat_at = ts
+        row.updated_at = ts
+        row.updated_by = worker_id
+        row.error = None
+        self.session.flush()
+        return _task_to_dict(row, full=True)
+
+    def heartbeat(self, task_id: str, worker_id: str) -> bool:
+        """运行中续约心跳。仅当任务仍是本 worker 持有的 running 时才续(防误续被回收后
+        被别的 POD 接管的任务)。返回是否续上。"""
+        n = self.session.query(EvalTask).filter(
+            EvalTask.task_id == task_id,
+            EvalTask.status == "running",
+            EvalTask.claimed_by == worker_id,
+        ).update({"heartbeat_at": _now()})
+        return bool(n)
+
+    def reclaim_stale(self, stale_before: datetime) -> int:
+        """回收僵尸任务:running 但心跳早于 stale_before(持有它的 POD 已死)→ 退回
+        pending,等待重新抢占续跑。返回回收条数。"""
+        n = self.session.query(EvalTask).filter(
+            EvalTask.status == "running",
+            EvalTask.heartbeat_at < stale_before,
+        ).update({
+            "status": "pending", "claimed_by": None,
+            "stage": "", "updated_at": _now(),
+            "error": "worker 心跳超时,已回收重跑",
+        })
+        return n
+
+    def requeue_idle(self) -> int:
+        """把「确定没在跑」的非终态任务(paused/interrupted)退回 pending 供重抢。
+
+        关键:不碰 running——多 POD 下别的 POD 可能正跑着 running 任务,无条件退回会
+        打断它。running 的存活与否一律交给 reclaim_stale 按心跳判定。返回条数。
+        """
+        n = self.session.query(EvalTask).filter(
+            EvalTask.status.in_(("paused", "interrupted")),
+        ).update({
+            "status": "pending", "claimed_by": None,
+            "stage": "", "updated_at": _now(),
+        }, synchronize_session=False)
+        return n
 
     def delete_task(self, task_id: str) -> bool:
         """硬删任务主记录 + 逐条结果。返回是否删到了主记录。"""
@@ -144,32 +212,6 @@ class EvalRepository:
             select(EvalTaskRow.row_index).where(EvalTaskRow.task_id == task_id)
         ).scalars().all()
         return set(rows)
-
-    def load_rows(self, task_id: str) -> list[dict]:
-        """读回所有逐条结果（按 row_index 排序）。仅用于小数据量场景。"""
-        rows = self.session.execute(
-            select(EvalTaskRow.row_json)
-            .where(EvalTaskRow.task_id == task_id)
-            .order_by(EvalTaskRow.row_index)
-        ).scalars().all()
-        return list(rows)
-
-    def load_rows_paged(self, task_id: str, page: int, page_size: int) -> list[dict]:
-        """分页读逐条结果（按 row_index 排序）。百万级下避免一次性全量加载。"""
-        offset = (page - 1) * page_size
-        rows = self.session.execute(
-            select(EvalTaskRow.row_json)
-            .where(EvalTaskRow.task_id == task_id)
-            .order_by(EvalTaskRow.row_index)
-            .offset(offset).limit(page_size)
-        ).scalars().all()
-        return list(rows)
-
-    def count_rows(self, task_id: str) -> int:
-        from sqlalchemy import func
-        return int(self.session.execute(
-            select(func.count()).select_from(EvalTaskRow).where(EvalTaskRow.task_id == task_id)
-        ).scalar() or 0)
 
     def _row_filters(self, task_id: str, q: str = "", intent: str = ""):
         """构造逐条结果的过滤条件：task_id + 关键字(问题) + 业务分类。"""

@@ -572,6 +572,9 @@ CREATE TABLE IF NOT EXISTS t_eval_task (
     progress_total INTEGER      NOT NULL DEFAULT 0,
     error          TEXT,
     result_json    JSONB,
+    claimed_by     VARCHAR(128),
+    claimed_at     TIMESTAMP(6),
+    heartbeat_at   TIMESTAMP(6),
     finished_at    TIMESTAMP(6),
     created_at     TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     created_by     VARCHAR(100) NOT NULL DEFAULT '',
@@ -592,6 +595,9 @@ COMMENT ON COLUMN t_eval_task.progress_done  IS '已完成样本数';
 COMMENT ON COLUMN t_eval_task.progress_total IS '样本总数';
 COMMENT ON COLUMN t_eval_task.error          IS '失败原因（status=failed 时有值）';
 COMMENT ON COLUMN t_eval_task.result_json    IS '聚合结果（summary/metrics/insights/advice，逐条 rows 在 t_eval_task_row）';
+COMMENT ON COLUMN t_eval_task.claimed_by     IS '抢占该任务的worker标识（主机:进程:随机后缀），多POD调度用';
+COMMENT ON COLUMN t_eval_task.claimed_at     IS '抢占时间';
+COMMENT ON COLUMN t_eval_task.heartbeat_at   IS '最近心跳时间（运行中定期续约，超时视为持有POD已死，任务被回收重抢）';
 COMMENT ON COLUMN t_eval_task.finished_at    IS '完成时间';
 COMMENT ON COLUMN t_eval_task.created_at     IS '创建时间';
 COMMENT ON COLUMN t_eval_task.created_by     IS '创建人';
@@ -599,6 +605,7 @@ COMMENT ON COLUMN t_eval_task.updated_at     IS '更新时间';
 COMMENT ON COLUMN t_eval_task.updated_by     IS '更新人';
 CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_task_task_id ON t_eval_task(task_id);
 CREATE INDEX IF NOT EXISTS idx_t_eval_task_created ON t_eval_task(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_t_eval_task_status_created ON t_eval_task(status, created_at);
 DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_task'; END $$;
 
 
@@ -623,6 +630,10 @@ COMMENT ON COLUMN t_eval_task_row.row_json   IS '单行完整评测结果（含 
 COMMENT ON COLUMN t_eval_task_row.created_at IS '落盘时间';
 COMMENT ON COLUMN t_eval_task_row.created_by IS '操作人';
 CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_task_row_task_idx ON t_eval_task_row(task_id, row_index);
+-- 明细页过滤：业务分类精确匹配 / 需复核筛选，避免 5万行任务全表扫 JSONB
+CREATE INDEX IF NOT EXISTS idx_t_eval_row_intent ON t_eval_task_row (task_id, (row_json->>'j_intent'));
+CREATE INDEX IF NOT EXISTS idx_t_eval_row_review ON t_eval_task_row (task_id)
+    WHERE (row_json->'judge'->>'needs_human_review') = 'true';
 DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_task_row'; END $$;
 
 -- 21. t_eval_prompt -- AI eval editable prompts (DB-backed, hot-editable)

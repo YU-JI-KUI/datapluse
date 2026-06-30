@@ -85,6 +85,21 @@ class BUConfig:
     sample_calib: str = ""
     sample_prod: str = ""
 
+    # 评测期间的提示词快照 {模板名: 内容}。run_evaluation 入口注入,贯穿整个任务,
+    # 避免中途被 bump_version 清缓存导致前后口径不一致。None 表示未快照(小数据/
+    # 测试路径),此时 prompt(name) 实时回退 load_bu_prompt。
+    prompts: dict | None = None
+
+    def prompt(self, name: str) -> str:
+        """取某模板内容:优先用任务快照,无快照则实时加载(回退兼容)。"""
+        if self.prompts is not None and name in self.prompts:
+            return self.prompts[name]
+        from datapulse.modules.eval.prompt_loader import load_bu_prompt, load_prompt
+        # judge_user.md 是 root 共享槽位,其余按 BU
+        if name == "judge_user.md":
+            return load_prompt(name)
+        return load_bu_prompt(self.code, name)
+
     def matches_dispatch(self, raw: str) -> bool:
         """日志「分发BU」列值是否代表本 BU(用于判断系统是否把这条分给了本 BU)。
 

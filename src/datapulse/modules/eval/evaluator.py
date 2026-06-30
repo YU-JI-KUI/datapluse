@@ -13,7 +13,12 @@ from collections import Counter, defaultdict
 
 from datapulse.modules.eval import _store as store
 from datapulse.modules.eval.bu.base import BUConfig
-from datapulse.modules.eval.llm.judge_runner import active_backend, generate_advice, judge_batch
+from datapulse.modules.eval.llm.judge_runner import (
+    RateLimitedError,
+    active_backend,
+    generate_advice,
+    judge_batch,
+)
 from datapulse.modules.eval.metrics import binary_report
 from datapulse.modules.eval.pipeline import build_all_samples, detect_gold, load_and_prep
 
@@ -126,9 +131,10 @@ class _IntentSlice:
 class _StreamAggregator:
     """流式聚合:逐批吃 rows、更新计数,跑完即丢弃 row 本体,不全量驻留内存。
 
-    finalize() 产出与 evaluator 中纯函数(compute_insights / _bu_dispatch_stats /
-    _intent_distribution / _compute_metrics)完全等价的结构。纯函数保留作小数据/
-    测试路径,本类是其增量版本,两者口径必须一致。
+    生产路径只走本类(逐批喂、不全量驻留)。文件末尾的纯函数(compute_insights /
+    _bu_dispatch_stats / _intent_distribution / _compute_metrics)不在生产调用,仅供
+    tests/eval/test_stream_aggregator.py 做「全量算 == 增量算」的等价校验,是本类的
+    正确性 oracle。改本类口径时,纯函数必须同步改,否则等价测试会失败(这正是它们的用途)。
     """
 
     def __init__(self) -> None:
@@ -286,7 +292,15 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
     batch_size = 200
     for start in range(0, len(pending), batch_size):
         batch = pending[start:start + batch_size]
-        judges = await judge_batch(batch, bu)
+        try:
+            judges = await judge_batch(batch, bu)
+        except RateLimitedError as e:
+            # 限流:把这批已成功跑完的部分先落盘(不喂累加器——累加器会在续跑读回时
+            # 重建),再上抛让引擎暂停退避。续跑时这些行已在库,不重做。
+            if persist and task_id and e.partial:
+                done_rows = [assemble_row(batch[i], j) for i, j in e.partial]
+                store.save_rows(task_id, done_rows)
+            raise
         batch_rows = [assemble_row(s, j) for s, j in zip(batch, judges)]
         if persist and task_id:
             store.save_rows(task_id, batch_rows)
@@ -361,6 +375,11 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
         # disagreements 仅返回有限代表样本,供报表/导出。
         "disagreements": agg.disagreements,
     }
+
+
+# ── 纯函数:全量 rows 一次算出指标 ────────────────────────────────────────────
+# 仅供 tests/eval 做「增量(_StreamAggregator) == 全量」等价校验,不在生产路径调用
+# (生产走 _StreamAggregator 流式聚合,百万级不全量驻留)。勿在生产代码引用。
 
 
 def _compute_metrics(rows: list[dict]) -> list[dict]:

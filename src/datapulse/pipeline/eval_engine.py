@@ -75,8 +75,10 @@ def get_task(task_id: str) -> dict | None:
     return _public(t) if t else None
 
 
-def list_tasks() -> list[dict]:
-    return [_public(t) for t in eval_db.list_tasks()]
+def list_tasks_paged(page: int, page_size: int, bu: str = "") -> tuple[list[dict], int]:
+    """分页任务列表(SQL 层分页 + 过滤),返回 (对外状态列表, 总数)。"""
+    rows, total = eval_db.list_tasks_paged(page, page_size, bu=bu)
+    return [_public(t) for t in rows], total
 
 
 def _display_sanitize(rows: list[dict], bu: str) -> list[dict]:
@@ -142,7 +144,14 @@ async def run_eval(task_id: str, resume: bool = False, operator: str = "eval") -
     t = eval_db.get_task(task_id)
     if not t:
         return
+    # 快照该 BU 评测要用的全部 prompt,贯穿整个任务:中途用户改 prompt 只影响下次评测,
+    # 不会让同一任务前后用不同口径。intents(业务分类)已在 get_bu 时固化进 frozen
+    # BUConfig,天然是快照,无需再处理。
+    from dataclasses import replace as _replace
+
+    from datapulse.modules.eval.prompt_loader import snapshot_for_bu
     bu = get_bu(t.get("bu"))
+    bu = _replace(bu, prompts=snapshot_for_bu(bu.code))
     eval_db.update_task(task_id, updated_by=operator, status="running", error=None)
 
     def on_progress(stage: str, done: int, total: int):
@@ -174,6 +183,11 @@ async def run_eval(task_id: str, resume: bool = False, operator: str = "eval") -
         _log.exception("eval.failed", task_id=task_id)
         eval_db.update_task(task_id, updated_by=operator,
                             status="failed", error=str(e), finished_at=_now())
+    finally:
+        # 本任务的事件循环即将随 asyncio.run 关闭,先释放绑定到它的 httpx 连接池,
+        # 避免连接对象泄漏(client 按 loop 缓存,不关就一直留着旧循环的池)。
+        from datapulse.modules.eval.llm.pingan_client import close_client
+        await close_client()
 
 
 def run_eval_sync(task_id: str, resume: bool = False, operator: str = "eval") -> None:
@@ -182,24 +196,21 @@ def run_eval_sync(task_id: str, resume: bool = False, operator: str = "eval") ->
 
 
 def recover_tasks() -> int:
-    """启动时自动恢复未完成任务：把 running/paused/interrupted/pending 重新入队续跑。
+    """启动时恢复未完成任务(多 POD 安全)。返回退回 pending 的任务数。
 
-    进程重启时，原来在跑的任务（running）和内存队列里没跑的（pending）都会遗留为
-    「未完成」。这里统一转 interrupted 标记后重新入队（resume=True，跳过已落盘行），
-    实现「进程崩溃/重启后任务自动接着跑」。返回恢复的任务数。
+    DB 抢占模型下不再逐个入队:只把「确定没在跑」的 paused/interrupted 退回 pending,
+    再回收一遍心跳超时的僵尸 running。退回后由任一 POD 的 worker 抢占续跑(跳过已落盘行)。
+    关键:绝不无条件动 running——多 POD 下别的 POD 可能正跑着,误退回会打断它;running
+    的存活交给心跳超时判定(reclaim_stale)。
     """
-    from datapulse.modules.eval import eval_worker
+    from datapulse.modules.eval.eval_worker import _STALE_SEC
 
-    tasks = eval_db.find_unfinished()
-    for t in tasks:
-        tid, op = t["task_id"], t.get("created_by") or "system"
-        eval_db.update_task(tid, status="interrupted", stage="",
-                            error="进程重启，已自动恢复续跑")
-        eval_worker.submit(tid, resume=True, operator=op)
-        _log.info("eval.recovered", task_id=tid, prev_status=t["status"])
-    if tasks:
-        _log.info("eval.recover.done", count=len(tasks))
-    return len(tasks)
+    requeued = eval_db.requeue_idle()
+    reclaimed = eval_db.reclaim_stale(_STALE_SEC)
+    n = requeued + reclaimed
+    if n:
+        _log.info("eval.recover.done", requeued=requeued, reclaimed=reclaimed)
+    return n
 
 
 def delete_task(task_id: str) -> bool:

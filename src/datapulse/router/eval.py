@@ -90,12 +90,8 @@ async def list_tasks(
     page_size: int = Query(20, ge=1, le=500),
     bu: str = Query("", description="按业务单元过滤；空则返回全部"),
 ):
-    tasks = eval_engine.list_tasks()
-    if bu:
-        tasks = [t for t in tasks if t.get("bu") == bu]
-    total = len(tasks)
-    start = (page - 1) * page_size
-    return success(page_data(tasks[start:start + page_size], page, page_size, total))
+    tasks, total = eval_engine.list_tasks_paged(page, page_size, bu=bu)
+    return success(page_data(tasks, page, page_size, total))
 
 
 @router.get("/tasks/{task_id}")

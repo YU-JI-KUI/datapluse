@@ -19,26 +19,37 @@ from datapulse.modules.eval.llm.signature import generate_app_sign, get_open_api
 
 logger = logging.getLogger(__name__)
 
-# 进程内复用一个 AsyncClient(禁 keep-alive 复杂度,够用即可)
-_client: httpx.AsyncClient | None = None
+# AsyncClient 的连接池绑定在「创建它的事件循环」上,不能跨循环复用。
+# 评测 worker 每个任务用独立 asyncio.run() 起新循环跑完即关,若全进程共用一个
+# client,第二个任务就会在已关闭的旧循环上发请求 → RuntimeError: Event loop is closed,
+# 整个任务的 LLM 调用全失败。故按当前 running loop 各缓存一个 client。
+_clients: dict[int, httpx.AsyncClient] = {}
 
 
 def _get_client() -> httpx.AsyncClient:
-    global _client
-    if _client is None:
-        _client = httpx.AsyncClient(
+    loop = asyncio.get_running_loop()
+    key = id(loop)
+    client = _clients.get(key)
+    if client is None:
+        client = httpx.AsyncClient(
             limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
             timeout=httpx.Timeout(60.0, connect=10.0),
             http2=False,
         )
-    return _client
+        _clients[key] = client
+    return client
 
 
 async def close_client() -> None:
-    global _client
-    if _client is not None:
-        await _client.aclose()
-        _client = None
+    """关闭并丢弃当前事件循环的 client（任务跑完时由编排层调用，释放连接池）。
+
+    必须在持有该 client 的同一个循环里调用（aclose 是 async）。其它循环的 client
+    各自负责，不在这里碰。
+    """
+    loop = asyncio.get_running_loop()
+    client = _clients.pop(id(loop), None)
+    if client is not None:
+        await client.aclose()
 
 
 async def call_bigmodel_api(

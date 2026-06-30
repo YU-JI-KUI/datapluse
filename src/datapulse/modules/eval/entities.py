@@ -37,6 +37,11 @@ class EvalTask(EvalBase):
     progress_total = Column(Integer, nullable=False, default=0)
     error          = Column(Text)
     result_json    = Column(JSONB)
+    # 多 POD 抢占式调度:哪个 worker 抢到、何时抢到、最近心跳。心跳超时视为该 POD
+    # 已死,任务被回收重抢(断点续跑)。pending 任务靠 FOR UPDATE SKIP LOCKED 抢占。
+    claimed_by     = Column(String(128))
+    claimed_at     = Column(_TS)
+    heartbeat_at   = Column(_TS)
     finished_at    = Column(_TS)
     created_at     = Column(_TS, nullable=False)
     created_by     = Column(String(100), nullable=False, default="")

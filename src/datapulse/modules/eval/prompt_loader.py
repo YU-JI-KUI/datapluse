@@ -98,3 +98,25 @@ def load_bu_prompt(bu_code: str, name: str) -> str:
 
     _cache[key] = content
     return content
+
+
+# 评测期间会用到的全部模板槽位(judge 每条样本 + advice 一次)。快照一次,整个
+# 任务复用,避免跑到一半被 bump_version() 清缓存后前后用不同 prompt,口径不一致。
+_SNAPSHOT_BU_SLOTS = (
+    "judge_system.md", "task_dispatch.md", "task_business_type.md",
+    "task_resolved.md", "task_review.md", "advice_system.md", "advice_user.md",
+)
+_SNAPSHOT_ROOT_SLOTS = ("judge_user.md",)
+
+
+def snapshot_for_bu(bu_code: str) -> dict[str, str]:
+    """把某 BU 评测要用的全部有效模板一次性读出,返回 {name: content}。
+
+    在 run_evaluation 入口调一次,贯穿整个任务。BU 槽位走 load_bu_prompt(bu→_default
+    回退),root 槽位走 load_prompt。读的是「当前生效内容」,此后任务内不再查库/缓存,
+    用户中途改 prompt 也只影响下次评测,不污染进行中的任务。
+    """
+    snap = {name: load_bu_prompt(bu_code, name) for name in _SNAPSHOT_BU_SLOTS}
+    for name in _SNAPSHOT_ROOT_SLOTS:
+        snap[name] = load_prompt(name)
+    return snap

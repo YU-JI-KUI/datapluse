@@ -29,7 +29,15 @@ def active_backend() -> str:
 
 
 class RateLimitedError(Exception):
-    """大模型限流/重试耗尽。上层据此暂停整个评测、退避后再继续，而不是跑成全垃圾。"""
+    """大模型限流/重试耗尽。上层据此暂停整个评测、退避后再继续，而不是跑成全垃圾。
+
+    partial: 触发限流的那一批里「已成功跑完」的 (sample_idx, judge) 列表。上层据此
+    把已完成部分落盘,避免续跑时整批重做。
+    """
+
+    def __init__(self, message: str, partial: list | None = None) -> None:
+        super().__init__(message)
+        self.partial = partial or []
 
 
 async def _judge_strong(sample: dict, bu: BUConfig) -> dict:
@@ -71,36 +79,48 @@ async def judge_one(sample: dict, bu: BUConfig) -> dict:
         return {"_error": str(e), "needs_human_review": True}
 
 
-async def judge_batch(samples: list[dict], bu: BUConfig, on_progress=None) -> list[dict]:
-    """并发跑一批样本。on_progress(done, total) 回调用于上报进度。"""
+async def judge_batch(samples: list[dict], bu: BUConfig) -> list[dict]:
+    """并发跑一批样本,返回与 samples 一一对应的 judge 结果。
+
+    限流熔断:任一 worker 撞限流即置 tripped,尚未开跑的 worker 直接放弃(不再白发
+    LLM 请求烧额度);已成功跑完的结果随 RateLimitedError.partial 上抛,供上层落盘,
+    续跑时不重做。在途请求无法收回(会自然跑完),但能挡住同批后续大量调用。
+    """
     total = len(samples)
     results: list[dict | None] = [None] * total
     sem = asyncio.Semaphore(max(1, settings.judge_concurrency))
-    done = 0
-    lock = asyncio.Lock()
+    tripped = asyncio.Event()   # 限流熔断标志:置位后未开跑的 worker 跳过
 
     async def worker(idx: int, s: dict):
-        nonlocal done
+        if tripped.is_set():
+            return
         async with sem:
+            if tripped.is_set():    # 排队期间可能已被熔断,再确认一次
+                return
             results[idx] = await judge_one(s, bu)
-        async with lock:
-            done += 1
-            if on_progress:
-                on_progress(done, total)
 
-    # return_exceptions=True:即便某 worker 抛出非预期异常,也不中断整批;
-    # 该位置的结果回填为带 _error 的占位,保证 results 与 samples 一一对应。
+    # return_exceptions=True:单 worker 非预期异常不中断整批;该位置回填带 _error 占位。
+    # judge_one 已把单条失败转成 _error,只有限流会以 RateLimitedError 冒泡到这里。
     outcomes = await asyncio.gather(
-        *(worker(i, s) for i, s in enumerate(samples)),
+        *(_guard(worker(i, s), tripped) for i, s in enumerate(samples)),
         return_exceptions=True,
     )
-    # 本批出现限流 → 整批上抛，让评测引擎暂停（已完成的批已落盘，不重做）
     if any(isinstance(o, RateLimitedError) for o in outcomes):
-        raise RateLimitedError("本批触发大模型限流")
+        partial = [(i, r) for i, r in enumerate(results) if r is not None]
+        raise RateLimitedError("本批触发大模型限流", partial=partial)
     for idx, o in enumerate(outcomes):
         if isinstance(o, Exception) and results[idx] is None:
             results[idx] = {"_error": str(o), "needs_human_review": True}
     return results  # type: ignore[return-value]
+
+
+async def _guard(coro, tripped: asyncio.Event):
+    """跑 worker;遇限流先置熔断标志再上抛,让同批尚未开跑的 worker 尽早放弃。"""
+    try:
+        return await coro
+    except RateLimitedError:
+        tripped.set()
+        raise
 
 
 async def generate_advice(insights: dict, bu: BUConfig, bu_dispatch: dict | None = None) -> dict:

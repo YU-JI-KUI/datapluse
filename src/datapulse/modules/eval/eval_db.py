@@ -91,14 +91,70 @@ def get_task(task_id: str) -> dict | None:
         return _repo(s).get_task(task_id)
 
 
-def list_tasks() -> list[dict]:
+def list_tasks_paged(page: int, page_size: int, bu: str = "") -> tuple[list[dict], int]:
     with eval_session() as s:
-        return _repo(s).list_tasks()
+        return _repo(s).list_tasks_paged(page, page_size, bu=bu)
 
 
-def find_unfinished() -> list[dict]:
+# ── 多 POD 抢占式调度 ─────────────────────────────────────────────────────────
+
+# 全局评测串行锁的 advisory key(任取一个进程间约定的常量即可,够独特避免与他处冲突)
+_EVAL_ADVISORY_KEY = 0x6576616C  # "eval" 的 ASCII
+
+
+def claim_next_task(worker_id: str) -> dict | None:
     with eval_session() as s:
-        return _repo(s).find_unfinished()
+        return _repo(s).claim_next_task(worker_id)
+
+
+def heartbeat(task_id: str, worker_id: str) -> bool:
+    with eval_session() as s:
+        return _repo(s).heartbeat(task_id, worker_id)
+
+
+def reclaim_stale(stale_seconds: int) -> int:
+    from datetime import timedelta
+    with eval_session() as s:
+        return _repo(s).reclaim_stale(_now_ts() - timedelta(seconds=stale_seconds))
+
+
+def requeue_idle() -> int:
+    with eval_session() as s:
+        return _repo(s).requeue_idle()
+
+
+def _now_ts():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Asia/Shanghai"))
+
+
+@contextmanager
+def advisory_lock():
+    """尝试拿全局评测串行锁(会话级 advisory lock)。拿到 yield True 并在退出时释放;
+    拿不到(已有 POD 在跑评测)yield False。
+
+    用独立连接持有,整个任务期间不放;评测落盘走各自的 eval_session,互不影响。
+    保证全集群「同时只跑一个评测任务」,避免多 POD 一起压垮内网 LLM 网关。
+    """
+    from sqlalchemy import text
+
+    from datapulse.repository.base import get_db
+    conn = get_db().engine.connect()
+    try:
+        got = conn.execute(
+            text("SELECT pg_try_advisory_lock(:k)"), {"k": _EVAL_ADVISORY_KEY}
+        ).scalar()
+        if not got:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _EVAL_ADVISORY_KEY})
+            conn.commit()
+    finally:
+        conn.close()
 
 
 def delete_task(task_id: str) -> bool:
@@ -139,21 +195,6 @@ def save_rows(task_id: str, rows: list[dict], created_by: str = "system") -> Non
 def done_row_indices(task_id: str) -> set[int]:
     with eval_session() as s:
         return _repo(s).done_row_indices(task_id)
-
-
-def load_rows(task_id: str) -> list[dict]:
-    with eval_session() as s:
-        return _repo(s).load_rows(task_id)
-
-
-def load_rows_paged(task_id: str, page: int, page_size: int) -> list[dict]:
-    with eval_session() as s:
-        return _repo(s).load_rows_paged(task_id, page, page_size)
-
-
-def count_rows(task_id: str) -> int:
-    with eval_session() as s:
-        return _repo(s).count_rows(task_id)
 
 
 def load_rows_filtered(task_id: str, page: int, page_size: int, q: str = "", intent: str = "") -> list[dict]:

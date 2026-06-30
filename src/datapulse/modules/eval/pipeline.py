@@ -10,6 +10,13 @@ import pandas as pd
 
 from datapulse.modules.eval.answer_sanitizer import sanitize_answer
 
+# 构造样本时上下文只保留最近 N 轮:judge 也只喂最近 N 轮,更早的留着纯属浪费内存。
+# 长会话(几百轮)若把每轮的全部前文都塞进 context,单会话内存是 O(轮数²),5万条
+# 叠加超长答案原文会 OOM。与 judge._MAX_CONTEXT_TURNS 对齐(取 judge 上限即可)。
+_CONTEXT_KEEP_TURNS = 3
+# 历史 AI 答只需大意,构造阶段即截断,既减小落盘 row_json 又降内存(judge 还会再截一次兜底)。
+_CTX_AI_MAX_LEN = 500
+
 # 逻辑键 -> 候选列名(按包含匹配,命中第一个)
 COLS: dict[str, list[str]] = {
     "question": ["客户问题"],
@@ -120,10 +127,16 @@ def _sample_from_group(group: list[dict], pos: int, m: dict[str, str], bu) -> di
 
     # 上下文 = 前文每一轮的「用户问 + AI 答原文」。用 turn 比较而非纯位置切片,
     # 保持与原实现一致:同会话相同 turn 的脏数据行互不算作对方的前/后文。
-    context = [
-        {"turn": r["_turn_n"], "user": r["question"], "ai": r["answer"]}
-        for r in group if r["_turn_n"] < turn
-    ]
+    # 只保留最近 _CONTEXT_KEEP_TURNS 轮(judge 也只喂这么多),更早的不进内存/不落盘;
+    # 历史 AI 答构造阶段即净化+截断,避免长会话 context 平方膨胀导致 OOM。
+    prior = [r for r in group if r["_turn_n"] < turn]
+    omitted = max(0, len(prior) - _CONTEXT_KEEP_TURNS)
+    context = []
+    for r in prior[-_CONTEXT_KEEP_TURNS:]:
+        ai = sanitize_answer((r["answer"] or "").strip(), bu.code)
+        if len(ai) > _CTX_AI_MAX_LEN:
+            ai = ai[:_CTX_AI_MAX_LEN] + "…(历史答案已截断)"
+        context.append({"turn": r["_turn_n"], "user": r["question"], "ai": ai})
     nxt = next((r for r in group if r["_turn_n"] > turn), None)
 
     return {
@@ -131,7 +144,8 @@ def _sample_from_group(group: list[dict], pos: int, m: dict[str, str], bu) -> di
         "question": row["question"],
         "session": row["session"],
         "turn": turn,
-        "context": context,
+        "context": context,                  # 已裁到最近 N 轮、AI 答已净化截断
+        "omitted_context_turns": omitted,    # 被省略的更早轮数(供 judge 提示)
         "dispatched_intent": dispatched,
         "dispatch_reason": row["dispatch_reason"],
         # 日志「分发BU」是否代表本BU;是→系统承接了,否则→对本BU视为拒识

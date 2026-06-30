@@ -14,15 +14,9 @@ from __future__ import annotations
 import json
 import logging
 
-from datapulse.modules.eval.answer_sanitizer import sanitize_answer
 from datapulse.modules.eval.bu.base import BUConfig
-from datapulse.modules.eval.prompt_loader import load_bu_prompt, load_prompt
 
 logger = logging.getLogger(__name__)
-
-# 上下文管理：只保留最近 N 轮历史，历史 AI 答截断到 M 字符（防长会话稀释关键信息）
-_MAX_CONTEXT_TURNS = 3
-_MAX_CTX_AI_LEN = 500
 
 # 各评测维度的判定规则文件,按此顺序拼进【任务】块。调某维度只改对应文件。
 _TASK_PROMPTS = (
@@ -60,24 +54,23 @@ def build_messages(sample: dict, bu: BUConfig) -> list[dict]:
     bu 提供意图清单与评测专家身份(证券/寿险不同)。
     """
     intents = bu.intents_block()
-    # 上下文:只保留最近 _MAX_CONTEXT_TURNS 轮(更早的对判当前问题帮助小，反而稀释
-    # 关键信息、撑长 prompt)。历史 AI 答也过净化器并截断(历史只需大意，不需全文)。
-    full_ctx = sample.get("context", [])
-    recent = full_ctx[-_MAX_CONTEXT_TURNS:]
+    # 上下文已在 pipeline 阶段裁到最近 N 轮、AI 答已净化截断(省内存/不落盘整坨)。
+    # 这里直接渲染,不再重复净化。被省略的更早轮数由 omitted_context_turns 透传。
+    recent = sample.get("context", [])
+    omitted = sample.get("omitted_context_turns", 0)
     ctx_lines = []
-    if len(full_ctx) > len(recent):
-        ctx_lines.append(f"    (省略更早 {len(full_ctx) - len(recent)} 轮，只保留最近 {len(recent)} 轮)")
+    if omitted > 0:
+        ctx_lines.append(f"    (省略更早 {omitted} 轮，只保留最近 {len(recent)} 轮)")
     for c in recent:
         ctx_lines.append(f"    第{c['turn']}轮 用户:{c['user']}")
-        ai = sanitize_answer((c.get("ai") or "").strip(), bu.code)
+        ai = (c.get("ai") or "").strip()
         if ai:
-            if len(ai) > _MAX_CTX_AI_LEN:
-                ai = ai[:_MAX_CTX_AI_LEN] + "…(历史答案已截断)"
             ctx_lines.append(f"         AI答:{ai}")
     ctx = "\n".join(ctx_lines) or "    (无前文,这是首轮)"
     # 各评测维度的判定规则按 BU 拆分(<bu_code>/ 优先,_default/ 回退),
     # 按 _TASK_PROMPTS 顺序拼进【任务】块。改某 BU 某维度只动对应文件。
-    tasks = "\n\n".join(load_bu_prompt(bu.code, f).strip() for f in _TASK_PROMPTS)
+    # 走 bu.prompt() 取任务快照,保证整个任务用同一份(中途改 prompt 不影响进行中的任务)。
+    tasks = "\n\n".join(bu.prompt(f).strip() for f in _TASK_PROMPTS)
     # 动态数据用 XML 标签包裹再填入，把「待评数据」和「指令」清晰隔开，避免模型
     # 把答案里的标签/相似问当成指令、或在长上下文里迷失关键部分。标签名取够独特，
     # 降低与数据内容（答案常含 HTML/JSON）的冲突。占位符仍在模板里，用户不会误删标签。
@@ -98,11 +91,11 @@ def build_messages(sample: dict, bu: BUConfig) -> list[dict]:
         "{tasks}": tasks,
         "{output_schema}": json.dumps(OUTPUT_SCHEMA, ensure_ascii=False, indent=2),
     }
-    user = load_prompt("judge_user.md")
+    user = bu.prompt("judge_user.md")
     for k, v in fields.items():
         user = user.replace(k, v)
     # system 人设走 prompts/<bu>/judge_system.md,缺则回退 prompts/_default/judge_system.md
-    system = load_bu_prompt(bu.code, "judge_system.md")
+    system = bu.prompt("judge_system.md")
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user},

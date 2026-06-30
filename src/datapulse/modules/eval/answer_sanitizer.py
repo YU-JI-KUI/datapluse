@@ -131,11 +131,20 @@ def _extract_generic(first, original: str) -> str | None:
     return None
 
 
+# 提取不出正文时保留原文的长度上限：超大 JSON 原样落盘会撑大 row_json、拖慢导出，
+# 且对模型判定无益（净化本就是为了去掉整坨结构）。统一截断防爆。
+_RAW_MAX_LEN = 2000
+
+
+def _truncate(s: str) -> str:
+    return s[:_RAW_MAX_LEN] + "…(原文超长已截断)" if len(s) > _RAW_MAX_LEN else s
+
+
 def _transform_extract_text(raw: str, bu_code: str) -> str:
     """统一提取入口：解析顶层 → 取首元素 → 先证券专属(仅证券BU)再通用 → 都不命中保留原文。"""
     parsed = _parse(raw)
     if parsed is None:
-        return raw[:2000] if len(raw) > 2000 else raw   # 非 JSON：原文（超长截断防爆）
+        return _truncate(raw)   # 非 JSON：原文（超长截断防爆）
     first = parsed[0] if isinstance(parsed, list) and parsed else parsed
 
     if bu_code == "securities" and isinstance(first, dict):
@@ -147,7 +156,7 @@ def _transform_extract_text(raw: str, bu_code: str) -> str:
     if got:
         return got
 
-    return raw   # 所有路径都不命中，保留原文（不丢数据）
+    return _truncate(raw)   # 所有路径都不命中：保留原文但截断（不丢关键信息，又防爆）
 
 
 # 额外的独立净化规则（如某 BU 需要完全不同的处理）可加进这里，按序匹配命中即用。

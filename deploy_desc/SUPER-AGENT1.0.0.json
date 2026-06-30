@@ -12,7 +12,8 @@
       "db/arkpg/20260508_arkpgdata_add_annotation_cot_fields.sql",
       "db/arkpg/20260627_arkpgdata_add_eval_tables.sql",
       "db/arkpg/20260627_arkpgdata_add_eval_prompt.sql",
-      "db/arkpg/20260628_arkpgdata_add_eval_category.sql"
+      "db/arkpg/20260628_arkpgdata_add_eval_category.sql",
+      "db/arkpg/20260630_arkpgdata_eval_worker_claim.sql"
     ]
   }
 }

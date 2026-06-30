@@ -12,21 +12,21 @@ def done_row_indices(task_id: str) -> set[int]:
     return eval_db.done_row_indices(task_id)
 
 
-def load_rows(task_id: str) -> list[dict]:
-    return eval_db.load_rows(task_id)
-
-
 def iter_rows(task_id: str, batch_size: int = 1000):
-    """分批读回已落盘行(按 row_index 排序),避免全量驻留内存。"""
-    page = 1
+    """分批读回已落盘行(按 row_index 升序),避免全量驻留内存。
+
+    用 keyset(row_index > 上批最大值)翻页,每批走 (task_id, row_index) 唯一索引定位,
+    整体 O(N);OFFSET 分页读到后段要先扫过前面再丢弃,续跑读回会越翻越慢。
+    """
+    after = -1   # row_index 从 0 起,-1 保证取到第一条
     while True:
-        batch = eval_db.load_rows_paged(task_id, page, batch_size)
+        batch = eval_db.load_rows_after(task_id, after, batch_size)
         if not batch:
             break
-        yield batch
+        yield [row_json for _idx, row_json in batch]
+        after = batch[-1][0]
         if len(batch) < batch_size:
             break
-        page += 1
 
 
 def save_rows(task_id: str, rows: list[dict]) -> None:

@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 
 from datapulse.modules.eval.bu.base import BUConfig
-from datapulse.modules.eval.prompt_loader import load_bu_prompt
 
 # 规则版阈值:解决率低于此判为需优化
 _LOW_RESOLVED = 0.6
@@ -49,8 +48,8 @@ def build_advice_prompt(insights: dict, bu: BUConfig, bu_dispatch: dict | None =
             for s in slices
         ],
     }
-    system = load_bu_prompt(bu.code, "advice_system.md").replace("{bu_name}", bu.name)
-    user = load_bu_prompt(bu.code, "advice_user.md").replace(
+    system = bu.prompt("advice_system.md").replace("{bu_name}", bu.name)
+    user = bu.prompt("advice_user.md").replace(
         "{payload}", json.dumps(payload, ensure_ascii=False, indent=2)
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
