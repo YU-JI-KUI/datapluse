@@ -137,8 +137,9 @@ export default function DetailDrawer({ row, open, onClose, taskId, intentOptions
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
+      {/* 右侧抽屉 + 三段式：固定头 / 滚动体 / 固定脚。长内容不憋屈，关闭键与复核操作始终可见。 */}
+      <DialogContent position="right" className="p-0 gap-0 flex flex-col overflow-hidden">
+        <DialogHeader className="shrink-0 px-6 pt-6 pb-3 border-b">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs text-muted-foreground">{row.session}</span>
             <EvalBadge tone="slate">第 {row.turn} 轮</EvalBadge>
@@ -147,10 +148,10 @@ export default function DetailDrawer({ row, open, onClose, taskId, intentOptions
             {j.needs_human_review && <EvalBadge tone="warn">需复核</EvalBadge>}
             {rv && <EvalBadge tone="good">已复核</EvalBadge>}
           </div>
-          <DialogTitle className="text-left mt-1">{row.question}</DialogTitle>
+          <DialogTitle className="text-left mt-1 pr-8">{row.question}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-6 mt-2">
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
           {/* 会话上下文 */}
           {Array.isArray(row.context) && row.context.length > 0 && (
             <Block icon={MessageSquare} title="会话上下文（前文）">
@@ -244,24 +245,28 @@ export default function DetailDrawer({ row, open, onClose, taskId, intentOptions
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-ring" />
                 </div>
               </div>
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-muted-foreground">
-                  {rv ? `已由 ${rv.reviewer || '—'} 复核` : '尚未复核'}
-                </div>
-                <div className="flex gap-2">
-                  {rv && (
-                    <Button variant="secondary" size="sm" onClick={handleRevokeReview} disabled={saving}>
-                      <RotateCcw className="w-4 h-4 mr-1.5" />撤销复核
-                    </Button>
-                  )}
-                  <Button size="sm" onClick={handleSubmitReview} disabled={saving}>
-                    {saving && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}提交复核
-                  </Button>
-                </div>
-              </div>
             </Block>
           )}
         </div>
+
+        {/* 固定脚：复核操作始终可见，不必滚到底 */}
+        {canReview && (
+          <div className="shrink-0 flex items-center justify-between gap-2 px-6 py-3 border-t bg-background">
+            <div className="text-xs text-muted-foreground">
+              {rv ? `已由 ${rv.reviewer || '—'} 复核` : '尚未复核'}
+            </div>
+            <div className="flex gap-2">
+              {rv && (
+                <Button variant="secondary" size="sm" onClick={handleRevokeReview} disabled={saving}>
+                  <RotateCcw className="w-4 h-4 mr-1.5" />撤销复核
+                </Button>
+              )}
+              <Button size="sm" onClick={handleSubmitReview} disabled={saving}>
+                {saving && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}提交复核
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   )
