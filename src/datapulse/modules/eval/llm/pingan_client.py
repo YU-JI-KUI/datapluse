@@ -121,7 +121,19 @@ async def call_bigmodel_api(
                 url=settings.open_ai_url, headers=headers, json=payload, timeout=timeout,
             )
             if response.status_code == 200:
-                return response.json()
+                try:
+                    return response.json()
+                except Exception as je:  # noqa: BLE001
+                    # 200 但响应体不是完整 JSON（网关把响应截断/流式中断，常见
+                    # Unterminated string）。这是偶发传输问题，重试大概率能拿到完整体，
+                    # 当可重试错误退避重试，而不是当成不可重试直接放弃。
+                    last_err = f"响应体非完整 JSON: {je}"
+                    logger.warning("大模型 200 响应解析失败 (attempt %d/%d): %s",
+                                   attempt + 1, max_retries, je)
+                    if attempt < max_retries - 1:
+                        await _backoff(attempt, None)
+                        continue
+                    return {"error": f"{last_err}，已重试 {max_retries} 次"}
             # 限流 / 暂时性故障 → 退避重试
             if response.status_code in retryable_status:
                 rate_limited = response.status_code == 429
