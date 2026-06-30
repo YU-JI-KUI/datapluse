@@ -189,21 +189,26 @@ def _extract_row(df: pd.DataFrame, i: int, m: dict[str, str]) -> dict:
     }
 
 
-def build_all_samples(df: pd.DataFrame, m: dict[str, str], bu) -> list[dict]:
-    """构造全部样本。先按会话分组(一次),组内切片取前后文,整体 O(N)。
+def build_all_samples(df: pd.DataFrame, m: dict[str, str], bu) -> tuple[list[dict], int]:
+    """构造全部评测样本。先按会话分组(一次),组内切片取前后文,整体 O(N)。
 
-    bu(BUConfig)用于判断每行分发BU是否代表本BU。
-    返回顺序按 row_index 升序,与落盘主键 (task_id, row_index) 对齐(续跑依赖)。
+    bu(BUConfig)用于判断分发BU是否代表本BU、以及该行是否为活动标问。
+    活动标问(前端写死按钮触发的写死回复)不生成评测样本——不喂模型、不计指标;
+    但其行仍留在 group 里,作为后续轮的上下文保留(它确实发生过,是对话的一部分)。
+    返回 (samples 按 row_index 升序, 被排除的活动标问条数)。续跑依赖 row_index 对齐。
     """
     groups: dict[str, list[dict]] = {}
     for i in range(len(df)):
         r = _extract_row(df, i, m)
         groups.setdefault(r["session"], []).append(r)
 
-    samples = [
-        _sample_from_group(group, pos, m, bu)
-        for group in groups.values()
-        for pos in range(len(group))
-    ]
+    samples = []
+    excluded = 0
+    for group in groups.values():
+        for pos in range(len(group)):
+            if bu.is_activity(group[pos]["question"]):
+                excluded += 1            # 活动标问:跳过评测,但 group 里仍在,供后续轮当前文
+                continue
+            samples.append(_sample_from_group(group, pos, m, bu))
     samples.sort(key=lambda s: s["row_index"])
-    return samples
+    return samples, excluded

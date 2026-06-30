@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from datapulse.modules.eval.bu.base import BUConfig, load_categories
+from datapulse.modules.eval.bu.base import BUConfig, load_activity_questions, load_categories
 from datapulse.modules.eval.bu.life_insurance import LIFE
 from datapulse.modules.eval.bu.securities import SECURITIES
 
@@ -26,9 +26,17 @@ def bu_codes() -> list[str]:
 
 
 def get_bu(code: str | None) -> BUConfig:
-    """按 code 取 BU 配置（intents 注入当前库/文件中的分类）;未知或空回默认。"""
+    """按 code 取 BU 配置;未知或空回默认。
+
+    intents（业务分类）与 activity_questions（活动标问）均注入当前库中的值,作为
+    快照固化进 frozen BUConfig,故页面改了不重启即生效、且任务中途不变。
+    """
     tpl = _TEMPLATES.get(code or DEFAULT_BU, _TEMPLATES[DEFAULT_BU])
-    return replace(tpl, intents=load_categories(tpl.code))
+    return replace(
+        tpl,
+        intents=load_categories(tpl.code),
+        activity_questions=load_activity_questions(tpl.code),
+    )
 
 
 def list_bus() -> list[dict]:

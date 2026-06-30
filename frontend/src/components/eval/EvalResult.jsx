@@ -45,7 +45,12 @@ export default function EvalResult({ taskId, result }) {
       {/* 4 张统计卡 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="评测样本" value={s.total_samples ?? 0}
-          sub={`日志共 ${f.total ?? s.total_samples ?? 0} 条`} tone="brand" icon={Database} />
+          sub={`日志共 ${f.total ?? s.total_samples ?? 0} 条`
+            + (f.excluded_activity ? `，已排除 ${f.excluded_activity} 条活动标问` : '')}
+          hint={f.excluded_activity
+            ? `活动标问（前端写死按钮触发的写死回复）不经 AI，已整条跳过 ${f.excluded_activity} 条：不喂模型、不计入分发准确率与解决率，仅作后续轮上下文保留。`
+            : undefined}
+          tone="brand" icon={Database} />
         <StatCard label="BU分发准确率" value={pct(s.dispatch_accuracy)}
           sub="AI 判该接与实际是否一致"
           hint={

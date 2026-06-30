@@ -324,7 +324,8 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
     df, m, filter_stats = load_and_prep(path)
     gold_info = detect_gold(df, m)
     mode = gold_info["mode"]
-    samples = build_all_samples(df, m, bu)
+    samples, excluded_activity = build_all_samples(df, m, bu)
+    filter_stats["excluded_activity"] = excluded_activity   # 跳过的活动标问条数,结果页展示
     total = len(samples)
     # 会话级指标基于 samples(judge 前即确定),无需进累加器
     sessions = len(set(s["session"] for s in samples))

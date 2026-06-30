@@ -18,7 +18,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from datapulse.modules.eval.entities import EvalCategory, EvalPrompt, EvalTask, EvalTaskRow
+from datapulse.modules.eval.entities import (
+    EvalActivityQuestion,
+    EvalCategory,
+    EvalPrompt,
+    EvalTask,
+    EvalTaskRow,
+)
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -429,3 +435,54 @@ class EvalCategoryRepository:
             for i, it in enumerate(items)
         ]).on_conflict_do_nothing(index_elements=["bu", "name"])
         self.session.execute(stmt)
+
+
+def _activity_to_dict(a: EvalActivityQuestion) -> dict[str, Any]:
+    return {
+        "id": a.id, "bu": a.bu, "question": a.question, "note": a.note,
+        "updated_at": _iso(a.updated_at), "updated_by": a.updated_by,
+    }
+
+
+class EvalActivityRepository:
+    """活动标问持久化层。(bu, question) 唯一；与客户问题精确相等即命中、整条跳过评测。"""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def list_by_bu(self, bu: str) -> list[dict]:
+        rows = self.session.execute(
+            select(EvalActivityQuestion).where(EvalActivityQuestion.bu == bu)
+            .order_by(EvalActivityQuestion.id)
+        ).scalars().all()
+        return [_activity_to_dict(a) for a in rows]
+
+    def list_questions(self, bu: str) -> list[str]:
+        """只取 question 文本列表，供评测加载活动标问集合（避免拉全字段）。"""
+        rows = self.session.execute(
+            select(EvalActivityQuestion.question).where(EvalActivityQuestion.bu == bu)
+        ).scalars().all()
+        return list(rows)
+
+    def create(self, bu: str, question: str, note: str = "", created_by: str = "system") -> dict:
+        ts = _now()
+        stmt = pg_insert(EvalActivityQuestion).values(
+            bu=bu, question=question, note=note,
+            created_at=ts, created_by=created_by, updated_at=ts, updated_by=created_by,
+        ).on_conflict_do_update(
+            index_elements=["bu", "question"],
+            set_={"note": note, "updated_at": ts, "updated_by": created_by},
+        )
+        self.session.execute(stmt)
+        a = self.session.execute(
+            select(EvalActivityQuestion).where(
+                EvalActivityQuestion.bu == bu, EvalActivityQuestion.question == question
+            )
+        ).scalars().first()
+        return _activity_to_dict(a)
+
+    def delete(self, act_id: int) -> bool:
+        n = self.session.query(EvalActivityQuestion).filter(
+            EvalActivityQuestion.id == act_id
+        ).delete()
+        return bool(n)

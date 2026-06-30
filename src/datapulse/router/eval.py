@@ -295,3 +295,33 @@ async def delete_category(cat_id: int, user: CurrentUser):
     if not eval_engine.delete_category(cat_id):
         raise NotFoundError("分类不存在")
     return success({"deleted": True})
+
+
+# ── 活动标问管理（写死按钮触发的写死回复，评测时整条跳过，不计入指标）────────────
+
+class ActivityBody(BaseModel):
+    question: str
+    note: str = ""
+
+
+@router.get("/activity-questions")
+async def list_activity_questions(user: CurrentUser, bu: str = "securities"):
+    """列出某 BU 的全部活动标问。"""
+    return success({"bu": bu, "questions": eval_engine.list_activity_questions(bu)})
+
+
+@router.post("/activity-questions")
+async def create_activity_question(user: CurrentUser, body: ActivityBody, bu: str = "securities"):
+    """新增一条活动标问（与客户问题精确相等即命中、整条跳过评测）。已存在则更新备注。"""
+    if not body.question.strip():
+        raise ParamError("活动标问不能为空")
+    return success(eval_engine.create_activity_question(
+        bu, body.question.strip(), body.note, operator=user.username))
+
+
+@router.delete("/activity-questions/{act_id}")
+async def delete_activity_question(act_id: int, user: CurrentUser):
+    """删除一条活动标问。"""
+    if not eval_engine.delete_activity_question(act_id):
+        raise NotFoundError("活动标问不存在")
+    return success({"deleted": True})

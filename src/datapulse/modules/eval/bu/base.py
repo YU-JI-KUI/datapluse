@@ -60,6 +60,35 @@ def load_categories(code: str) -> dict[str, str]:
     return cats
 
 
+# 活动标问缓存：以库为准，增删改时 bump_activity_version 失效。评测时 get_bu 把当前
+# 集合快照进 BUConfig，故页面改了不重启即生效。
+_activity_cache: dict[str, frozenset] = {}
+
+
+def bump_activity_version() -> None:
+    """活动标问增删后调用，使缓存失效（下次评测/读取即拿到最新）。"""
+    _activity_cache.clear()
+
+
+def load_activity_questions(code: str) -> frozenset:
+    """读某 BU 的活动标问集合（与客户问题精确相等即命中）。DB 不可用时返回空集。
+
+    返回 frozenset[str]，问题已 strip。无文件兜底——活动标问只在库里维护（区别于
+    业务分类有出厂 JSON），库里没有就视为「该 BU 暂无活动标问」，不过滤任何样本。
+    """
+    if code in _activity_cache:
+        return _activity_cache[code]
+    qs: set[str] = set()
+    try:
+        from datapulse.modules.eval import eval_db
+        qs = {q.strip() for q in eval_db.activity_list_questions(code) if q and q.strip()}
+    except Exception:
+        qs = set()
+    fs = frozenset(qs)
+    _activity_cache[code] = fs
+    return fs
+
+
 @dataclass(frozen=True)
 class BUConfig:
     """一个 BU 的全部领域知识。"""
@@ -90,6 +119,10 @@ class BUConfig:
     # 测试路径),此时 prompt(name) 实时回退 load_bu_prompt。
     prompts: dict | None = None
 
+    # 活动标问集合（前端写死按钮触发的写死回复，评测时整条跳过）。get_bu 时注入当前
+    # 库中该 BU 的集合，作为快照随任务固定。空集 = 不过滤任何样本。
+    activity_questions: frozenset = frozenset()
+
     def prompt(self, name: str) -> str:
         """取某模板内容:优先用任务快照,无快照则实时加载(回退兼容)。"""
         if self.prompts is not None and name in self.prompts:
@@ -99,6 +132,12 @@ class BUConfig:
         if name == "judge_user.md":
             return load_prompt(name)
         return load_bu_prompt(self.code, name)
+
+    def is_activity(self, question: str) -> bool:
+        """客户问题是否为活动标问（与集合精确相等，去首尾空格）。集合空则恒 False。"""
+        if not self.activity_questions:
+            return False
+        return (question or "").strip() in self.activity_questions
 
     def matches_dispatch(self, raw: str) -> bool:
         """日志「分发BU」列值是否代表本 BU(用于判断系统是否把这条分给了本 BU)。

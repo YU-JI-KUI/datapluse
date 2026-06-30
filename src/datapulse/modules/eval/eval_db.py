@@ -293,3 +293,30 @@ def category_delete(cat_id: int) -> bool:
 def category_bulk_seed(bu: str, items: list[dict], created_by: str = "system") -> None:
     with eval_session() as s:
         _cat_repo(s).bulk_seed(bu, items, created_by=created_by)
+
+
+# ── 活动标问 ──────────────────────────────────────────────────────────────────
+
+def _act_repo(s: Session):
+    from datapulse.modules.eval.repository import EvalActivityRepository
+    return EvalActivityRepository(s)
+
+
+def activity_list(bu: str) -> list[dict]:
+    with eval_session() as s:
+        return _act_repo(s).list_by_bu(bu)
+
+
+def activity_list_questions(bu: str) -> list[str]:
+    with eval_session() as s:
+        return _act_repo(s).list_questions(bu)
+
+
+def activity_create(bu: str, question: str, note: str = "", created_by: str = "system") -> dict:
+    with eval_session() as s:
+        return _act_repo(s).create(bu, question, note=note, created_by=created_by)
+
+
+def activity_delete(act_id: int) -> bool:
+    with eval_session() as s:
+        return _act_repo(s).delete(act_id)

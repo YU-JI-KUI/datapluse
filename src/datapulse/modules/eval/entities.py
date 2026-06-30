@@ -119,3 +119,27 @@ class EvalCategory(EvalBase):
     __table_args__ = (
         UniqueConstraint("bu", "name", name="uk_t_eval_category_bu_name"),
     )
+
+
+class EvalActivityQuestion(EvalBase):
+    """t_eval_activity_question — 活动标问（前端写死按钮 → 写死回复，不经 AI）
+
+    这类问题（如「帮我解锁消费权益」）回复是写死的，不经 AI 分发/生成，评测时
+    应整条跳过：不喂模型、不计入分发准确率/解决率，仅作为后续轮的上下文保留。
+    按 BU 一套，页面可增删改；客户问题与 question 精确相等即判定为活动标问。
+    """
+
+    __tablename__ = "t_eval_activity_question"
+
+    id          = Column(BigInteger, primary_key=True, autoincrement=True)
+    bu          = Column(String(64), nullable=False)     # 所属 BU code
+    question    = Column(Text, nullable=False)           # 活动标问全文（精确匹配）
+    note        = Column(String(255), nullable=False, default="")  # 备注（可选，说明用途）
+    created_at  = Column(_TS, nullable=False)
+    created_by  = Column(String(100), nullable=False, default="")
+    updated_at  = Column(_TS, nullable=False)
+    updated_by  = Column(String(100), nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("bu", "question", name="uk_t_eval_activity_bu_question"),
+    )

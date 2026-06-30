@@ -575,3 +575,27 @@ def delete_category(cat_id: int) -> bool:
     if deleted:
         _bump_categories()
     return deleted
+
+
+# ── 活动标问管理 ──────────────────────────────────────────────────────────────
+
+def _bump_activity():
+    from datapulse.modules.eval.bu.base import bump_activity_version
+    bump_activity_version()
+
+
+def list_activity_questions(bu: str) -> list[dict]:
+    return eval_db.activity_list(bu)
+
+
+def create_activity_question(bu: str, question: str, note: str = "", operator: str = "system") -> dict:
+    rec = eval_db.activity_create(bu, question, note=note, created_by=operator)
+    _bump_activity()
+    return rec
+
+
+def delete_activity_question(act_id: int) -> bool:
+    deleted = eval_db.activity_delete(act_id)
+    if deleted:
+        _bump_activity()
+    return deleted
