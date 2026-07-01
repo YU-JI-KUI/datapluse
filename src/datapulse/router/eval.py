@@ -191,6 +191,24 @@ async def dryrun_row(task_id: str, row_index: int, user: CurrentUser,
     return success(result)
 
 
+@router.post("/tasks/{task_id}/rerun-subset")
+async def rerun_subset(task_id: str, user: CurrentUser, flag: str = Query("review")):
+    """用最新提示词(含业务知识)对某筛选子集重跑 Judge、覆盖结果、全量重算指标。
+
+    阶段一 flag=review（待复核子集，已排除人工复核过的行）。同步执行，子集上限 50 条；
+    超限返回提示走全量重测。会调 LLM、覆盖对应行的 AI 判定。"""
+    if not eval_engine.get_task(task_id):
+        raise NotFoundError("任务不存在")
+    r = await eval_engine.rerun_subset(task_id, flag=flag, operator=user.username)
+    if r.get("error"):
+        raise ParamError(r["error"])
+    if r.get("over_limit"):
+        raise ParamError(
+            f"待重跑子集 {r['total_candidates']} 条，超过单次上限 {r['limit']} 条；"
+            f"请缩小范围，或用「重新评测」全量重跑。")
+    return success(r)
+
+
 @router.post("/tasks/{task_id}/resume")
 async def resume_task(task_id: str, user: CurrentUser):
     """断点续跑：对中断的任务，跳过已完成行继续。"""

@@ -164,6 +164,57 @@ def delete_review(task_id: str, row_index: int) -> bool:
     return eval_db.review_delete(task_id, row_index)
 
 
+# 子集重跑单次上限:同步跑,几十条几十秒可接受;超限提示走全量 rerun。
+_RERUN_SUBSET_MAX = 50
+
+
+async def rerun_subset(task_id: str, flag: str = "review", operator: str = "system") -> dict:
+    """用最新提示词(含业务知识)对某筛选子集重跑 Judge、覆盖结果、全量重算指标。
+
+    阶段一:flag='review'(待复核子集,已排除人工复核过的行)。同步执行,上限
+    _RERUN_SUBSET_MAX 条(超限抛错,提示走全量 rerun)。拿全局 advisory 锁避免与正在
+    跑的评测抢 LLM。返回 {reran, total_candidates, over_limit}。
+    """
+    from datapulse.modules.eval import eval_db as _db
+    from datapulse.modules.eval.evaluator import recompute_result_from_rows
+    from datapulse.modules.eval.judge import assemble_row_sample_from_row
+    from datapulse.modules.eval.llm.judge_runner import judge_batch
+
+    t = eval_db.get_task(task_id)
+    if not t:
+        return {"error": "任务不存在"}
+    indices = eval_db.rerun_subset_indices(task_id, flag)
+    if not indices:
+        return {"reran": 0, "total_candidates": 0, "over_limit": False}
+    if len(indices) > _RERUN_SUBSET_MAX:
+        return {"reran": 0, "total_candidates": len(indices), "over_limit": True,
+                "limit": _RERUN_SUBSET_MAX}
+
+    from datapulse.modules.eval.evaluator import assemble_row, other_label
+    bu = get_bu(t.get("bu"))            # 注入最新 prompt/业务知识/分类快照
+    allowed = set(bu.intents.keys())
+    other = other_label(bu)
+
+    with _db.advisory_lock() as got:
+        if not got:
+            return {"error": "有评测任务正在运行，请稍后再试"}
+        # 重建 sample → 用最新 bu 重 judge → 覆盖对应行
+        row_map = eval_db.load_rows_by_indices(task_id, indices)
+        samples = [assemble_row_sample_from_row(row_map[i]) for i in indices if i in row_map]
+        judges = await judge_batch(samples, bu)
+        new_rows = [assemble_row(s, j, allowed, other) for s, j in zip(samples, judges)]
+        eval_db.save_rows(task_id, new_rows, created_by=operator)
+
+        # 全量重算 summary(扫全表聚合,不调 LLM),覆盖 result_json
+        old = eval_db.load_result(task_id) or {}
+        mode = old.get("mode") or (old.get("summary", {}) or {}).get("mode") or "production"
+        new_result = recompute_result_from_rows(old, eval_db.iter_all_row_jsons(task_id), mode)
+        eval_db.save_result(task_id, new_result, updated_by=operator)
+
+    _log.info("eval.rerun_subset.done", task_id=task_id, flag=flag, reran=len(new_rows))
+    return {"reran": len(new_rows), "total_candidates": len(indices), "over_limit": False}
+
+
 async def dryrun_row(task_id: str, row_index: int,
                      business_knowledge: str | None = None) -> dict | None:
     """用当前 prompt 对某一条重新跑 Judge,返回新旧对比,不落库。

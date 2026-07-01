@@ -6,11 +6,14 @@
  *  分发场景（正常/该拒未拒…）只在详情页展示，此处分发判定列只看 AI/人工 是否一致。
  */
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, AlertTriangle, Search } from 'lucide-react'
+import { toast } from 'sonner'
+import { ChevronRight, AlertTriangle, Search, Zap, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
 import { EvalBadge, YesNo, SectionTitle } from './EvalPrimitives'
 import DetailDrawer from './DetailDrawer'
@@ -36,6 +39,24 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
   // 复核成功后：触发当前视图重拉（reloadKey 变会同时驱动「全部」和「需复核」两个 effect）
   function onReviewed() {
     setReloadKey(k => k + 1)
+  }
+
+  const [rerunOpen, setRerunOpen] = useState(false)
+  const [rerunning, setRerunning] = useState(false)
+
+  async function handleRerunSubset() {
+    setRerunning(true)
+    try {
+      const r = await evalApi.rerunSubset(taskId, 'review')
+      const n = RESP(r).reran ?? 0
+      toast.success(`已用最新提示词重跑 ${n} 条，指标已更新（重进结果页查看）`)
+      setReloadKey(k => k + 1)   // 刷新需复核列表（重跑后判定可能变、不再需复核的会消失）
+    } catch (e) {
+      toast.error(e.response?.data?.message || '重跑失败')
+    } finally {
+      setRerunning(false)
+      setRerunOpen(false)
+    }
   }
 
   const isAll = filter === 'all'
@@ -138,6 +159,13 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
               </SelectContent>
             </Select>
           )}
+          {filter === 'review' && reviewRows.length > 0 && (
+            <Button variant="outline" size="sm" className="ml-auto h-8"
+              onClick={() => setRerunOpen(true)} disabled={rerunning}>
+              {rerunning ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />重跑中…</>
+                : <><Zap className="w-3.5 h-3.5 mr-1.5" />用最新提示词重跑这批</>}
+            </Button>
+          )}
         </div>
       </CardHeader>
       <CardContent className="p-0">
@@ -220,6 +248,17 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
 
       <DetailDrawer row={active} open={!!active} onClose={() => setActive(null)}
         taskId={taskId} intentOptions={intentOptions} onReviewed={onReviewed} />
+
+      <ConfirmDialog
+        open={rerunOpen}
+        onOpenChange={v => { if (!v) setRerunOpen(false) }}
+        title="用最新提示词重跑这批"
+        description={`将对当前「需复核」的 ${reviewRows.length} 条用最新提示词（含业务知识）重新评测，`
+          + `覆盖它们的 AI 判定并重算指标。会调用大模型；已人工复核过的不受影响。`
+          + `单次上限 50 条，超出请用「重新评测」全量重跑。`}
+        confirmLabel="开始重跑"
+        onConfirm={handleRerunSubset}
+      />
     </Card>
   )
 }

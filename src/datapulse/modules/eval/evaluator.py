@@ -448,6 +448,42 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
     }
 
 
+def recompute_result_from_rows(old_result: dict, rows_batches, mode: str) -> dict:
+    """用全部 row(可能被子集重跑覆盖过)重新聚合指标,合并进旧 result。
+
+    子集重跑后调:只重算「依赖 judge 结果的指标」(分发漏斗/准确率/解决率/需复核/
+    业务分类分布/校准指标),保留 result 里数据固有、不因重 judge 变的字段
+    (mode/sessions/multi_turn/filter_stats/gold_coverage/advice/disagreements)。
+    rows_batches: 可迭代,每项是一批 row dict(全量,keyset 分批读)。
+    """
+    import copy
+    agg = _StreamAggregator()
+    for batch in rows_batches:
+        agg.update(batch)
+
+    out = copy.deepcopy(old_result)
+    s = out.get("summary", {})
+    bu_dispatch = agg.bu_dispatch()
+    insights = agg.insights()
+    # 保留 insights.overall 里评测时算的会话级字段(count/in_bu_count 由 rows 重算即可,
+    # 这些本就是 rows 派生的),整体覆盖 insights 是对的。
+    s["bu_dispatch"] = bu_dispatch
+    s["dispatch_accuracy"] = bu_dispatch["accuracy"]
+    s["resolved_rate"] = insights["overall"]["resolved_rate"]
+    s["end_to_end_resolved_rate"] = insights["overall"]["resolved_rate"]
+    s["needs_review"] = agg.needs_review
+    s["disagreement_count"] = agg.disagreement_count
+    s["errors"] = agg.errors
+    s["total_samples"] = agg.total
+    out["summary"] = s
+    out["insights"] = insights
+    out["intent_distribution"] = agg.intent_distribution()
+    if mode == "calibration":
+        out["metrics"] = agg.metrics()
+    out["disagreements"] = agg.disagreements
+    return out
+
+
 # ── 人工复核：把复核覆盖叠加到评测结果上，重算受影响的指标 ────────────────────
 
 def apply_reviews_to_result(result: dict, reviews: list[dict], ai_rows: dict[int, dict]) -> dict:

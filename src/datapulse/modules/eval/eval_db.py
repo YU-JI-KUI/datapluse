@@ -222,6 +222,18 @@ def load_rows_by_indices(task_id: str, indices: list[int]) -> dict[int, dict]:
         return _repo(s).load_rows_by_indices(task_id, indices)
 
 
+def rerun_subset_indices(task_id: str, flag: str) -> list[int]:
+    with eval_session() as s:
+        return _repo(s).rerun_subset_indices(task_id, flag)
+
+
+def iter_all_row_jsons(task_id: str, batch_size: int = 1000):
+    """跨独立 session 分批读回全部 row_json(全量重算 summary 用)。"""
+    with eval_session() as s:
+        # 在同一 session 内迭代完(生成器 yield 期间 session 保持打开)
+        yield from _repo(s).iter_all_row_jsons(task_id, batch_size=batch_size)
+
+
 def save_result(task_id: str, result: dict, updated_by: str = "system") -> None:
     with eval_session() as s:
         _repo(s).save_result(task_id, result, updated_by=updated_by)

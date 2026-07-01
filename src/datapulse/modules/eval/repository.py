@@ -310,6 +310,43 @@ class EvalRepository:
         ).scalars().all()
         return list(rows)
 
+    def rerun_subset_indices(self, task_id: str, flag: str) -> list[int]:
+        """按筛选取待重跑的 row_index(排除已复核行——人工结论优先,不被自动覆盖)。
+
+        阶段一支持 flag='review'(待人工复核)。返回升序 row_index 列表。
+        """
+        reviewed = (
+            select(EvalReview.row_index).where(EvalReview.task_id == task_id).scalar_subquery()
+        )
+        conds = [EvalTaskRow.task_id == task_id, EvalTaskRow.row_index.notin_(reviewed)]
+        if flag == "review":
+            conds.append(
+                EvalTaskRow.row_json["judge"]["needs_human_review"].as_boolean().is_(True)
+            )
+        else:
+            raise ValueError(f"暂不支持的重跑筛选: {flag}")
+        rows = self.session.execute(
+            select(EvalTaskRow.row_index).where(*conds).order_by(EvalTaskRow.row_index)
+        ).scalars().all()
+        return [int(i) for i in rows]
+
+    def iter_all_row_jsons(self, task_id: str, batch_size: int = 1000):
+        """分批读回该任务全部 row_json(按 row_index 升序,keyset),供全量重算 summary。"""
+        after = -1
+        while True:
+            batch = self.session.execute(
+                select(EvalTaskRow.row_index, EvalTaskRow.row_json)
+                .where(EvalTaskRow.task_id == task_id, EvalTaskRow.row_index > after)
+                .order_by(EvalTaskRow.row_index)
+                .limit(batch_size)
+            ).all()
+            if not batch:
+                break
+            yield [rj for _idx, rj in batch]
+            after = int(batch[-1][0])
+            if len(batch) < batch_size:
+                break
+
     # ── 聚合结果 ──────────────────────────────────────────────────────────────
 
     def save_result(self, task_id: str, result: dict, updated_by: str = "system") -> None:

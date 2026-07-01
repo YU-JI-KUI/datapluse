@@ -466,6 +466,9 @@ export const evalApi = {
   dryrunRow: (taskId, rowIndex, businessKnowledge) =>
     api.post(`/eval/tasks/${taskId}/rows/${rowIndex}/dryrun`,
       businessKnowledge != null ? { business_knowledge: businessKnowledge } : {}),
+  // 子集重跑：用最新提示词对某筛选子集重评、覆盖、全量重算指标（同步，上限 50 条）
+  rerunSubset: (taskId, flag = 'review') =>
+    api.post(`/eval/tasks/${taskId}/rerun-subset`, {}, { params: { flag } }),
 
   // 三种导出（带 token 的 blob 下载）
   // 文件名以后端 Content-Disposition 为准（含原始上传文件名前缀）；下方 fallback 仅在
