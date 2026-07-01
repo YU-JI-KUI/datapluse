@@ -1,9 +1,13 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ d68544fa
+# 基于 origin/main @ 7bec12c0
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   d68544fa 评测报告新增会话轮次分布图（动态分桶）
-frontend/src/components/eval/EvalResult.jsx
-frontend/src/components/eval/TurnDistributionChart.jsx
-src/datapulse/modules/eval/evaluator.py
-tests/eval/test_turn_dist.py
+#   7bec12c0 评测详情页闭环调优：业务知识 + 单条试跑 + 一键保存
+frontend/src/components/eval/DetailDrawer.jsx
+frontend/src/lib/api.js
+scripts/analyze_answer_length.py
+src/datapulse/modules/eval/judge.py
+src/datapulse/modules/eval/prompt_loader.py
+src/datapulse/modules/eval/prompts/_default/business_knowledge.md
+src/datapulse/pipeline/eval_engine.py
+src/datapulse/router/eval.py
