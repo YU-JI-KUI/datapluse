@@ -1,8 +1,16 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 6c906ff6
+# 基于 origin/main @ caa497fe
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   6c906ff6 修复复核后明细消失 + 需复核过滤仍显示已复核
+#   caa497fe 新增 AI 评测使用与原理文档
+#   988bbbd5 评测子集重跑（阶段一）：需复核子集用最新提示词重跑并重算指标
+docs/ai_eval_guide.md
+docs/eval_subset_rerun_design.md
 frontend/src/components/eval/RowsTable.jsx
+frontend/src/lib/api.js
+src/datapulse/modules/eval/eval_db.py
+src/datapulse/modules/eval/evaluator.py
 src/datapulse/modules/eval/repository.py
 src/datapulse/pipeline/eval_engine.py
+src/datapulse/router/eval.py
+tests/eval/test_subset_rerun.py
