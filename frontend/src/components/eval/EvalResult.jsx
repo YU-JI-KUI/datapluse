@@ -9,6 +9,7 @@ import AdvicePanel from './AdvicePanel'
 import InsightsPanel from './InsightsPanel'
 import IntentCharts from './IntentCharts'
 import SourceBreakdownChart from './SourceBreakdownChart'
+import TurnDistributionChart from './TurnDistributionChart'
 import MetricsPanel from './MetricsPanel'
 import RowsTable from './RowsTable'
 import { evalApi } from '@/lib/api'
@@ -122,6 +123,7 @@ export default function EvalResult({ taskId, result }) {
       <InsightsPanel insights={result.insights} />
       <IntentCharts insights={result.insights} />
       <SourceBreakdownChart filterStats={result.filter_stats} />
+      <TurnDistributionChart filterStats={result.filter_stats} />
 
       {/* 校准指标（仅 calibration） */}
       {isCalib && (

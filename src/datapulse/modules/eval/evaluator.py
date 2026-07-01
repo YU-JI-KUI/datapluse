@@ -385,6 +385,7 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
     # 会话级指标基于 samples(judge 前即确定),无需进累加器
     sessions = len(set(s["session"] for s in samples))
     multi_turn = _count_multi_turn(samples)
+    filter_stats["turn_distribution"] = turn_distribution(samples)   # 会话轮次分布(动态分桶)
     if on_progress:
         on_progress("loaded", 1, 1)
 
@@ -645,8 +646,49 @@ def _bu_dispatch_stats(rows: list[dict]) -> dict:
     }
 
 
-def _count_multi_turn(samples: list[dict]) -> int:
+def _session_turns(samples: list[dict]) -> dict[str, int]:
+    """每通会话的总轮次 = 该会话内样本 turn 的最大值。"""
     sess_turns: dict[str, int] = {}
     for s in samples:
         sess_turns[s["session"]] = max(sess_turns.get(s["session"], 0), s["turn"])
-    return sum(1 for v in sess_turns.values() if v > 1)
+    return sess_turns
+
+
+def _count_multi_turn(samples: list[dict]) -> int:
+    return sum(1 for v in _session_turns(samples).values() if v > 1)
+
+
+def turn_distribution(samples: list[dict]) -> list[dict]:
+    """会话轮次分布(按会话:每通对话总轮次)。低轮次单独成档,高轮次按分位数动态归桶。
+
+    不写死区间:1/2/3 轮各一档(通常占大头),>3 轮的用中位数动态切 2 档 + 封顶档,
+    区间由当前数据的实际分布算出。总档数 ≤5;数据轮次少时自动少于 5 档,不硬凑。
+    返回 [{name, count}](会话数),供柱状图。
+    """
+    turns = sorted(_session_turns(samples).values())
+    if not turns:
+        return []
+
+    buckets: list[tuple[str, int]] = []
+    # 1/2/3 轮各单独档
+    for k in (1, 2, 3):
+        c = sum(1 for t in turns if t == k)
+        if c:
+            buckets.append((f"{k}轮", c))
+
+    high = [t for t in turns if t > 3]
+    if high:
+        mx = max(high)
+        if mx == 4:
+            buckets.append(("4轮", len(high)))
+        else:
+            # >3 轮的用中位数动态切:4~mid / (mid+1)~最大。区间随数据变,不写死。
+            mid = high[len(high) // 2]
+            mid = min(max(mid, 4), mx - 1)   # 保证切点落在 [4, mx-1],两档都非空且区间合法
+            lo = sum(1 for t in high if t <= mid)
+            hi = len(high) - lo
+            if lo:
+                buckets.append((f"4-{mid}轮", lo))
+            if hi:
+                buckets.append((f"{mid + 1}轮及以上", hi))
+    return [{"name": n, "count": c} for n, c in buckets]
