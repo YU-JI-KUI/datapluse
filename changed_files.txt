@@ -1,22 +1,12 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 476a2213
+# 基于 origin/main @ 13d814c7
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   476a2213 评测新增规则短路：命中写死结果免 LLM，仍计入指标
-db/arkpg/20260428_arkpgdata_init.sql
-db/arkpg/20260701_arkpgdata_add_eval_rule.sql
-deploy_desc/SUPER-AGENT1.0.0.json
-frontend/src/App.jsx
-frontend/src/components/Layout.jsx
+#   13d814c7 评测报告新增来源分布图 + 柱状图带百分比
 frontend/src/components/eval/EvalResult.jsx
-frontend/src/lib/api.js
-frontend/src/pages/EvalRules.jsx
-src/datapulse/modules/eval/bu/base.py
-src/datapulse/modules/eval/bu/registry.py
-src/datapulse/modules/eval/entities.py
-src/datapulse/modules/eval/eval_db.py
+frontend/src/components/eval/IntentCharts.jsx
+frontend/src/components/eval/SourceBreakdownChart.jsx
 src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/repository.py
-src/datapulse/pipeline/eval_engine.py
-src/datapulse/router/eval.py
+src/datapulse/modules/eval/pipeline.py
+tests/eval/test_activity.py
 tests/eval/test_rule_bypass.py
