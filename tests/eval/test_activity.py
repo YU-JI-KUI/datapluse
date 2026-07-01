@@ -31,7 +31,7 @@ def test_activity_empty_set_skips_nothing():
         {"客户问题": "帮我解锁消费权益", "客户咨询轮次": "1", "应用会话ID": "S", "答案": "已解锁", "分发BU": "证券"},
     ])
     samples, excluded = build_all_samples(df, m, bu)
-    assert len(samples) == 1 and excluded == 0
+    assert len(samples) == 1 and sum(excluded.values()) == 0
 
 
 def test_activity_skipped_and_counted():
@@ -42,7 +42,7 @@ def test_activity_skipped_and_counted():
         {"客户问题": "我的总资产", "客户咨询轮次": "2", "应用会话ID": "S", "答案": "52万", "分发BU": "证券"},
     ])
     samples, excluded = build_all_samples(df, m, bu)
-    assert excluded == 1
+    assert sum(excluded.values()) == 1
     assert len(samples) == 1
     assert samples[0]["question"] == "我的总资产"   # 只剩非活动标问那条
 
@@ -55,7 +55,7 @@ def test_activity_kept_as_context():
         {"客户问题": "还有别的权益吗", "客户咨询轮次": "2", "应用会话ID": "S", "答案": "有积分", "分发BU": "证券"},
     ])
     samples, excluded = build_all_samples(df, m, bu)
-    assert excluded == 1 and len(samples) == 1
+    assert sum(excluded.values()) == 1 and len(samples) == 1
     ctx = samples[0]["context"]
     # 第2轮的前文应含被跳过的活动标问那轮
     assert len(ctx) == 1

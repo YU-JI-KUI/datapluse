@@ -62,9 +62,10 @@ def test_streaming_rule_hit_skips_llm(monkeypatch):
         _sample(2, "我要开户", "开户流程如下"),   # 不在规则 → 走 LLM
     ]
     agg = _StreamAggregator()
-    rule_hit = asyncio.run(_judge_streaming(samples, bu, None, None, False, agg))
+    rule_breakdown = asyncio.run(_judge_streaming(samples, bu, None, None, False, agg))
 
-    assert rule_hit == 1                 # 只有 row0 命中规则
+    assert sum(rule_breakdown.values()) == 1   # 只有 row0 命中规则
+    assert rule_breakdown == {"转人工": 1}      # 按规则问题细分
     assert called["batch"] == 2          # 只有 row1、row2 进了 LLM
     assert agg.total == 3                # 3 条都进了统计（命中的也计入指标）
 

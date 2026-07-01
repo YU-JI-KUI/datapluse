@@ -319,7 +319,8 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
         on_progress("judging", done_count, total)
 
     # 规则短路:命中的直接用写死 judge 结果,不进 LLM。命中判据 = 问题精确 + 答案一致。
-    rule_hit = 0
+    from collections import Counter
+    rule_breakdown: Counter = Counter()   # 按规则问题细分命中数,供来源分布图
     pending = []
     rule_rows = []
     for s in todo:
@@ -328,7 +329,7 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
             judge = dict(rj)
             judge["_source"] = "rule"          # 标记来源,明细可区分「规则命中」非 AI 判
             rule_rows.append(assemble_row(s, judge, allowed, other))
-            rule_hit += 1
+            rule_breakdown[(s.get("question") or "").strip()] += 1
         else:
             pending.append(s)
     if rule_rows:
@@ -363,7 +364,7 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
         if on_progress:
             on_progress("judging", done_count, total)
 
-    return rule_hit
+    return dict(rule_breakdown)
 
 
 async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None, persist=False) -> dict:
@@ -377,8 +378,9 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
     df, m, filter_stats = load_and_prep(path)
     gold_info = detect_gold(df, m)
     mode = gold_info["mode"]
-    samples, excluded_activity = build_all_samples(df, m, bu)
-    filter_stats["excluded_activity"] = excluded_activity   # 跳过的活动标问条数,结果页展示
+    samples, activity_breakdown = build_all_samples(df, m, bu)
+    activity_total = sum(activity_breakdown.values())
+    filter_stats["excluded_activity"] = activity_total   # 跳过的活动标问总数,结果页展示
     total = len(samples)
     # 会话级指标基于 samples(judge 前即确定),无需进累加器
     sessions = len(set(s["session"] for s in samples))
@@ -387,8 +389,18 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
         on_progress("loaded", 1, 1)
 
     agg = _StreamAggregator()
-    rule_hit = await _judge_streaming(samples, bu, on_progress, task_id, persist, agg)
-    filter_stats["rule_hit"] = rule_hit   # 规则短路命中数(免 LLM),结果页展示
+    rule_breakdown = await _judge_streaming(samples, bu, on_progress, task_id, persist, agg)
+    rule_total = sum(rule_breakdown.values())
+    filter_stats["rule_hit"] = rule_total   # 规则短路命中总数(免 LLM),结果页展示
+    # 来源分布(供柱状图):每个活动标问、每条规则各命中多少 + 其余走 LLM 的数量。
+    # 全集 = 整个日志文件 = 活动标问 + 规则命中 + LLM 评测。
+    filter_stats["source_breakdown"] = {
+        "activity": [{"name": k, "count": v} for k, v in
+                     sorted(activity_breakdown.items(), key=lambda x: -x[1])],
+        "rule": [{"name": k, "count": v} for k, v in
+                 sorted(rule_breakdown.items(), key=lambda x: -x[1])],
+        "llm": total - rule_total,   # 参与评测(total) 中扣掉规则命中 = 真正调 LLM 的
+    }
 
     # 校准指标仅在 calibration 模式算;production 无金标则为空
     metrics = agg.metrics() if mode == "calibration" else []
