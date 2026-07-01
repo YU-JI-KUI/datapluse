@@ -44,13 +44,27 @@ def _dispatch_correct(sample: dict, judge: dict) -> bool | None:
 # 统计切片时归为空(落到「(未分类)」),不污染各业务类型的解决率。
 _NON_BUSINESS_TYPES = {"非本BU", "拒识", "其他", ""}
 
+# 模型自创、不在配置清单内的分类,统一归入此桶。保证报告里业务分类是「闭集」:
+# 只出现配置的 N 个分类 + 这一个兜底桶,不会冒出几十个模型跑飞的标签。
+_OTHER_BUCKET = "其他(清单外)"
 
-def _business_type(judge: dict) -> str:
-    """取模型返回的业务分类标签(字段名 business_type)。非业务分类占位值归空。"""
+
+def _business_type(judge: dict, allowed: set | None = None) -> str:
+    """取模型返回的业务分类标签(字段名 business_type)并做闭集约束。
+
+    - 非业务分类占位值(非本BU/拒识/其他/空)→ 归空(落「(未分类)」,不算业务分类)。
+    - allowed 给定时:标签必须在清单内才保留,否则归入「其他(清单外)」——模型常不遵守
+      「只从清单选」,自创/改写标签会让报告冒出几十个分类,这里硬兜底成闭集。
+    - allowed 为 None(小数据/测试路径)时不校验,保留原值。
+    """
     if not isinstance(judge, dict):
         return ""
     bt = (judge.get("business_type") or "").strip()
-    return "" if bt in _NON_BUSINESS_TYPES else bt
+    if bt in _NON_BUSINESS_TYPES:
+        return ""
+    if allowed is not None and bt not in allowed:
+        return _OTHER_BUCKET
+    return bt
 
 
 def _dispatch_scene(sample: dict, judge: dict) -> str:
@@ -71,8 +85,12 @@ def _dispatch_scene(sample: dict, judge: dict) -> str:
     return "该拒未拒" if (actual and not should) else "该分未分"
 
 
-def assemble_row(sample: dict, judge: dict) -> dict:
-    """把一条样本 + judge 输出组装成明细行(抽出复用,供续跑场景也能调)。"""
+def assemble_row(sample: dict, judge: dict, allowed_intents: set | None = None) -> dict:
+    """把一条样本 + judge 输出组装成明细行(抽出复用,供续跑场景也能调)。
+
+    allowed_intents:该 BU 的合法业务分类集合(= bu.intents 的 key)。传入后对模型返回的
+    business_type 做闭集约束,清单外的归「其他(清单外)」,避免报告冒出几十个跑飞分类。
+    """
     gold = sample["gold"]
     dispatch_correct = _dispatch_correct(sample, judge)
     j_dispatch = "" if dispatch_correct is None else ("是" if dispatch_correct else "否")
@@ -89,7 +107,7 @@ def assemble_row(sample: dict, judge: dict) -> dict:
         "dispatched_to_bu": sample.get("dispatched_to_bu", False),
         "answer_text": sample["answer_text"],
         "judge": judge,
-        "j_intent": _business_type(judge),
+        "j_intent": _business_type(judge, allowed_intents),
         "dispatch_correct": dispatch_correct,
         "dispatch_scene": _dispatch_scene(sample, judge),  # 正常/该拒未拒/该分未分
         "j_dispatch": j_dispatch,
@@ -276,6 +294,7 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
     落盘:分批写入,避免大批量跑一半中断后全部重来。
     """
     total = len(samples)
+    allowed = set(bu.intents.keys())   # 该 BU 的合法业务分类闭集,约束模型跑飞的分类
     done_idx: set[int] = set()
     if persist and task_id:
         done_idx = store.done_row_indices(task_id)
@@ -301,10 +320,10 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
             # 限流:把这批已成功跑完的部分先落盘(不喂累加器——累加器会在续跑读回时
             # 重建),再上抛让引擎暂停退避。续跑时这些行已在库,不重做。
             if persist and task_id and e.partial:
-                done_rows = [assemble_row(batch[i], j) for i, j in e.partial]
+                done_rows = [assemble_row(batch[i], j, allowed) for i, j in e.partial]
                 store.save_rows(task_id, done_rows)
             raise
-        batch_rows = [assemble_row(s, j) for s, j in zip(batch, judges)]
+        batch_rows = [assemble_row(s, j, allowed) for s, j in zip(batch, judges)]
         if persist and task_id:
             store.save_rows(task_id, batch_rows)
         agg.update(batch_rows)          # 喂累加器后该批即可释放
