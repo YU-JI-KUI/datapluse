@@ -1,12 +1,9 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 13d814c7
+# 基于 origin/main @ d68544fa
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   13d814c7 评测报告新增来源分布图 + 柱状图带百分比
+#   d68544fa 评测报告新增会话轮次分布图（动态分桶）
 frontend/src/components/eval/EvalResult.jsx
-frontend/src/components/eval/IntentCharts.jsx
-frontend/src/components/eval/SourceBreakdownChart.jsx
+frontend/src/components/eval/TurnDistributionChart.jsx
 src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/pipeline.py
-tests/eval/test_activity.py
-tests/eval/test_rule_bypass.py
+tests/eval/test_turn_dist.py
