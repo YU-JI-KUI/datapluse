@@ -1,12 +1,7 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 2e71baf5
+# 基于 origin/main @ 1672d10e
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   6e30da7f 评测导出优化：防狂点加载态 + 文件名带原始文件名前缀
-#   2e71baf5 业务分类闭集约束：模型跑飞的分类归入「其他(清单外)」
-frontend/src/components/eval/EvalResult.jsx
-frontend/src/lib/api.js
-src/datapulse/pipeline/eval_engine.py
+#   1672d10e 业务分类兜底桶改「非XX业务」，占位值与清单外统一归桶
 src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/prompts/_default/task_business_type.md
 tests/eval/test_intent_closed_set.py
