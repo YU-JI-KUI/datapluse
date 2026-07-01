@@ -1,22 +1,12 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ b28151d4
+# 基于 origin/main @ 2e71baf5
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   ebf294f2 评测明细新增人工复核：覆盖AI判定并按最终值重算指标
-#   b28151d4 评测详情页改右侧抽屉 + 头尾固定，复核操作常驻可见
-db/arkpg/20260428_arkpgdata_init.sql
-db/arkpg/20260701_arkpgdata_add_eval_review.sql
-deploy_desc/SUPER-AGENT1.0.0.json
-frontend/src/components/eval/DetailDrawer.jsx
+#   6e30da7f 评测导出优化：防狂点加载态 + 文件名带原始文件名前缀
+#   2e71baf5 业务分类闭集约束：模型跑飞的分类归入「其他(清单外)」
 frontend/src/components/eval/EvalResult.jsx
-frontend/src/components/eval/RowsTable.jsx
 frontend/src/lib/api.js
-src/datapulse/modules/eval/entities.py
-src/datapulse/modules/eval/eval_db.py
-src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/prompts/_default/task_review.md
-src/datapulse/modules/eval/repository.py
 src/datapulse/pipeline/eval_engine.py
-src/datapulse/router/eval.py
-tests/eval/test_review.py
-frontend/src/components/ui/dialog.jsx
+src/datapulse/modules/eval/evaluator.py
+src/datapulse/modules/eval/prompts/_default/task_business_type.md
+tests/eval/test_intent_closed_set.py
