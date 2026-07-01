@@ -1,7 +1,22 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 1672d10e
+# 基于 origin/main @ 476a2213
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   1672d10e 业务分类兜底桶改「非XX业务」，占位值与清单外统一归桶
+#   476a2213 评测新增规则短路：命中写死结果免 LLM，仍计入指标
+db/arkpg/20260428_arkpgdata_init.sql
+db/arkpg/20260701_arkpgdata_add_eval_rule.sql
+deploy_desc/SUPER-AGENT1.0.0.json
+frontend/src/App.jsx
+frontend/src/components/Layout.jsx
+frontend/src/components/eval/EvalResult.jsx
+frontend/src/lib/api.js
+frontend/src/pages/EvalRules.jsx
+src/datapulse/modules/eval/bu/base.py
+src/datapulse/modules/eval/bu/registry.py
+src/datapulse/modules/eval/entities.py
+src/datapulse/modules/eval/eval_db.py
 src/datapulse/modules/eval/evaluator.py
-tests/eval/test_intent_closed_set.py
+src/datapulse/modules/eval/repository.py
+src/datapulse/pipeline/eval_engine.py
+src/datapulse/router/eval.py
+tests/eval/test_rule_bypass.py
