@@ -172,3 +172,29 @@ class EvalReview(EvalBase):
     __table_args__ = (
         UniqueConstraint("task_id", "row_index", name="uk_t_eval_review_task_row"),
     )
+
+
+class EvalRule(EvalBase):
+    """t_eval_rule — 规则短路（写死评测结果，命中即免 LLM）
+
+    某些问题（如「转人工」）结果确定：分发/业务分类/答案/是否解决都已知。评测时若客户
+    问题精确等于 question 且答案等于 expected_answer，直接用 judge_json（结构同 LLM 输出）
+    产出结果、计入指标、落盘，不调 LLM——省大量调用。按 BU 一套，(bu, question) 唯一。
+    """
+
+    __tablename__ = "t_eval_rule"
+
+    id              = Column(BigInteger, primary_key=True, autoincrement=True)
+    bu              = Column(String(64), nullable=False)
+    question        = Column(Text, nullable=False)           # 触发问题（与客户问题精确相等）
+    expected_answer = Column(Text, nullable=False, default="")   # 期望答案（与样本答案一致才命中）
+    judge_json      = Column(JSONB, nullable=False)          # 写死的 judge 输出（11 字段，结构同 LLM）
+    note            = Column(String(255), nullable=False, default="")
+    created_at      = Column(_TS, nullable=False)
+    created_by      = Column(String(100), nullable=False, default="")
+    updated_at      = Column(_TS, nullable=False)
+    updated_by      = Column(String(100), nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("bu", "question", name="uk_t_eval_rule_bu_question"),
+    )

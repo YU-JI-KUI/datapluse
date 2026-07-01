@@ -295,10 +295,12 @@ class _StreamAggregator:
         return out
 
 
-async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _StreamAggregator) -> None:
-    """跑 judge,逐批喂累加器并落盘,不全量收集 rows(百万级避免 OOM)。
+async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _StreamAggregator) -> int:
+    """跑 judge,逐批喂累加器并落盘,不全量收集 rows(百万级避免 OOM)。返回规则命中条数。
 
     续跑:已落盘的行分批读回喂累加器(喂完即弃),再只对未完成样本跑 judge。
+    规则短路:未落盘样本先过 bu.match_rule(问题精确+答案一致),命中即用写死 judge 结果
+    组装,不调 LLM;只有未命中的才进 LLM 批次。省大量 LLM 调用。
     落盘:分批写入,避免大批量跑一半中断后全部重来。
     """
     total = len(samples)
@@ -311,10 +313,31 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
         for cached_batch in store.iter_rows(task_id, batch_size=1000):
             agg.update(cached_batch)
 
-    pending = [s for s in samples if s["row_index"] not in done_idx]
+    todo = [s for s in samples if s["row_index"] not in done_idx]
     done_count = len(done_idx)
     if on_progress:
         on_progress("judging", done_count, total)
+
+    # 规则短路:命中的直接用写死 judge 结果,不进 LLM。命中判据 = 问题精确 + 答案一致。
+    rule_hit = 0
+    pending = []
+    rule_rows = []
+    for s in todo:
+        rj = bu.match_rule(s.get("question", ""), s.get("answer_text", ""))
+        if rj is not None:
+            judge = dict(rj)
+            judge["_source"] = "rule"          # 标记来源,明细可区分「规则命中」非 AI 判
+            rule_rows.append(assemble_row(s, judge, allowed, other))
+            rule_hit += 1
+        else:
+            pending.append(s)
+    if rule_rows:
+        if persist and task_id:
+            store.save_rows(task_id, rule_rows)
+        agg.update(rule_rows)
+        done_count += len(rule_rows)
+        if on_progress:
+            on_progress("judging", done_count, total)
 
     # 批大小 = 并发窗口 + 落盘/进度上报粒度。整批跑完才落盘,所以它也是「崩溃后最多
     # 重跑多少条」的上界:50 条一批,挂了最多重做 49 条(原 200 会白跑近 200 条)。
@@ -340,6 +363,8 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
         if on_progress:
             on_progress("judging", done_count, total)
 
+    return rule_hit
+
 
 async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None, persist=False) -> dict:
     """跑一次完整评测。bu 注入该 BU 的领域知识(意图体系/分组/专家身份)。
@@ -362,7 +387,8 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
         on_progress("loaded", 1, 1)
 
     agg = _StreamAggregator()
-    await _judge_streaming(samples, bu, on_progress, task_id, persist, agg)
+    rule_hit = await _judge_streaming(samples, bu, on_progress, task_id, persist, agg)
+    filter_stats["rule_hit"] = rule_hit   # 规则短路命中数(免 LLM),结果页展示
 
     # 校准指标仅在 calibration 模式算;production 无金标则为空
     metrics = agg.metrics() if mode == "calibration" else []

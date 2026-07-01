@@ -62,10 +62,15 @@ export default function EvalResult({ taskId, result }) {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="评测样本" value={s.total_samples ?? 0}
           sub={`日志共 ${f.total ?? s.total_samples ?? 0} 条`
-            + (f.excluded_activity ? `，已排除 ${f.excluded_activity} 条活动标问` : '')}
-          hint={f.excluded_activity
-            ? `活动标问（前端写死按钮触发的写死回复）不经 AI，已整条跳过 ${f.excluded_activity} 条：不喂模型、不计入分发准确率与解决率，仅作后续轮上下文保留。`
-            : undefined}
+            + (f.excluded_activity ? `，排除 ${f.excluded_activity} 条活动标问` : '')
+            + (f.rule_hit ? `，规则命中 ${f.rule_hit} 条` : '')}
+          hint={
+            (f.excluded_activity
+              ? `活动标问（写死按钮触发的写死回复）已整条跳过 ${f.excluded_activity} 条：不喂模型、不计入指标。\n` : '')
+            + (f.rule_hit
+              ? `规则短路命中 ${f.rule_hit} 条：问题+答案匹配预设规则，直接用写死结果、免 LLM 调用，但照常计入指标。\n` : '')
+            + '评测样本 = 实际参与评测的条数（已排除活动标问）。'
+          }
           tone="brand" icon={Database} />
         <StatCard label="BU分发准确率" value={pct(s.dispatch_accuracy)}
           sub="AI 判该接与实际是否一致"

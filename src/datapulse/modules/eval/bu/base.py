@@ -89,6 +89,39 @@ def load_activity_questions(code: str) -> frozenset:
     return fs
 
 
+# 规则短路缓存：以库为准，增删改时 bump_rules_version 失效。评测时 get_bu 把当前规则
+# 快照进 BUConfig，命中即用写死结果免 LLM。
+_rules_cache: dict[str, dict] = {}
+
+
+def bump_rules_version() -> None:
+    """规则短路增删后调用，使缓存失效（下次评测/读取即拿到最新）。"""
+    _rules_cache.clear()
+
+
+def load_rules(code: str) -> dict:
+    """读某 BU 的短路规则,返回 {归一化question: {"expected_answer": str, "judge": dict}}。
+
+    DB 不可用或库中无规则时返回空 dict(=不短路任何样本)。question 已 strip 作 key。
+    """
+    if code in _rules_cache:
+        return _rules_cache[code]
+    rules: dict = {}
+    try:
+        from datapulse.modules.eval import eval_db
+        for r in eval_db.rule_list_for_match(code):
+            q = (r.get("question") or "").strip()
+            if q:
+                rules[q] = {
+                    "expected_answer": (r.get("expected_answer") or "").strip(),
+                    "judge": r.get("judge_json") or {},
+                }
+    except Exception:
+        rules = {}
+    _rules_cache[code] = rules
+    return rules
+
+
 @dataclass(frozen=True)
 class BUConfig:
     """一个 BU 的全部领域知识。"""
@@ -123,6 +156,10 @@ class BUConfig:
     # 库中该 BU 的集合，作为快照随任务固定。空集 = 不过滤任何样本。
     activity_questions: frozenset = frozenset()
 
+    # 短路规则 {归一化question: {expected_answer, judge}}。命中（问题精确+答案一致）即用
+    # 写死 judge 结果免 LLM。get_bu 时注入快照。空 = 不短路。
+    rules: dict = field(default_factory=dict)
+
     def prompt(self, name: str) -> str:
         """取某模板内容:优先用任务快照,无快照则实时加载(回退兼容)。"""
         if self.prompts is not None and name in self.prompts:
@@ -138,6 +175,18 @@ class BUConfig:
         if not self.activity_questions:
             return False
         return (question or "").strip() in self.activity_questions
+
+    def match_rule(self, question: str, answer: str) -> dict | None:
+        """短路规则匹配：问题精确相等 + 答案一致 → 返回写死的 judge dict（免 LLM），
+        否则 None。答案不一致（写死结论可能已不适用）也返回 None，走正常 LLM 评测。"""
+        if not self.rules:
+            return None
+        rule = self.rules.get((question or "").strip())
+        if rule is None:
+            return None
+        if (answer or "").strip() != rule.get("expected_answer", ""):
+            return None
+        return rule.get("judge") or None
 
     def matches_dispatch(self, raw: str) -> bool:
         """日志「分发BU」列值是否代表本 BU(用于判断系统是否把这条分给了本 BU)。

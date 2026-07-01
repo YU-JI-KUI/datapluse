@@ -15,7 +15,8 @@
       "db/arkpg/20260628_arkpgdata_add_eval_category.sql",
       "db/arkpg/20260630_arkpgdata_eval_worker_claim.sql",
       "db/arkpg/20260630_arkpgdata_add_eval_activity.sql",
-      "db/arkpg/20260701_arkpgdata_add_eval_review.sql"
+      "db/arkpg/20260701_arkpgdata_add_eval_review.sql",
+      "db/arkpg/20260701_arkpgdata_add_eval_rule.sql"
     ]
   }
 }

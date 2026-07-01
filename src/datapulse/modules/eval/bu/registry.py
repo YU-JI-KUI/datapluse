@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from datapulse.modules.eval.bu.base import BUConfig, load_activity_questions, load_categories
+from datapulse.modules.eval.bu.base import (
+    BUConfig,
+    load_activity_questions,
+    load_categories,
+    load_rules,
+)
 from datapulse.modules.eval.bu.life_insurance import LIFE
 from datapulse.modules.eval.bu.securities import SECURITIES
 
@@ -36,6 +41,7 @@ def get_bu(code: str | None) -> BUConfig:
         tpl,
         intents=load_categories(tpl.code),
         activity_questions=load_activity_questions(tpl.code),
+        rules=load_rules(tpl.code),
     )
 
 

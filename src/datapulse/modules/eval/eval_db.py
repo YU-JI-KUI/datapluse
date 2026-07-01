@@ -357,3 +357,32 @@ def review_list(task_id: str) -> list[dict]:
 def review_delete(task_id: str, row_index: int) -> bool:
     with eval_session() as s:
         return _review_repo(s).delete(task_id, row_index)
+
+
+# ── 规则短路 ──────────────────────────────────────────────────────────────────
+
+def _rule_repo(s: Session):
+    from datapulse.modules.eval.repository import EvalRuleRepository
+    return EvalRuleRepository(s)
+
+
+def rule_list(bu: str) -> list[dict]:
+    with eval_session() as s:
+        return _rule_repo(s).list_by_bu(bu)
+
+
+def rule_list_for_match(bu: str) -> list[dict]:
+    with eval_session() as s:
+        return _rule_repo(s).list_for_match(bu)
+
+
+def rule_upsert(bu: str, question: str, expected_answer: str, judge_json: dict,
+                note: str = "", updated_by: str = "system") -> dict:
+    with eval_session() as s:
+        return _rule_repo(s).upsert(bu, question, expected_answer, judge_json,
+                                    note=note, updated_by=updated_by)
+
+
+def rule_delete(rule_id: int) -> bool:
+    with eval_session() as s:
+        return _rule_repo(s).delete(rule_id)

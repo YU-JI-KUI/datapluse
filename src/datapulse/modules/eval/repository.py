@@ -23,6 +23,7 @@ from datapulse.modules.eval.entities import (
     EvalCategory,
     EvalPrompt,
     EvalReview,
+    EvalRule,
     EvalTask,
     EvalTaskRow,
 )
@@ -568,3 +569,54 @@ class EvalReviewRepository:
     def delete_all(self, task_id: str) -> None:
         """删任务时清理其复核（连带删除）。"""
         self.session.query(EvalReview).filter(EvalReview.task_id == task_id).delete()
+
+
+def _rule_to_dict(r: EvalRule) -> dict[str, Any]:
+    return {
+        "id": r.id, "bu": r.bu, "question": r.question,
+        "expected_answer": r.expected_answer, "judge_json": r.judge_json,
+        "note": r.note, "updated_at": _iso(r.updated_at), "updated_by": r.updated_by,
+    }
+
+
+class EvalRuleRepository:
+    """规则短路持久化层。(bu, question) 唯一；命中即用写死 judge 结果免 LLM。"""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def list_by_bu(self, bu: str) -> list[dict]:
+        rows = self.session.execute(
+            select(EvalRule).where(EvalRule.bu == bu).order_by(EvalRule.id)
+        ).scalars().all()
+        return [_rule_to_dict(r) for r in rows]
+
+    def list_for_match(self, bu: str) -> list[dict]:
+        """取匹配所需字段（question/expected_answer/judge_json），供评测加载规则集合。"""
+        rows = self.session.execute(
+            select(EvalRule.question, EvalRule.expected_answer, EvalRule.judge_json)
+            .where(EvalRule.bu == bu)
+        ).all()
+        return [{"question": q, "expected_answer": ea, "judge_json": jj} for q, ea, jj in rows]
+
+    def upsert(self, bu: str, question: str, expected_answer: str, judge_json: dict,
+               note: str = "", updated_by: str = "system") -> dict:
+        ts = _now()
+        stmt = pg_insert(EvalRule).values(
+            bu=bu, question=question, expected_answer=expected_answer,
+            judge_json=_clean_json(judge_json), note=note,
+            created_at=ts, created_by=updated_by, updated_at=ts, updated_by=updated_by,
+        ).on_conflict_do_update(
+            index_elements=["bu", "question"],
+            set_={"expected_answer": expected_answer, "judge_json": _clean_json(judge_json),
+                  "note": note, "updated_at": ts, "updated_by": updated_by},
+        )
+        self.session.execute(stmt)
+        r = self.session.execute(
+            select(EvalRule).where(EvalRule.bu == bu, EvalRule.question == question)
+        ).scalars().first()
+        return _rule_to_dict(r)
+
+    def delete(self, rule_id: int) -> bool:
+        n = self.session.query(EvalRule).filter(EvalRule.id == rule_id).delete()
+        return bool(n)

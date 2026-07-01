@@ -657,3 +657,29 @@ def delete_activity_question(act_id: int) -> bool:
     if deleted:
         _bump_activity()
     return deleted
+
+
+# ── 规则短路管理 ──────────────────────────────────────────────────────────────
+
+def _bump_rules():
+    from datapulse.modules.eval.bu.base import bump_rules_version
+    bump_rules_version()
+
+
+def list_rules(bu: str) -> list[dict]:
+    return eval_db.rule_list(bu)
+
+
+def upsert_rule(bu: str, question: str, expected_answer: str, judge_json: dict,
+                note: str = "", operator: str = "system") -> dict:
+    rec = eval_db.rule_upsert(bu, question, expected_answer, judge_json,
+                              note=note, updated_by=operator)
+    _bump_rules()
+    return rec
+
+
+def delete_rule(rule_id: int) -> bool:
+    deleted = eval_db.rule_delete(rule_id)
+    if deleted:
+        _bump_rules()
+    return deleted

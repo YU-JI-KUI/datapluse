@@ -438,6 +438,11 @@ export const evalApi = {
   createActivityQuestion: (data, bu = getCurrentBu()) => api.post('/eval/activity-questions', data, { params: { bu } }),
   deleteActivityQuestion: (id) => api.delete(`/eval/activity-questions/${id}`),
 
+  // 规则短路管理（命中写死结果、免 LLM 调用，计入指标）。按 BU 增删查
+  listRules:  (bu = getCurrentBu()) => api.get('/eval/rules', { params: { bu } }),
+  upsertRule: (data, bu = getCurrentBu()) => api.post('/eval/rules', data, { params: { bu } }),
+  deleteRule: (id) => api.delete(`/eval/rules/${id}`),
+
   // 任务列表 / 状态 / 结果 / 续跑。bu 默认当前全局 BU（传空字符串可查全部）
   listTasks: (page = 1, pageSize = 50, bu = getCurrentBu()) =>
     api.get('/eval/tasks', { params: { page, page_size: pageSize, bu } }),

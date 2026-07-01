@@ -356,3 +356,38 @@ async def delete_activity_question(act_id: int, user: CurrentUser):
     if not eval_engine.delete_activity_question(act_id):
         raise NotFoundError("活动标问不存在")
     return success({"deleted": True})
+
+
+# ── 规则短路管理（命中写死结果、免 LLM 调用，计入指标）────────────────────────
+
+class RuleBody(BaseModel):
+    question: str
+    expected_answer: str = ""
+    judge_json: dict          # 完整 judge 输出（11 字段，结构同 LLM output）
+    note: str = ""
+
+
+@router.get("/rules")
+async def list_rules(user: CurrentUser, bu: str = "securities"):
+    """列出某 BU 的全部短路规则。"""
+    return success({"bu": bu, "rules": eval_engine.list_rules(bu)})
+
+
+@router.post("/rules")
+async def upsert_rule(user: CurrentUser, body: RuleBody, bu: str = "securities"):
+    """新增/更新一条短路规则（按 (bu, question) upsert）。"""
+    if not body.question.strip():
+        raise ParamError("触发问题不能为空")
+    if not isinstance(body.judge_json, dict) or not body.judge_json:
+        raise ParamError("judge_json 不能为空")
+    return success(eval_engine.upsert_rule(
+        bu, body.question.strip(), body.expected_answer, body.judge_json,
+        note=body.note, operator=user.username))
+
+
+@router.delete("/rules/{rule_id}")
+async def delete_rule(rule_id: int, user: CurrentUser):
+    """删除一条短路规则。"""
+    if not eval_engine.delete_rule(rule_id):
+        raise NotFoundError("规则不存在")
+    return success({"deleted": True})
