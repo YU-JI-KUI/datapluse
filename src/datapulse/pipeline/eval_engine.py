@@ -282,6 +282,22 @@ def _outputs_dir() -> Path:
     return Path(get_settings().eval_outputs_dir)
 
 
+def _export_name(task_id: str, kind: str) -> str:
+    """拼导出文件名：<原始上传文件名(去扩展名)>_<kind>_<task_id>.xlsx。
+
+    如上传 abc.xlsx → abc_评估报告_<task_id>.xlsx。取 task.filename 去掉目录与扩展名;
+    文件名可能含路径分隔/非法字符,统一净化(去 / \\ : 等);为空(如样例任务无名)时
+    省略前缀,回退到原来的 <kind>_<task_id>.xlsx。task_id 作后缀保证唯一、不覆盖。
+    """
+    import re
+    t = eval_db.get_task(task_id) or {}
+    raw = (t.get("filename") or "").strip()
+    stem = Path(raw).stem if raw else ""                 # abc.xlsx → abc；空 → ''
+    stem = re.sub(r'[\\/:*?"<>|]+', "_", stem).strip("_")  # 净化文件系统非法字符
+    prefix = f"{stem}_" if stem else ""
+    return f"{prefix}{kind}_{task_id}.xlsx"
+
+
 def _stream_to_xlsx(out: Path, columns: list[str], row_iter) -> Path:
     """用 openpyxl write_only 模式逐行写 xlsx，常量内存。
 
@@ -357,7 +373,7 @@ def export_disagreements(task_id: str) -> Path | None:
     result = eval_db.load_result(task_id)
     if not result:
         return None
-    out = _outputs_dir() / f"不一致case_{task_id}.xlsx"
+    out = _outputs_dir() / _export_name(task_id, "不一致case")
     return _stream_to_xlsx(
         out, _DISAGREEMENT_COLUMNS,
         (_disagreement_record(r) for r in result.get("disagreements", [])),
@@ -404,7 +420,7 @@ def export_rows(task_id: str) -> Path | None:
     """
     if not eval_db.load_result(task_id):
         return None
-    out = _outputs_dir() / f"评测明细_{task_id}.xlsx"
+    out = _outputs_dir() / _export_name(task_id, "评测明细")
     return _stream_to_xlsx(
         out, _ROW_COLUMNS,
         (_row_record(r) for r in _iter_all_rows(task_id)),
@@ -470,7 +486,7 @@ def export_report(task_id: str) -> Path | None:
         for a in result.get("advice", {}).get("items", [])
     ]
 
-    out = _outputs_dir() / f"评估报告_{task_id}.xlsx"
+    out = _outputs_dir() / _export_name(task_id, "评估报告")
     with pd.ExcelWriter(out) as writer:
         pd.DataFrame(overview, columns=["指标", "数值"]).to_excel(writer, sheet_name="概览", index=False)
         pd.DataFrame(dispatch, columns=["指标", "数值"]).to_excel(writer, sheet_name="BU分发漏斗", index=False)

@@ -458,6 +458,8 @@ export const evalApi = {
     api.delete(`/eval/tasks/${taskId}/rows/${rowIndex}/review`),
 
   // 三种导出（带 token 的 blob 下载）
+  // 文件名以后端 Content-Disposition 为准（含原始上传文件名前缀）；下方 fallback 仅在
+  // 响应头缺失时兜底。
   exportDisagreements: (taskId) =>
     _downloadWithToken(`/eval/tasks/${taskId}/export`, `不一致case_${taskId}.xlsx`),
   exportRows: (taskId) =>

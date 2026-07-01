@@ -1,5 +1,6 @@
 /** 评测结果视图：统计卡 + BU 分发漏斗 + 优化建议 + 业务洞察 + 分布图 + 校准指标 + 明细 + 导出。 */
-import { Database, TrendingUp, CheckCircle2, AlertTriangle, Download, FileSpreadsheet, FileText } from 'lucide-react'
+import { useState } from 'react'
+import { Database, TrendingUp, CheckCircle2, AlertTriangle, Download, FileSpreadsheet, FileText, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { toast } from 'sonner'
@@ -18,11 +19,20 @@ export default function EvalResult({ taskId, result }) {
   const isCalib = result.mode === 'calibration'
   const disp = s.bu_dispatch || {}
 
-  async function doExport(fn, name) {
+  // 正在导出的类型 key（'report' | 'rows' | 'disagree'），用于禁用对应按钮 + 显示进度
+  const [exporting, setExporting] = useState(null)
+
+  async function doExport(key, fn, name) {
+    if (exporting) return                     // 有导出在进行中，忽略重复点击（防狂点触发多次大导出）
+    setExporting(key)
+    const tip = toast.loading(`正在生成${name}，数据量大时需稍候…`)
     try {
       await fn(taskId)
+      toast.success(`${name}已开始下载`, { id: tip })
     } catch (e) {
-      toast.error(e.message || `${name}失败`)
+      toast.error(e.message || `${name}失败`, { id: tip })
+    } finally {
+      setExporting(null)
     }
   }
 
@@ -33,11 +43,17 @@ export default function EvalResult({ taskId, result }) {
         <EvalBadge tone="brand">{s.bu_name || result.bu_name || '—'}</EvalBadge>
         <EvalBadge tone={isCalib ? 'info' : 'good'}>{isCalib ? '校准模式（有人工打标）' : '生产模式（无标注）'}</EvalBadge>
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => doExport(evalApi.exportReport, '导出报告')}>
-            <FileText className="w-4 h-4 mr-1.5" />评估报告
+          <Button variant="outline" size="sm" disabled={!!exporting}
+            onClick={() => doExport('report', evalApi.exportReport, '评估报告')}>
+            {exporting === 'report'
+              ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />导出中…</>
+              : <><FileText className="w-4 h-4 mr-1.5" />评估报告</>}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => doExport(evalApi.exportRows, '导出明细')}>
-            <FileSpreadsheet className="w-4 h-4 mr-1.5" />逐条明细
+          <Button variant="outline" size="sm" disabled={!!exporting}
+            onClick={() => doExport('rows', evalApi.exportRows, '逐条明细')}>
+            {exporting === 'rows'
+              ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />导出中…</>
+              : <><FileSpreadsheet className="w-4 h-4 mr-1.5" />逐条明细</>}
           </Button>
         </div>
       </div>
@@ -107,8 +123,11 @@ export default function EvalResult({ taskId, result }) {
           <Card>
             <CardContent className="p-4 flex items-center justify-between">
               <span className="text-sm text-muted-foreground">导出 Judge 与人工打标不一致的 case，便于人工复核校准 prompt</span>
-              <Button variant="outline" size="sm" onClick={() => doExport(evalApi.exportDisagreements, '导出不一致')}>
-                <Download className="w-4 h-4 mr-1.5" />导出不一致 case
+              <Button variant="outline" size="sm" disabled={!!exporting}
+                onClick={() => doExport('disagree', evalApi.exportDisagreements, '不一致 case')}>
+                {exporting === 'disagree'
+                  ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />导出中…</>
+                  : <><Download className="w-4 h-4 mr-1.5" />导出不一致 case</>}
               </Button>
             </CardContent>
           </Card>
