@@ -1,11 +1,11 @@
 /** 单行详情：会话上下文 / AI 回答 / Judge 判断 / 人工打标对比 / 人工复核。用 Dialog 承载。 */
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { MessageSquare, Bot, Scale, ShieldCheck, UserCheck, Loader2, RotateCcw } from 'lucide-react'
+import { MessageSquare, Bot, Scale, ShieldCheck, UserCheck, Loader2, RotateCcw, Zap } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { evalApi } from '@/lib/api'
+import { evalApi, getCurrentBu } from '@/lib/api'
 import { EvalBadge, YesNo } from './EvalPrimitives'
 
 function Block({ icon: Icon, title, children }) {
@@ -90,14 +90,56 @@ export default function DetailDrawer({ row, open, onClose, taskId, intentOptions
   const [intent, setIntent]     = useState('')
   const [comment, setComment]   = useState('')
   const [saving, setSaving]     = useState(false)
+  const [dryrunning, setDryrunning] = useState(false)
+  const [dryResult, setDryResult]   = useState(null)   // { old, new, changed }
+  const [bizText, setBizText]       = useState('')      // 业务知识编辑框内容
+  const [bizLoaded, setBizLoaded]   = useState(false)
+  const [bizSaving, setBizSaving]   = useState(false)
+  const [bu, setBu]                 = useState('')
 
-  // 切换到不同行时，用该行已有的复核值回填表单
+  // 切换到不同行时，用该行已有的复核值回填表单，清掉上一条的试跑结果
   useEffect(() => {
     setDispatch(rv?.reviewed_dispatch || '')
     setResolved(rv?.reviewed_resolved || '')
     setIntent(rv?.reviewed_intent || '')
     setComment(rv?.comment || '')
+    setDryResult(null)
   }, [row?.row_index, rv?.reviewed_dispatch, rv?.reviewed_resolved, rv?.reviewed_intent, rv?.comment])
+
+  // 抽屉打开时加载该 BU 当前业务知识(编辑框初值)。用 getCurrentBu，与评测同一 BU。
+  useEffect(() => {
+    if (!open) return
+    const cur = getCurrentBu()
+    setBu(cur)
+    setBizLoaded(false)
+    evalApi.getPrompt(cur, 'business_knowledge.md')
+      .then(r => { setBizText(r?.data?.data?.content || ''); setBizLoaded(true) })
+      .catch(() => setBizLoaded(true))
+  }, [open])
+
+  async function handleDryrun() {
+    setDryrunning(true)
+    try {
+      const r = await evalApi.dryrunRow(taskId, row.row_index, bizText)   // 用编辑框临时内容
+      setDryResult(r?.data?.data ?? null)
+    } catch (e) {
+      toast.error(e.response?.data?.message || '试跑失败')
+    } finally {
+      setDryrunning(false)
+    }
+  }
+
+  async function handleSaveBiz() {
+    setBizSaving(true)
+    try {
+      await evalApi.savePrompt(bu, 'business_knowledge.md', bizText)
+      toast.success('业务知识已保存（下次评测/重测生效）')
+    } catch (e) {
+      toast.error(e.response?.data?.message || '保存失败')
+    } finally {
+      setBizSaving(false)
+    }
+  }
 
   if (!row) return null
   const j = row.judge && typeof row.judge === 'object' ? row.judge : {}
@@ -216,6 +258,62 @@ export default function DetailDrawer({ row, open, onClose, taskId, intentOptions
               )}
               {gold.qtype && (
                 <div className="text-xs text-muted-foreground">打标问题类型：{gold.qtype}</div>
+              )}
+            </Block>
+          )}
+
+          {/* AI 试跑：当场编辑业务知识 → 用编辑框内容试跑 → 满意再保存，不落库 */}
+          {canReview && (
+            <Block icon={Zap} title="调优业务知识 + AI 试跑">
+              <p className="text-xs text-muted-foreground">
+                在下方编辑本 BU（<span className="font-medium">{bu}</span>）的「业务知识」补充规则，
+                点<span className="font-medium">试跑</span>用编辑框内容重评这一条看效果（<span className="font-medium">不落库、不影响指标</span>）；
+                满意后点<span className="font-medium">保存</span>写入，下次评测/重测生效。
+              </p>
+              <textarea
+                value={bizText}
+                onChange={e => setBizText(e.target.value)}
+                rows={5}
+                disabled={!bizLoaded}
+                placeholder={bizLoaded ? '写补充判定规则，如：含「已为您转接人工」的答案视为已解决…' : '加载中…'}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handleDryrun} disabled={dryrunning || !bizLoaded}>
+                  {dryrunning ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />试跑中…</>
+                    : <><Zap className="w-4 h-4 mr-1.5" />用编辑框内容试跑这一条</>}
+                </Button>
+                <Button size="sm" onClick={handleSaveBiz} disabled={bizSaving || !bizLoaded}>
+                  {bizSaving && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}保存业务知识
+                </Button>
+              </div>
+              {dryResult && (
+                <div className={`rounded-md border p-3 space-y-2 ${dryResult.changed ? 'border-amber-300 bg-amber-50' : 'border-border'}`}>
+                  <div className="text-xs font-medium">
+                    {dryResult.changed ? '试跑结果与原判定不同：' : '试跑结果与原判定一致'}
+                  </div>
+                  {[
+                    ['该本BU承接', 'should_dispatch_to_bu'],
+                    ['业务分类', 'business_type'],
+                    ['是否解决', 'answer_resolved'],
+                    ['需复核', 'needs_human_review'],
+                  ].map(([label, k]) => {
+                    const oldV = String(dryResult.old?.[k] ?? '—')
+                    const newV = String(dryResult.new?.[k] ?? '—')
+                    const diff = oldV !== newV
+                    return (
+                      <div key={k} className="flex items-center gap-2 text-sm">
+                        <span className="w-24 text-[11px] text-muted-foreground">{label}</span>
+                        <span>原：{oldV}</span>
+                        <span className={diff ? 'text-amber-600 font-bold' : 'text-muted-foreground'}>→</span>
+                        <span className={diff ? 'text-amber-700 font-medium' : ''}>新：{newV}</span>
+                      </div>
+                    )
+                  })}
+                  {dryResult.new?.resolved_reason && (
+                    <div className="text-xs text-muted-foreground">新·解决度依据：{dryResult.new.resolved_reason}</div>
+                  )}
+                </div>
               )}
             </Block>
           )}

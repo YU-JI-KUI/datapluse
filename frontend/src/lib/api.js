@@ -461,6 +461,11 @@ export const evalApi = {
     api.put(`/eval/tasks/${taskId}/rows/${rowIndex}/review`, data),
   deleteReview: (taskId, rowIndex) =>
     api.delete(`/eval/tasks/${taskId}/rows/${rowIndex}/review`),
+  // 单条试跑：用当前提示词重评这一条，返回新旧对比，不落库。
+  // businessKnowledge 传入则用这段临时业务知识试跑（详情页改后未保存即可验证）
+  dryrunRow: (taskId, rowIndex, businessKnowledge) =>
+    api.post(`/eval/tasks/${taskId}/rows/${rowIndex}/dryrun`,
+      businessKnowledge != null ? { business_knowledge: businessKnowledge } : {}),
 
   // 三种导出（带 token 的 blob 下载）
   // 文件名以后端 Content-Disposition 为准（含原始上传文件名前缀）；下方 fallback 仅在

@@ -173,6 +173,24 @@ async def delete_review(task_id: str, row_index: int, user: CurrentUser):
     return success({"deleted": True})
 
 
+class DryrunBody(BaseModel):
+    business_knowledge: str | None = None   # 详情页编辑框的临时业务知识；None=用库里已保存的
+
+
+@router.post("/tasks/{task_id}/rows/{row_index}/dryrun")
+async def dryrun_row(task_id: str, row_index: int, user: CurrentUser,
+                     body: DryrunBody | None = None):
+    """用当前提示词对该条重新试跑 Judge，返回新旧对比，不落库。
+    body.business_knowledge 非空时用这段临时业务知识试跑（详情页改后未保存即可验证）。"""
+    if not eval_engine.get_task(task_id):
+        raise NotFoundError("任务不存在")
+    biz = body.business_knowledge if body else None
+    result = await eval_engine.dryrun_row(task_id, row_index, business_knowledge=biz)
+    if result is None:
+        raise NotFoundError("明细行不存在")
+    return success(result)
+
+
 @router.post("/tasks/{task_id}/resume")
 async def resume_task(task_id: str, user: CurrentUser):
     """断点续跑：对中断的任务，跳过已完成行继续。"""

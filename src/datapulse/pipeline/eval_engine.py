@@ -164,6 +164,52 @@ def delete_review(task_id: str, row_index: int) -> bool:
     return eval_db.review_delete(task_id, row_index)
 
 
+async def dryrun_row(task_id: str, row_index: int,
+                     business_knowledge: str | None = None) -> dict | None:
+    """用当前 prompt 对某一条重新跑 Judge,返回新旧对比,不落库。
+
+    business_knowledge 非 None 时,用这段「临时业务知识」覆盖库里的版本参与试跑——
+    支持详情页「编辑→试跑→满意再保存」:试跑时改动还没落库。None 则用库里已保存的。
+    试跑结果不影响已落盘结果与指标。返回 {old, new, changed}。
+    """
+    from dataclasses import replace as _replace
+
+    from datapulse.modules.eval.judge import assemble_row_sample_from_row
+    from datapulse.modules.eval.llm.judge_runner import judge_one
+    from datapulse.modules.eval.prompt_loader import snapshot_for_bu
+
+    rows = eval_db.load_rows_by_indices(task_id, [row_index])
+    row = rows.get(row_index)
+    if not row:
+        return None
+    bu = get_bu(_task_bu(task_id))   # get_bu 已注入当前库中最新 prompt/分类/业务知识
+    if business_knowledge is not None:
+        # 用编辑框的临时业务知识覆盖快照,其余槽位仍取库中当前值
+        snap = snapshot_for_bu(bu.code)
+        snap["business_knowledge.md"] = business_knowledge
+        bu = _replace(bu, prompts=snap)
+    sample = assemble_row_sample_from_row(row)
+    new_judge = await judge_one(sample, bu)
+
+    def _brief(j):
+        j = j if isinstance(j, dict) else {}
+        return {
+            "should_dispatch_to_bu": j.get("should_dispatch_to_bu"),
+            "business_type": j.get("business_type"),
+            "answer_resolved": j.get("answer_resolved"),
+            "needs_human_review": j.get("needs_human_review"),
+            "resolved_reason": j.get("resolved_reason"),
+            "dispatch_reason": j.get("dispatch_reason"),
+        }
+
+    old = row.get("judge") if isinstance(row.get("judge"), dict) else {}
+    new_brief, old_brief = _brief(new_judge), _brief(old)
+    changed = any(new_brief.get(k) != old_brief.get(k)
+                  for k in ("should_dispatch_to_bu", "business_type", "answer_resolved"))
+    return {"row_index": row_index, "old": old_brief, "new": new_brief,
+            "new_full": new_judge, "changed": changed}
+
+
 _RESUMABLE_STATUS = {"failed", "paused", "interrupted"}
 
 
@@ -506,6 +552,7 @@ _PROMPT_DESC = {
     "task_business_type.md": "任务·业务分类：给客户问题打业务标签",
     "task_resolved.md":     "任务·解决判定：答案是否解决客户问题",
     "task_review.md":       "任务·人工复核：是否需要人工二次确认",
+    "business_knowledge.md": "业务补充规则：业务方自己写的判定规则/领域知识，追加进 Judge（安全地盘，不碰技术模板）",
     "advice_system.md":     "优化建议·系统人设：给建议的专家身份",
     "advice_user.md":       "优化建议·用户模板：喂入聚合指标的格式",
 }
@@ -518,7 +565,8 @@ def _prompt_desc(name: str) -> str:
 # BU 级模板槽位（每个 BU 都可单独覆盖；未覆盖则继承通用 _default/文件）
 _BU_SLOTS = (
     "judge_system.md", "task_dispatch.md", "task_business_type.md",
-    "task_resolved.md", "task_review.md", "advice_system.md", "advice_user.md",
+    "task_resolved.md", "task_review.md", "business_knowledge.md",
+    "advice_system.md", "advice_user.md",
 )
 # 根共享模板槽位（跨 BU 共用，作用域 _root）
 _ROOT_SLOTS = ("judge_user.md",)

@@ -104,7 +104,8 @@ def load_bu_prompt(bu_code: str, name: str) -> str:
 # 任务复用,避免跑到一半被 bump_version() 清缓存后前后用不同 prompt,口径不一致。
 _SNAPSHOT_BU_SLOTS = (
     "judge_system.md", "task_dispatch.md", "task_business_type.md",
-    "task_resolved.md", "task_review.md", "advice_system.md", "advice_user.md",
+    "task_resolved.md", "task_review.md", "business_knowledge.md",
+    "advice_system.md", "advice_user.md",
 )
 _SNAPSHOT_ROOT_SLOTS = ("judge_user.md",)
 

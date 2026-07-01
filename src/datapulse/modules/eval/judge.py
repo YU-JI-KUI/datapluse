@@ -47,6 +47,22 @@ OUTPUT_SCHEMA = {
 }
 
 
+def assemble_row_sample_from_row(row: dict) -> dict:
+    """从落盘的明细行 row_json 重建喂 Judge 的 sample(单条试跑用)。
+
+    build_messages 只需 question/context/answer_text/next_user_turn/dispatched_to_bu,
+    这些字段落盘时都在 row_json 里,原样取回即可(context 已是裁剪+净化后的)。
+    """
+    return {
+        "row_index": row.get("row_index"),
+        "question": row.get("question", ""),
+        "context": row.get("context", []),
+        "answer_text": row.get("answer_text", ""),
+        "next_user_turn": row.get("next_user_turn"),
+        "dispatched_to_bu": row.get("dispatched_to_bu", False),
+    }
+
+
 def build_messages(sample: dict, bu: BUConfig) -> list[dict]:
     """根据一条样本 + BU 领域知识构造 chat messages。
 
@@ -71,6 +87,10 @@ def build_messages(sample: dict, bu: BUConfig) -> list[dict]:
     # 按 _TASK_PROMPTS 顺序拼进【任务】块。改某 BU 某维度只动对应文件。
     # 走 bu.prompt() 取任务快照,保证整个任务用同一份(中途改 prompt 不影响进行中的任务)。
     tasks = "\n\n".join(bu.prompt(f).strip() for f in _TASK_PROMPTS)
+    # 业务知识:业务人员维护的补充判定规则(安全地盘,不碰技术槽位),有内容才追加。
+    biz = bu.prompt("business_knowledge.md").strip()
+    if biz:
+        tasks += f"\n\n## 业务补充规则(业务方维护,优先遵守)\n\n{biz}"
     # 动态数据用 XML 标签包裹再填入，把「待评数据」和「指令」清晰隔开，避免模型
     # 把答案里的标签/相似问当成指令、或在长上下文里迷失关键部分。标签名取够独特，
     # 降低与数据内容（答案常含 HTML/JSON）的冲突。占位符仍在模板里，用户不会误删标签。
