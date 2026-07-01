@@ -176,16 +176,17 @@ async def dryrun_row(task_id: str, row_index: int,
 
     from datapulse.modules.eval.judge import assemble_row_sample_from_row
     from datapulse.modules.eval.llm.judge_runner import judge_one
-    from datapulse.modules.eval.prompt_loader import snapshot_for_bu
 
     rows = eval_db.load_rows_by_indices(task_id, [row_index])
     row = rows.get(row_index)
     if not row:
         return None
-    bu = get_bu(_task_bu(task_id))   # get_bu 已注入当前库中最新 prompt/分类/业务知识
+    # get_bu 已注入库中最新全套 prompt(judge_system / 各 task / 分类 / 业务知识)。
+    bu = get_bu(_task_bu(task_id))
     if business_knowledge is not None:
-        # 用编辑框的临时业务知识覆盖快照,其余槽位仍取库中当前值
-        snap = snapshot_for_bu(bu.code)
+        # 只把业务知识替换成编辑框的临时内容,其余槽位仍用库里当前值 → 试跑口径 =
+        # 「库里所有其它提示词 + 最新业务知识」。
+        snap = dict(bu.prompts or {})
         snap["business_knowledge.md"] = business_knowledge
         bu = _replace(bu, prompts=snap)
     sample = assemble_row_sample_from_row(row)

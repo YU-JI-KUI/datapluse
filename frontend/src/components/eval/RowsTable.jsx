@@ -33,10 +33,9 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
   const [loading, setLoading] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)   // 复核提交/撤销后自增，触发明细重拉
 
-  // 复核成功后：刷新当前明细 + 提示上层结果页指标需重进生效
+  // 复核成功后：触发当前视图重拉（reloadKey 变会同时驱动「全部」和「需复核」两个 effect）
   function onReviewed() {
-    setReviewRows([])          // 清需复核缓存，下次切入重拉
-    setReloadKey(k => k + 1)   // 触发「全部」视图重拉，拉到最新 review 字段
+    setReloadKey(k => k + 1)
   }
 
   const isAll = filter === 'all'
@@ -65,16 +64,17 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
     return () => { cancelled = true }
   }, [isAll, taskId, page, pageSize, kw, intent, reloadKey])
 
-  // 「需复核」视图：首次切入拉回有限子集
+  // 「需复核」视图：切入或复核后(reloadKey 变)重拉待复核子集。
+  // 不再用 reviewRows.length 做缓存判断——否则复核完清不掉旧数据、也拉不到新的。
   useEffect(() => {
-    if (filter !== 'review' || !taskId || reviewRows.length) return
+    if (filter !== 'review' || !taskId) return
     let cancelled = false
     setLoading(true)
     evalApi.getRows(taskId, 1, 500, 'review')
       .then(res => { if (!cancelled) setReviewRows(RESP(res).list || []) })
       .finally(() => !cancelled && setLoading(false))
     return () => { cancelled = true }
-  }, [filter, taskId])
+  }, [filter, taskId, reloadKey])
 
   // 子集视图（不一致/需复核）前端搜索 + 分页
   const subsetAll = filter === 'disagree' ? disagreements : filter === 'review' ? reviewRows : []

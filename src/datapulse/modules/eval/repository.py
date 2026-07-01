@@ -290,16 +290,20 @@ class EvalRepository:
         return [(int(idx), rj) for idx, rj in rows]
 
     def load_review_rows(self, task_id: str, limit: int = 500) -> list[dict]:
-        """读「需人工复核」的行（JSONB 过滤），上限 limit。
+        """读「待人工复核」的行（needs_human_review 且尚未被复核），上限 limit。
 
-        需复核是要人工处理的有限子集，与 disagreements 对称只取代表样本，
-        百万级下不做全量返回。row_json->'judge'->>'needs_human_review' 为真即命中。
+        排除已在 t_eval_review 有记录的行——它们已人工确认、summary 需复核数也已扣除，
+        不应再出现在「需复核」队列(否则复核完还显示、且与指标口径不一致)。
         """
+        reviewed = (
+            select(EvalReview.row_index).where(EvalReview.task_id == task_id).scalar_subquery()
+        )
         rows = self.session.execute(
             select(EvalTaskRow.row_json)
             .where(
                 EvalTaskRow.task_id == task_id,
                 EvalTaskRow.row_json["judge"]["needs_human_review"].as_boolean().is_(True),
+                EvalTaskRow.row_index.notin_(reviewed),
             )
             .order_by(EvalTaskRow.row_index)
             .limit(limit)
