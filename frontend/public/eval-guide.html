@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 评测 · 使用说明</title>
+<style>
+  :root{
+    --bg:#f6f8fc; --card:#fff; --fg:#1e293b; --muted:#64748b; --border:#e2e8f0;
+    --brand:#4f46e5; --brand2:#6366f1; --code-bg:#f1f5f9;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:15px/1.75 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;
+  }
+  /* 顶部渐变横幅 */
+  .hero{
+    background:linear-gradient(120deg,#4f46e5,#7c3aed,#2563eb);
+    color:#fff; padding:44px 24px; text-align:center;
+  }
+  .hero h1{margin:0 0 8px; font-size:28px; font-weight:800; letter-spacing:.5px}
+  .hero p{margin:0; opacity:.9; font-size:14px}
+  .wrap{max-width:920px; margin:-28px auto 60px; padding:0 20px}
+  .doc{
+    background:var(--card); border:1px solid var(--border); border-radius:16px;
+    padding:36px 40px; box-shadow:0 10px 40px rgba(30,41,59,.08);
+  }
+  /* markdown 元素 */
+  .doc h1{display:none}                       /* md 首个 h1 已由 hero 展示 */
+  .doc h2{
+    margin:34px 0 14px; padding-bottom:8px; font-size:21px; font-weight:700;
+    border-bottom:2px solid var(--border); scroll-margin-top:16px;
+  }
+  .doc h2::before{content:"";display:inline-block;width:4px;height:18px;margin-right:10px;
+    vertical-align:-2px;border-radius:2px;background:linear-gradient(var(--brand),var(--brand2))}
+  .doc h3{margin:24px 0 10px; font-size:17px; font-weight:700; color:#334155}
+  .doc p{margin:12px 0}
+  .doc ul,.doc ol{margin:10px 0; padding-left:24px}
+  .doc li{margin:4px 0}
+  .doc blockquote{
+    margin:16px 0; padding:12px 16px; border-left:4px solid var(--brand2);
+    background:#eef2ff; border-radius:0 8px 8px 0; color:#3730a3;
+  }
+  .doc blockquote p{margin:6px 0}
+  .doc code{background:var(--code-bg); padding:2px 6px; border-radius:5px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; color:#be185d}
+  .doc pre{
+    background:#0f172a; color:#e2e8f0; padding:16px 18px; border-radius:10px;
+    overflow:auto; font-family:ui-monospace,Menlo,monospace; font-size:13px; line-height:1.6;
+  }
+  .doc pre code{background:none; color:inherit; padding:0}
+  .doc strong{color:#0f172a; font-weight:700}
+  .doc hr{border:none; border-top:1px dashed var(--border); margin:28px 0}
+  /* 表格 */
+  .doc table{border-collapse:collapse; width:100%; margin:16px 0; font-size:14px; overflow:hidden; border-radius:10px}
+  .doc thead th{background:#eef2ff; color:#3730a3; font-weight:700; text-align:left}
+  .doc th,.doc td{border:1px solid var(--border); padding:9px 12px; vertical-align:top}
+  .doc tbody tr:nth-child(even){background:#f8fafc}
+  .doc a{color:var(--brand); text-decoration:none}
+  .doc a:hover{text-decoration:underline}
+  #err{color:#dc2626; padding:20px}
+  /* 顶部返回条 */
+  .bar{position:sticky; top:0; z-index:5; background:rgba(255,255,255,.9); backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--border); padding:8px 20px; font-size:13px}
+  .bar a{color:var(--brand); text-decoration:none}
+</style>
+</head>
+<body>
+  <div class="bar"><a href="javascript:window.close()">← 关闭</a> · AI 评测使用说明</div>
+  <div class="hero">
+    <h1>✨ AI 评测 · 使用与原理</h1>
+    <p>每个数字怎么算出来 · 你改哪里会影响哪个数字 · 改完要不要重跑</p>
+  </div>
+  <div class="wrap"><div class="doc" id="doc">加载中…</div></div>
+
+<script>
+/* 极简 Markdown → HTML（零依赖，够本文档用：标题/列表/表格/加粗/行内码/代码块/引用/hr/链接） */
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function inline(s){
+  return esc(s)
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2">$1</a>');
+}
+function renderMd(md){
+  const lines = md.replace(/\r\n/g,'\n').split('\n');
+  let html='', i=0, inCode=false, codeBuf=[];
+  const flushList = (()=>{}); // 占位
+  let listType=null, listBuf=[];
+  function closeList(){
+    if(!listType) return;
+    html += `<${listType}>` + listBuf.map(x=>`<li>${inline(x)}</li>`).join('') + `</${listType}>`;
+    listType=null; listBuf=[];
+  }
+  let tableBuf=[];
+  function closeTable(){
+    if(!tableBuf.length) return;
+    const rows = tableBuf.filter(r=>!/^\s*\|?[\s:|-]+\|?\s*$/.test(r)); // 去掉分隔行
+    const cells = r=>r.replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+    let t='<table>';
+    rows.forEach((r,idx)=>{
+      const cs=cells(r);
+      t += '<tr>'+cs.map(c=> idx===0?`<th>${inline(c)}</th>`:`<td>${inline(c)}</td>`).join('')+'</tr>';
+      if(idx===0) t=t.replace('<table>','<table><thead>')+'</thead><tbody>';
+    });
+    t += '</tbody></table>';
+    html += t; tableBuf=[];
+  }
+  for(i=0;i<lines.length;i++){
+    let ln = lines[i];
+    if(ln.trim().startsWith('```')){
+      if(inCode){ html+='<pre><code>'+esc(codeBuf.join('\n'))+'</code></pre>'; inCode=false; codeBuf=[]; }
+      else { closeList(); closeTable(); inCode=true; }
+      continue;
+    }
+    if(inCode){ codeBuf.push(ln); continue; }
+    if(/^\s*\|.*\|\s*$/.test(ln)){ closeList(); tableBuf.push(ln); continue; }
+    else closeTable();
+    if(/^#{1,6}\s/.test(ln)){
+      closeList();
+      const lvl=ln.match(/^#+/)[0].length;
+      html += `<h${lvl}>${inline(ln.replace(/^#+\s/,''))}</h${lvl}>`;
+    } else if(/^\s*>\s?/.test(ln)){
+      closeList();
+      html += `<blockquote><p>${inline(ln.replace(/^\s*>\s?/,''))}</p></blockquote>`;
+    } else if(/^\s*[-*]\s/.test(ln)){
+      if(listType!=='ul'){ closeList(); listType='ul'; }
+      listBuf.push(ln.replace(/^\s*[-*]\s/,''));
+    } else if(/^\s*\d+\.\s/.test(ln)){
+      if(listType!=='ol'){ closeList(); listType='ol'; }
+      listBuf.push(ln.replace(/^\s*\d+\.\s/,''));
+    } else if(/^\s*---\s*$/.test(ln)){
+      closeList(); html += '<hr>';
+    } else if(ln.trim()===''){
+      closeList();
+    } else {
+      closeList(); html += `<p>${inline(ln)}</p>`;
+    }
+  }
+  closeList(); closeTable();
+  return html;
+}
+fetch('./ai_eval_guide.md',{cache:'no-cache'})
+  .then(r=>{ if(!r.ok) throw new Error(r.status); return r.text(); })
+  .then(md=>{ document.getElementById('doc').innerHTML = renderMd(md); })
+  .catch(e=>{ document.getElementById('doc').innerHTML =
+    '<div id="err">文档加载失败（'+e.message+'）。请确认 ai_eval_guide.md 已随前端部署。</div>'; });
+</script>
+</body>
+</html>

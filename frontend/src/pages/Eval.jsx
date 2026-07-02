@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  AlertTriangle, RotateCcw, ArrowLeft, History, Loader2,
+  AlertTriangle, RotateCcw, ArrowLeft, History, Loader2, BookOpen,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,11 @@ import { EvalBadge } from '@/components/eval/EvalPrimitives'
 import EvalUploader from '@/components/eval/EvalUploader'
 import EvalProgress from '@/components/eval/EvalProgress'
 import EvalResult from '@/components/eval/EvalResult'
+
+// 使用说明是独立 HTML（public/eval-guide.html，fetch docs 的 md 渲染，md 唯一维护源）
+const GUIDE_URL = '/eval-guide.html'
+const _GUIDE_SEEN_KEY = 'eval_guide_seen'
+function openGuide() { window.open(GUIDE_URL, '_blank', 'noopener') }
 
 const RESP = (r) => r?.data?.data ?? {}   // datapulse 统一响应：res.data.data
 
@@ -31,6 +36,10 @@ export default function Eval() {
   const [resumable, setResumable] = useState(null)
   const [busy, setBusy]         = useState(false)
   const [uploadPct, setUploadPct] = useState(0)   // 上传进度 0-100
+  // 首次进页面显示醒目的「新人必读」提示条（新标签打开说明，浏览器可能拦截自动弹窗，
+  // 故用提示条让用户主动点，比强开新标签体验好）；看过后不再显示。
+  const [showGuideTip, setShowGuideTip] = useState(() => !localStorage.getItem(_GUIDE_SEEN_KEY))
+  function dismissGuideTip() { localStorage.setItem(_GUIDE_SEEN_KEY, '1'); setShowGuideTip(false) }
   const pollRef = useRef(null)
 
   // 初始化：后端配置（BU 由左侧全局选择器决定，上传时 evalApi 自动带当前 BU）
@@ -130,11 +139,26 @@ export default function Eval() {
               <ArrowLeft className="w-4 h-4 mr-1.5" />新评测
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={openGuide}>
+            <BookOpen className="w-4 h-4 mr-1.5" />使用说明
+          </Button>
           <Button variant="outline" size="sm" asChild>
             <Link to="/eval/history"><History className="w-4 h-4 mr-1.5" />历史评测</Link>
           </Button>
         </div>
       </div>
+
+      {/* 首次访问：醒目的新人必读提示条 */}
+      {showGuideTip && (
+        <div className="flex items-center gap-3 rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-50 to-blue-50 px-4 py-3 text-sm">
+          <BookOpen className="w-5 h-5 text-indigo-600 shrink-0" />
+          <span className="flex-1">
+            <b>新人必读</b>：先花 2 分钟看《AI 评测使用说明》，了解每个指标怎么算、改哪里影响什么、改完要不要重跑。
+          </span>
+          <Button size="sm" onClick={() => { openGuide(); dismissGuideTip() }}>打开说明</Button>
+          <Button variant="ghost" size="sm" onClick={dismissGuideTip}>知道了</Button>
+        </div>
+      )}
 
       {/* 错误条 */}
       {error && (

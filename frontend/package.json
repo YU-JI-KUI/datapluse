@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "sync:guide": "node -e \"require('fs').copyFileSync('../docs/ai_eval_guide.md','public/ai_eval_guide.md')\"",
+    "predev": "npm run sync:guide",
+    "prebuild": "npm run sync:guide",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
