@@ -1,16 +1,21 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ caa497fe
+# 基于 origin/main @ 1ddad7d4
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   caa497fe 新增 AI 评测使用与原理文档
-#   988bbbd5 评测子集重跑（阶段一）：需复核子集用最新提示词重跑并重算指标
+#   1ddad7d4 code clean
+#   073a45c2 使用说明改为 md 单一源 + 独立 HTML 页，新标签打开
+#   45a9ddcc 文档修正：活动标问/规则短路的举例对调
+#   5f15cfa7 文档同步：子集重跑更新为明细勾选异步重跑
+#   c7e203c3 评测三项优化：修上传超时误报 + 报告页分区导航 + 明细复选异步重跑
+frontend/.gitignore
+frontend/package.json
+frontend/public/eval-guide.html
+frontend/src/pages/Eval.jsx
 docs/ai_eval_guide.md
-docs/eval_subset_rerun_design.md
+frontend/src/components/eval/EvalResult.jsx
+frontend/src/components/eval/EvalUploader.jsx
 frontend/src/components/eval/RowsTable.jsx
 frontend/src/lib/api.js
-src/datapulse/modules/eval/eval_db.py
-src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/repository.py
 src/datapulse/pipeline/eval_engine.py
 src/datapulse/router/eval.py
-tests/eval/test_subset_rerun.py
+[DEL] docs/eval_subset_rerun_design.md
