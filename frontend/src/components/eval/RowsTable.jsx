@@ -43,16 +43,34 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
 
   const [rerunOpen, setRerunOpen] = useState(false)
   const [rerunning, setRerunning] = useState(false)
+  const [selected, setSelected] = useState(() => new Set())   // 勾选的 row_index
 
-  async function handleRerunSubset() {
+  function toggleRow(idx) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(idx) ? next.delete(idx) : next.add(idx)
+      return next
+    })
+  }
+  function toggleAllOnPage(rows, checked) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      rows.forEach(r => { if (r.row_index != null) checked ? next.add(r.row_index) : next.delete(r.row_index) })
+      return next
+    })
+  }
+
+  // 勾选行重跑（异步）：提交后立即返回，前端刷新任务状态看进度；完成后指标全量重算
+  async function handleRerunSelected() {
     setRerunning(true)
     try {
-      const r = await evalApi.rerunSubset(taskId, 'review')
-      const n = RESP(r).reran ?? 0
-      toast.success(`已用最新提示词重跑 ${n} 条，指标已更新（重进结果页查看）`)
-      setReloadKey(k => k + 1)   // 刷新需复核列表（重跑后判定可能变、不再需复核的会消失）
+      const r = await evalApi.rerunRows(taskId, [...selected])
+      const n = RESP(r).count ?? selected.size
+      toast.success(`已提交重跑 ${n} 条，后台运行中；完成后重进结果页查看新指标`)
+      setSelected(new Set())
+      setReloadKey(k => k + 1)
     } catch (e) {
-      toast.error(e.response?.data?.message || '重跑失败')
+      toast.error(e.response?.data?.message || '重跑提交失败')
     } finally {
       setRerunning(false)
       setRerunOpen(false)
@@ -159,11 +177,11 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
               </SelectContent>
             </Select>
           )}
-          {filter === 'review' && reviewRows.length > 0 && (
+          {selected.size > 0 && (
             <Button variant="outline" size="sm" className="ml-auto h-8"
               onClick={() => setRerunOpen(true)} disabled={rerunning}>
-              {rerunning ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />重跑中…</>
-                : <><Zap className="w-3.5 h-3.5 mr-1.5" />用最新提示词重跑这批</>}
+              {rerunning ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />提交中…</>
+                : <><Zap className="w-3.5 h-3.5 mr-1.5" />用最新提示词重跑选中（{selected.size}）</>}
             </Button>
           )}
         </div>
@@ -172,6 +190,15 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <input
+                  type="checkbox"
+                  className="align-middle cursor-pointer"
+                  title="全选本页"
+                  checked={display.length > 0 && display.every(r => selected.has(r.row_index))}
+                  onChange={e => toggleAllOnPage(display, e.target.checked)}
+                />
+              </TableHead>
               <TableHead className="w-40">会话 / 轮次</TableHead>
               <TableHead>客户问题</TableHead>
               <TableHead>业务分类</TableHead>
@@ -184,18 +211,28 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">加载中…</TableCell>
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">加载中…</TableCell>
               </TableRow>
             ) : display.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">暂无数据</TableCell>
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">暂无数据</TableCell>
               </TableRow>
             ) : display.map((r, i) => (
               <TableRow
                 key={r.row_index ?? i}
                 onClick={() => setActive(r)}
-                className={cn('cursor-pointer', r.is_disagreement && 'bg-red-50/40')}
+                className={cn('cursor-pointer', r.is_disagreement && 'bg-red-50/40',
+                  selected.has(r.row_index) && 'bg-blue-50/60')}
               >
+                <TableCell onClick={e => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    className="align-middle cursor-pointer"
+                    checked={selected.has(r.row_index)}
+                    disabled={r.row_index == null}
+                    onChange={() => toggleRow(r.row_index)}
+                  />
+                </TableCell>
                 <TableCell>
                   <div className="font-mono text-xs truncate max-w-[140px]">{r.session}</div>
                   <span className="inline-block mt-0.5 rounded bg-gray-100 px-1.5 text-[11px]">第 {r.turn} 轮</span>
@@ -252,12 +289,12 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
       <ConfirmDialog
         open={rerunOpen}
         onOpenChange={v => { if (!v) setRerunOpen(false) }}
-        title="用最新提示词重跑这批"
-        description={`将对当前「需复核」的 ${reviewRows.length} 条用最新提示词（含业务知识）重新评测，`
-          + `覆盖它们的 AI 判定并重算指标。会调用大模型；已人工复核过的不受影响。`
-          + `单次上限 50 条，超出请用「重新评测」全量重跑。`}
-        confirmLabel="开始重跑"
-        onConfirm={handleRerunSubset}
+        title="用最新提示词重跑选中"
+        description={`将对选中的 ${selected.size} 条用最新提示词（含业务知识）重新评测，`
+          + `覆盖它们的 AI 判定并全量重算指标。会调用大模型；已人工复核过的行会自动跳过。`
+          + `后台运行，完成后重进结果页查看新指标。`}
+        confirmLabel="提交重跑"
+        onConfirm={handleRerunSelected}
       />
     </Card>
   )

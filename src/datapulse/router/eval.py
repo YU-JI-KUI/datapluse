@@ -191,22 +191,40 @@ async def dryrun_row(task_id: str, row_index: int, user: CurrentUser,
     return success(result)
 
 
-@router.post("/tasks/{task_id}/rerun-subset")
-async def rerun_subset(task_id: str, user: CurrentUser, flag: str = Query("review")):
-    """用最新提示词(含业务知识)对某筛选子集重跑 Judge、覆盖结果、全量重算指标。
+class RerunRowsBody(BaseModel):
+    row_indices: list[int]
 
-    阶段一 flag=review（待复核子集，已排除人工复核过的行）。同步执行，子集上限 50 条；
-    超限返回提示走全量重测。会调 LLM、覆盖对应行的 AI 判定。"""
-    if not eval_engine.get_task(task_id):
-        raise NotFoundError("任务不存在")
-    r = await eval_engine.rerun_subset(task_id, flag=flag, operator=user.username)
+
+def _rerun_result_or_raise(r: dict) -> dict:
     if r.get("error"):
         raise ParamError(r["error"])
     if r.get("over_limit"):
         raise ParamError(
-            f"待重跑子集 {r['total_candidates']} 条，超过单次上限 {r['limit']} 条；"
-            f"请缩小范围，或用「重新评测」全量重跑。")
-    return success(r)
+            f"待重跑 {r['count']} 条，超过单次上限 {r['limit']} 条；请缩小范围或用「重新评测」全量重跑。")
+    if not r.get("accepted"):
+        raise ParamError(r.get("reason") or "没有可重跑的行")
+    return r
+
+
+@router.post("/tasks/{task_id}/rerun-subset")
+async def rerun_subset(task_id: str, user: CurrentUser, flag: str = Query("review")):
+    """按筛选(flag=review 待复核)异步重跑该子集。已排除人工复核过的行。
+    立即返回，前端轮询任务状态看进度。"""
+    if not eval_engine.get_task(task_id):
+        raise NotFoundError("任务不存在")
+    return success(_rerun_result_or_raise(eval_engine.rerun_subset(task_id, flag=flag, operator=user.username)))
+
+
+@router.post("/tasks/{task_id}/rerun-rows")
+async def rerun_rows(task_id: str, body: RerunRowsBody, user: CurrentUser):
+    """异步重跑用户勾选的明细行（任意视图勾选）。已排除人工复核过的行。
+    立即返回，前端轮询任务状态看进度；完成后指标全量重算。"""
+    if not eval_engine.get_task(task_id):
+        raise NotFoundError("任务不存在")
+    if not body.row_indices:
+        raise ParamError("未选择任何行")
+    return success(_rerun_result_or_raise(
+        eval_engine.rerun_rows_async(task_id, body.row_indices, operator=user.username)))
 
 
 @router.post("/tasks/{task_id}/resume")

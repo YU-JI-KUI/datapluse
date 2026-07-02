@@ -60,7 +60,29 @@ export default function EvalResult({ taskId, result }) {
         </div>
       </div>
 
+      {/* 吸顶分区导航：点击平滑滚到对应区块，长页面不用手动来回滚 */}
+      <nav className="sticky top-0 z-20 -mx-1 flex flex-wrap gap-1 border-b bg-background/95 px-1 py-2 backdrop-blur text-sm">
+        {[
+          ['overview', '概览'],
+          ['advice', '优化建议'],
+          ['insights', '业务洞察'],
+          ['charts', '分布图'],
+          ...(isCalib ? [['metrics', '校准指标']] : []),
+          ['rows', '逐条明细'],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => document.getElementById(`eval-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="rounded-md px-3 py-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
       {/* 4 张统计卡 */}
+      <div id="eval-overview" className="scroll-mt-16" />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="评测样本" value={s.total_samples ?? 0}
           sub={`日志共 ${f.total ?? s.total_samples ?? 0} 条`
@@ -117,10 +139,15 @@ export default function EvalResult({ taskId, result }) {
       )}
 
       {/* 优化建议 */}
+      <div id="eval-advice" className="scroll-mt-16" />
       <AdvicePanel advice={result.advice} />
 
-      {/* 业务洞察 + 分布图 */}
+      {/* 业务洞察 */}
+      <div id="eval-insights" className="scroll-mt-16" />
       <InsightsPanel insights={result.insights} />
+
+      {/* 分布图 */}
+      <div id="eval-charts" className="scroll-mt-16" />
       <IntentCharts insights={result.insights} />
       <SourceBreakdownChart filterStats={result.filter_stats} />
       <TurnDistributionChart filterStats={result.filter_stats} />
@@ -128,6 +155,7 @@ export default function EvalResult({ taskId, result }) {
       {/* 校准指标（仅 calibration） */}
       {isCalib && (
         <>
+          <div id="eval-metrics" className="scroll-mt-16" />
           <MetricsPanel metrics={result.metrics} />
           <Card>
             <CardContent className="p-4 flex items-center justify-between">
@@ -144,6 +172,7 @@ export default function EvalResult({ taskId, result }) {
       )}
 
       {/* 逐条明细（服务端分页：rows 不再随 result 全量返回） */}
+      <div id="eval-rows" className="scroll-mt-16" />
       <RowsTable
         taskId={taskId}
         disagreements={result.disagreements || []}

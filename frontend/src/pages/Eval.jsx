@@ -30,6 +30,7 @@ export default function Eval() {
   const [error, setError]       = useState(null)
   const [resumable, setResumable] = useState(null)
   const [busy, setBusy]         = useState(false)
+  const [uploadPct, setUploadPct] = useState(0)   // 上传进度 0-100
   const pollRef = useRef(null)
 
   // 初始化：后端配置（BU 由左侧全局选择器决定，上传时 evalApi 自动带当前 BU）
@@ -65,15 +66,18 @@ export default function Eval() {
   }
 
   async function handleUpload(file) {
-    setError(null); setResumable(null); setBusy(true)
+    setError(null); setResumable(null); setBusy(true); setUploadPct(0)
     try {
-      const t = RESP(await evalApi.upload(file))   // bu 走全局当前 BU
+      const onProgress = (e) => {
+        if (e.total) setUploadPct(Math.round(e.loaded * 100 / e.total))
+      }
+      const t = RESP(await evalApi.upload(file, undefined, onProgress))   // bu 走全局当前 BU
       setTask(t)
       startPolling(t.task_id)
     } catch (e) {
       setError(e.response?.data?.message || '上传失败')
     } finally {
-      setBusy(false)
+      setBusy(false); setUploadPct(0)
     }
   }
 
@@ -147,7 +151,7 @@ export default function Eval() {
 
       {/* 主体 */}
       {view === 'upload' && (
-        <EvalUploader onUpload={handleUpload} onSample={handleSample} busy={busy} />
+        <EvalUploader onUpload={handleUpload} onSample={handleSample} busy={busy} uploadPct={uploadPct} />
       )}
       {view === 'running' && <EvalProgress task={task} />}
       {view === 'result' && <EvalResult taskId={task?.task_id} result={result} />}

@@ -25,7 +25,7 @@ const OPTIONAL_COLS = [
   { name: '问题类型 / 常规意图识别模块', use: '透传展示，不参与指标计算' },
 ]
 
-export default function EvalUploader({ onUpload, onSample, busy }) {
+export default function EvalUploader({ onUpload, onSample, busy, uploadPct = 0 }) {
   const inputRef = useRef(null)
   const [drag, setDrag] = useState(false)
   const [showCols, setShowCols] = useState(false)
@@ -54,8 +54,22 @@ export default function EvalUploader({ onUpload, onSample, busy }) {
             )}
           >
             <Upload className="w-8 h-8 text-muted-foreground" />
-            <div className="font-medium">拖入或点击上传对话日志 Excel</div>
-            <div className="text-xs text-muted-foreground">支持 .xlsx / .xls，需含日志导出列（可含运营人工标注列）</div>
+            {busy ? (
+              <div className="w-64 text-center">
+                <div className="font-medium">
+                  {uploadPct < 100 ? `上传中… ${uploadPct}%` : '已上传，正在创建任务…'}
+                </div>
+                <div className="mt-2 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                  <div className="h-full bg-blue-500 transition-all" style={{ width: `${uploadPct}%` }} />
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">大文件传输较慢，请勿关闭页面</div>
+              </div>
+            ) : (
+              <>
+                <div className="font-medium">拖入或点击上传对话日志 Excel</div>
+                <div className="text-xs text-muted-foreground">支持 .xlsx / .xls，需含日志导出列（可含运营人工标注列）</div>
+              </>
+            )}
           </div>
           <input
             ref={inputRef}

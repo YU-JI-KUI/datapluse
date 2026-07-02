@@ -164,55 +164,112 @@ def delete_review(task_id: str, row_index: int) -> bool:
     return eval_db.review_delete(task_id, row_index)
 
 
-# 子集重跑单次上限:同步跑,几十条几十秒可接受;超限提示走全量 rerun。
-_RERUN_SUBSET_MAX = 50
+# 单次重跑上限:防误选全量。可选很大子集,但超过此数提示走全量重测更合适。
+_RERUN_ROWS_MAX = 2000
+# 重跑分批大小(与评测同口径,喂满并发)
+_RERUN_BATCH = 50
 
 
-async def rerun_subset(task_id: str, flag: str = "review", operator: str = "system") -> dict:
-    """用最新提示词(含业务知识)对某筛选子集重跑 Judge、覆盖结果、全量重算指标。
+async def _rerun_indices_core(task_id: str, indices: list[int], operator: str,
+                              on_progress=None) -> int:
+    """对给定 row_index 列表用最新提示词重 judge、覆盖、全量重算指标。返回重跑条数。
 
-    阶段一:flag='review'(待复核子集,已排除人工复核过的行)。同步执行,上限
-    _RERUN_SUBSET_MAX 条(超限抛错,提示走全量 rerun)。拿全局 advisory 锁避免与正在
-    跑的评测抢 LLM。返回 {reran, total_candidates, over_limit}。
+    调用方保证已排除已复核行、已持有 advisory 锁。分批跑并回调进度。
     """
-    from datapulse.modules.eval import eval_db as _db
-    from datapulse.modules.eval.evaluator import recompute_result_from_rows
+    from datapulse.modules.eval.evaluator import (
+        assemble_row,
+        other_label,
+        recompute_result_from_rows,
+    )
     from datapulse.modules.eval.judge import assemble_row_sample_from_row
     from datapulse.modules.eval.llm.judge_runner import judge_batch
 
     t = eval_db.get_task(task_id)
-    if not t:
-        return {"error": "任务不存在"}
-    indices = eval_db.rerun_subset_indices(task_id, flag)
-    if not indices:
-        return {"reran": 0, "total_candidates": 0, "over_limit": False}
-    if len(indices) > _RERUN_SUBSET_MAX:
-        return {"reran": 0, "total_candidates": len(indices), "over_limit": True,
-                "limit": _RERUN_SUBSET_MAX}
-
-    from datapulse.modules.eval.evaluator import assemble_row, other_label
     bu = get_bu(t.get("bu"))            # 注入最新 prompt/业务知识/分类快照
     allowed = set(bu.intents.keys())
     other = other_label(bu)
 
-    with _db.advisory_lock() as got:
-        if not got:
-            return {"error": "有评测任务正在运行，请稍后再试"}
-        # 重建 sample → 用最新 bu 重 judge → 覆盖对应行
-        row_map = eval_db.load_rows_by_indices(task_id, indices)
-        samples = [assemble_row_sample_from_row(row_map[i]) for i in indices if i in row_map]
+    done = 0
+    total = len(indices)
+    for start in range(0, total, _RERUN_BATCH):
+        chunk = indices[start:start + _RERUN_BATCH]
+        row_map = eval_db.load_rows_by_indices(task_id, chunk)
+        samples = [assemble_row_sample_from_row(row_map[i]) for i in chunk if i in row_map]
+        if not samples:
+            continue
         judges = await judge_batch(samples, bu)
         new_rows = [assemble_row(s, j, allowed, other) for s, j in zip(samples, judges)]
         eval_db.save_rows(task_id, new_rows, created_by=operator)
+        done += len(new_rows)
+        if on_progress:
+            on_progress(done, total)
 
-        # 全量重算 summary(扫全表聚合,不调 LLM),覆盖 result_json
-        old = eval_db.load_result(task_id) or {}
-        mode = old.get("mode") or (old.get("summary", {}) or {}).get("mode") or "production"
-        new_result = recompute_result_from_rows(old, eval_db.iter_all_row_jsons(task_id), mode)
-        eval_db.save_result(task_id, new_result, updated_by=operator)
+    # 全量重算 summary(扫全表聚合,不调 LLM),覆盖 result_json
+    old = eval_db.load_result(task_id) or {}
+    mode = old.get("mode") or (old.get("summary", {}) or {}).get("mode") or "production"
+    new_result = recompute_result_from_rows(old, eval_db.iter_all_row_jsons(task_id), mode)
+    eval_db.save_result(task_id, new_result, updated_by=operator)
+    return done
 
-    _log.info("eval.rerun_subset.done", task_id=task_id, flag=flag, reran=len(new_rows))
-    return {"reran": len(new_rows), "total_candidates": len(indices), "over_limit": False}
+
+def rerun_rows_async(task_id: str, row_indices: list[int], operator: str = "system") -> dict:
+    """异步重跑用户勾选的明细行(后台线程,不阻塞请求)。立即返回,前端轮询任务状态看进度。
+
+    排除已复核行(人工结论优先);拿全局 advisory 锁与评测串行(不抢 LLM);
+    任务 status 置 rerunning + progress 显示重跑进度,完成恢复 done。返回 {accepted, count}。
+    """
+    import asyncio
+    import threading
+
+    t = eval_db.get_task(task_id)
+    if not t:
+        return {"error": "任务不存在"}
+    # 排除已复核的行(人工结论优先,不被自动覆盖)
+    reviewed = {r["row_index"] for r in eval_db.review_list(task_id)}
+    indices = sorted(set(row_indices) - reviewed)
+    if not indices:
+        return {"accepted": False, "count": 0, "reason": "所选行均已人工复核,无需重跑"}
+    if len(indices) > _RERUN_ROWS_MAX:
+        return {"accepted": False, "count": len(indices), "over_limit": True,
+                "limit": _RERUN_ROWS_MAX}
+
+    def _worker():
+        from datapulse.modules.eval import eval_db as _db
+        try:
+            with _db.advisory_lock() as got:
+                if not got:
+                    eval_db.update_task(task_id, updated_by=operator,
+                                        error="有评测任务正在运行，重跑未开始，请稍后再试")
+                    return
+                eval_db.update_task(task_id, updated_by=operator, status="rerunning",
+                                    stage="rerunning", error=None,
+                                    progress_done=0, progress_total=len(indices))
+
+                def on_progress(done, total):
+                    eval_db.update_task(task_id, updated_by=operator,
+                                        progress_done=done, progress_total=total)
+
+                reran = asyncio.run(_rerun_indices_core(task_id, indices, operator, on_progress))
+                # 恢复 done 态,进度回填真实样本数
+                samples = (eval_db.load_result(task_id) or {}).get("summary", {}).get("total_samples", reran)
+                eval_db.update_task(task_id, updated_by=operator, status="done", stage="done",
+                                    progress_done=samples, progress_total=samples)
+                _log.info("eval.rerun_rows.done", task_id=task_id, reran=reran)
+        except Exception as e:
+            _log.exception("eval.rerun_rows.failed", task_id=task_id)
+            eval_db.update_task(task_id, updated_by=operator, status="done",
+                                error=f"重跑失败：{e}")
+
+    threading.Thread(target=_worker, name=f"eval-rerun-{task_id}", daemon=True).start()
+    return {"accepted": True, "count": len(indices)}
+
+
+def rerun_subset(task_id: str, flag: str = "review", operator: str = "system") -> dict:
+    """按筛选(flag=review 待复核)异步重跑该子集。薄封装:查 indices → rerun_rows_async。"""
+    if not eval_db.get_task(task_id):
+        return {"error": "任务不存在"}
+    indices = eval_db.rerun_subset_indices(task_id, flag)
+    return rerun_rows_async(task_id, indices, operator=operator)
 
 
 async def dryrun_row(task_id: str, row_index: int,

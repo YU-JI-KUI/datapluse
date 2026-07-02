@@ -417,11 +417,15 @@ export const evalApi = {
   bus:     ()   => api.get('/eval/meta/bus'),
   intents: (bu = getCurrentBu()) => api.get('/eval/meta/intents', { params: { bu } }),
 
-  // 上传 Excel 起评测（仅存文件 + 建任务，立即返回 task_id）。bu 默认当前全局 BU
+  // 上传 Excel 起评测（仅存文件 + 建任务，立即返回 task_id）。bu 默认当前全局 BU。
+  // 大文件（如 90M+）传输耗时远超全局 30s 超时，这里单独放开 timeout=0（不超时），
+  // 否则会「后端已存成功、前端却因超时误报失败」。onProgress 上报上传进度。
   upload: (file, bu = getCurrentBu(), onProgress) => {
     const form = new FormData()
     form.append('file', file)
-    return api.post('/eval/upload', form, { params: { bu }, onUploadProgress: onProgress })
+    return api.post('/eval/upload', form, {
+      params: { bu }, onUploadProgress: onProgress, timeout: 0,
+    })
   },
   // 用内置样例起评测（kind: calib | prod）
   runSample: (bu = getCurrentBu(), kind = 'calib') =>
@@ -469,6 +473,9 @@ export const evalApi = {
   // 子集重跑：用最新提示词对某筛选子集重评、覆盖、全量重算指标（同步，上限 50 条）
   rerunSubset: (taskId, flag = 'review') =>
     api.post(`/eval/tasks/${taskId}/rerun-subset`, {}, { params: { flag } }),
+  // 异步重跑用户勾选的明细行(任意视图),立即返回,轮询任务状态看进度
+  rerunRows: (taskId, rowIndices) =>
+    api.post(`/eval/tasks/${taskId}/rerun-rows`, { row_indices: rowIndices }),
 
   // 三种导出（带 token 的 blob 下载）
   // 文件名以后端 Content-Disposition 为准（含原始上传文件名前缀）；下方 fallback 仅在
