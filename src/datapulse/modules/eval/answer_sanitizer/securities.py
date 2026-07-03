@@ -106,42 +106,28 @@ class RobotTextAnswerParser(AnswerParser):
 
 @register
 class XiaoAnCardParser(AnswerParser):
-    """证券·小安机器人渲染卡（含同花顺选股、列表卡片等变体）。
+    """证券·小安机器人特有渲染卡：同花顺智能选股 thsData、列表卡片 list。
 
-    统一入口是 first.msgContext.msgInfo；内部按已知字段路径逐个兜底提取正文，
-    覆盖：msgContent（最常见）/ data.context / 同花顺 thsData / 列表卡片 list。
+    统一入口 first.msgContext.msgInfo.data。基础的 msgContent/data.content 由通用
+    MsgContextCardParser 处理，这里只认证券日志特有的两种结构。
     """
     name = "securities.xiaoan_card"
     bu_codes = ("securities",)
     priority = 10
 
-    def _msg_info(self, parsed):
-        return _msg_info(parsed)
+    def _data(self, parsed):
+        mi = _msg_info(parsed)
+        return (mi.get("data") or {}) if isinstance(mi, dict) else {}
 
     def match(self, raw, parsed) -> bool:
-        return self._msg_info(parsed) is not None
+        return self.parse(raw, parsed) is not None
 
     def parse(self, raw, parsed) -> str | None:
-        msg_info = self._msg_info(parsed)
-        if msg_info is None:
-            return None
-        data = msg_info.get("data") or {}
+        data = self._data(parsed)
 
-        # 路径1：msgInfo.msgContent（小安机器人最常见）。仅当是纯文本时取；对象结构
-        # （如 robotMenuItems 菜单卡）由更高优先级的专属解析器处理，这里跳过避免输出整坨 dict。
-        content = msg_info.get("msgContent")
-        if content and isinstance(content, str):
-            return strip_html(content)
-
-        # 路径2：msgInfo.data.context.data.content
-        content = dig(data, "context", "data", "content")
-        if content:
-            return strip_html(content)
-
-        # 路径3：同花顺智能选股 thsData
+        # 同花顺智能选股 thsData：answer[0].txt[0].content(又是 JSON 串)→ components[0].data.content
         ths = data.get("thsData") or {}
         if ths:
-            # thsData.answer[0].txt[0].content（content 又是 JSON 字符串）→ components[0].data.content
             content_json = dig(ths, "answer", 0, "txt", 0, "content")
             comp_content = dig(loads_maybe(content_json), "components", 0, "data", "content")
             if comp_content:
@@ -150,7 +136,7 @@ class XiaoAnCardParser(AnswerParser):
             if reply:
                 return strip_html(reply)
 
-        # 路径4：msgInfo.data.list[].data.content（列表卡片，取含 <p> 的项）
+        # 列表卡片 data.list[].data.content（取含 <p> 的项）
         for item in (data.get("list") or []):
             c = dig(item, "data", "content")
             if c and "<p>" in str(c):

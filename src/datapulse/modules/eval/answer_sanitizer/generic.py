@@ -8,6 +8,7 @@ from __future__ import annotations
 from datapulse.modules.eval.answer_sanitizer.base import (
     AnswerParser,
     dig,
+    loads_maybe,
     register,
     strip_html,
 )
@@ -18,6 +19,14 @@ def _first(parsed):
     if isinstance(parsed, list):
         return parsed[0] if parsed else None
     return parsed
+
+
+def _msg_info(parsed):
+    """渲染卡统一入口：first.msgContext(可能是 JSON 字符串).msgInfo。取不到返回 None。"""
+    first = _first(parsed)
+    ctx = loads_maybe(first.get("msgContext")) if isinstance(first, dict) else None
+    mi = ctx.get("msgInfo") if isinstance(ctx, dict) else None
+    return mi if isinstance(mi, dict) else None
 
 
 @register
@@ -45,6 +54,82 @@ class JumpPlatformParser(AnswerParser):
             return None
         tail = f"，{desc}" if desc else ""
         return f"本 BU 不承接，请使用【{title}】{tail}"
+
+
+@register
+class MsgContextCardParser(AnswerParser):
+    """渲染卡通用提取（msgContext.msgInfo）：寿险/证券日志的主体结构。
+
+    统一入口 first.msgContext.msgInfo，按已知路径逐个兜底取正文：
+    msgContent（纯文本）/ data.content（最常见）/ data.context.data.content（多一层）。
+    证券特有的 thsData 同花顺、list 列表卡片由证券专属解析器处理（专属先于通用）。
+    """
+    name = "generic.msgcontext_card"
+    bu_codes = ("*",)
+    priority = 30
+
+    def match(self, raw, parsed) -> bool:
+        return _msg_info(parsed) is not None
+
+    def parse(self, raw, parsed) -> str | None:
+        mi = _msg_info(parsed)
+        if mi is None:
+            return None
+        data = mi.get("data") or {}
+
+        # 路径1：msgContent 纯文本（对象结构如菜单卡由专属解析器处理，这里只取字符串）
+        content = mi.get("msgContent")
+        if content and isinstance(content, str):
+            return strip_html(content)
+
+        # 路径2a：data.content（最常见，content 直接挂 data 下）
+        content = dig(data, "content")
+        if content:
+            return strip_html(content)
+
+        # 路径2b：data.context.data.content（多一层 context 的变体）
+        content = dig(data, "context", "data", "content")
+        if content:
+            return strip_html(content)
+
+        return None
+
+
+@register
+class BenefitCardParser(AnswerParser):
+    """权益领取结果卡（catalogId + data.benefits）：领权益后返回的结果卡。
+
+    结构：first.catalogId 存在，data.benefits=[{benefitName:"..."}]，
+    data.cardHead.mainTitle 为标题。提取 = 标题 + 各权益名逐行。
+    """
+    name = "generic.benefit_card"
+    bu_codes = ("*",)
+    priority = 8
+
+    def _card(self, parsed):
+        first = _first(parsed)
+        if not (isinstance(first, dict) and first.get("catalogId")):
+            return None
+        data = first.get("data")
+        benefits = data.get("benefits") if isinstance(data, dict) else None
+        return data if isinstance(benefits, list) and benefits else None
+
+    def match(self, raw, parsed) -> bool:
+        return self._card(parsed) is not None
+
+    def parse(self, raw, parsed) -> str | None:
+        data = self._card(parsed)
+        if data is None:
+            return None
+        lines = []
+        title = strip_html(dig(data, "cardHead", "mainTitle") or "")
+        if title:
+            lines.append(title)
+        for b in data.get("benefits", []):
+            name = strip_html(b.get("benefitName") or "") if isinstance(b, dict) else ""
+            if name:
+                lines.append(name)
+        return "\n".join(lines) or None
 
 
 @register

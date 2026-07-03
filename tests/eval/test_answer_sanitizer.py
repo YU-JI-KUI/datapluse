@@ -91,6 +91,25 @@ def test_generic_jump_platform():
     )
 
 
+def test_generic_msgcontext_data_content():
+    """通用渲染卡 msgContext.msgInfo.data.content：寿险/证券日志主体结构，寿险也须命中。"""
+    raw = _wrap_msgcontext({"msgInfo": {"data": {"content": "<p>您的保单仍然有效。</p>"}}})
+    assert sanitize_answer(raw, "life") == "您的保单仍然有效。"       # 寿险
+    assert sanitize_answer(raw, "securities") == "您的保单仍然有效。"  # 证券同样命中
+
+
+def test_generic_benefit_card():
+    """权益领取结果卡 catalogId+benefits：标题 + 各权益名逐行。"""
+    raw = json.dumps([{
+        "catalogId": "mx-activity-result-multiple",
+        "data": {
+            "cardHead": {"mainTitle": "恭喜领取以下权益", "subTitle": "数量有限尽快领取"},
+            "benefits": [{"benefitName": "超级Level-2"}, {"benefitName": "科学投顾体验券"}],
+        },
+    }], ensure_ascii=False)
+    assert sanitize_answer(raw, "life") == "恭喜领取以下权益\n超级Level-2\n科学投顾体验券"
+
+
 def test_generic_text_reply():
     # A1：嵌套 list → content_data
     raw = json.dumps([[{"content_data": "您的保单已生效。"}]], ensure_ascii=False)
