@@ -1,11 +1,11 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 6a4fc3b8
+# 基于 origin/main @ 881cacc2
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   6a4fc3b8 修复证券菜单卡漏网 + 新增协议同意卡解析器
+#   881cacc2 统一嵌套数组剥离，修复双层结构卡片全线漏网
+src/datapulse/modules/eval/answer_sanitizer/base.py
 src/datapulse/modules/eval/answer_sanitizer/generic.py
 src/datapulse/modules/eval/answer_sanitizer/samples/generic.agreement_card.md
-src/datapulse/modules/eval/answer_sanitizer/samples/securities.robot_menu.md
-src/datapulse/modules/eval/answer_sanitizer/samples/样例索引.md
+src/datapulse/modules/eval/answer_sanitizer/samples/generic.jump_platform.md
 src/datapulse/modules/eval/answer_sanitizer/securities.py
 tests/eval/test_answer_sanitizer.py
