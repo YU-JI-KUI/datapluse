@@ -454,8 +454,13 @@ export const evalApi = {
   getResult: (taskId) => api.get(`/eval/tasks/${taskId}/result`),
   // 逐条明细分页（百万级下不再随 result 返回全量 rows）。flag: all | review
   // q=客户问题关键字，intent=业务分类（仅 flag=all 生效）
-  getRows:   (taskId, page = 1, pageSize = 20, flag = 'all', q = '', intent = '') =>
-    api.get(`/eval/tasks/${taskId}/rows`, { params: { page, page_size: pageSize, flag, q, intent } }),
+  getRows:   (taskId, page = 1, pageSize = 20, flag = 'all', q = '', intent = '', extra = {}) =>
+    api.get(`/eval/tasks/${taskId}/rows`, { params: {
+      page, page_size: pageSize, flag, q, intent,
+      dispatched_bu: extra.dispatched_bu || '',
+      j_dispatch: extra.j_dispatch || '',
+      j_resolved: extra.j_resolved || '',
+    } }),
   resume:    (taskId) => api.post(`/eval/tasks/${taskId}/resume`),
   rerun:     (taskId) => api.post(`/eval/tasks/${taskId}/rerun`),
   remove:    (taskId) => api.delete(`/eval/tasks/${taskId}`),

@@ -197,14 +197,14 @@ def done_row_indices(task_id: str) -> set[int]:
         return _repo(s).done_row_indices(task_id)
 
 
-def load_rows_filtered(task_id: str, page: int, page_size: int, q: str = "", intent: str = "") -> list[dict]:
+def load_rows_filtered(task_id: str, page: int, page_size: int, filters: dict) -> list[dict]:
     with eval_session() as s:
-        return _repo(s).load_rows_filtered(task_id, page, page_size, q=q, intent=intent)
+        return _repo(s).load_rows_filtered(task_id, page, page_size, filters)
 
 
-def count_rows_filtered(task_id: str, q: str = "", intent: str = "") -> int:
+def count_rows_filtered(task_id: str, filters: dict) -> int:
     with eval_session() as s:
-        return _repo(s).count_rows_filtered(task_id, q=q, intent=intent)
+        return _repo(s).count_rows_filtered(task_id, filters)
 
 
 def load_review_rows(task_id: str, limit: int = 500) -> list[dict]:

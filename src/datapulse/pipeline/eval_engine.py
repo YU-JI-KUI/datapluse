@@ -133,15 +133,15 @@ def _attach_reviews(task_id: str, rows: list[dict]) -> list[dict]:
     return rows
 
 
-def list_rows(task_id: str, page: int, page_size: int, q: str = "", intent: str = "") -> list[dict]:
-    """分页读逐条评测明细（前端结果页表格用），支持关键字/业务分类过滤。"""
-    rows = eval_db.load_rows_filtered(task_id, page, page_size, q=q, intent=intent)
+def list_rows(task_id: str, page: int, page_size: int, filters: dict) -> list[dict]:
+    """分页读逐条评测明细（前端结果页表格用），支持多字段过滤。"""
+    rows = eval_db.load_rows_filtered(task_id, page, page_size, filters)
     rows = _display_sanitize(rows, _task_bu(task_id))
     return _attach_reviews(task_id, rows)
 
 
-def count_rows(task_id: str, q: str = "", intent: str = "") -> int:
-    return eval_db.count_rows_filtered(task_id, q=q, intent=intent)
+def count_rows(task_id: str, filters: dict) -> int:
+    return eval_db.count_rows_filtered(task_id, filters)
 
 
 def list_review_rows(task_id: str) -> list[dict]:

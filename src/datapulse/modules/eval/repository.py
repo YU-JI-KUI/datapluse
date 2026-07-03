@@ -232,32 +232,41 @@ class EvalRepository:
         ).scalars().all()
         return set(rows)
 
-    def _row_filters(self, task_id: str, q: str = "", intent: str = ""):
-        """构造逐条结果的过滤条件：task_id + 关键字(问题) + 业务分类。"""
+    def _row_filters(self, task_id: str, f: dict):
+        """构造逐条结果的过滤条件。f 支持：
+        q(问题关键字, 模糊) / intent(业务分类, 精确) / dispatched_bu(分发BU, 模糊) /
+        j_dispatch(分发判定 是/否, 精确) / j_resolved(是否解决 是/否, 精确)。
+        """
         conds = [EvalTaskRow.task_id == task_id]
-        if q:
-            conds.append(EvalTaskRow.row_json["question"].astext.ilike(f"%{q}%"))
-        if intent:
-            conds.append(EvalTaskRow.row_json["j_intent"].astext == intent)
+        rj = EvalTaskRow.row_json
+        if f.get("q"):
+            conds.append(rj["question"].astext.ilike(f"%{f['q']}%"))
+        if f.get("intent"):
+            conds.append(rj["j_intent"].astext == f["intent"])
+        if f.get("dispatched_bu"):
+            conds.append(rj["dispatched_bu"].astext.ilike(f"%{f['dispatched_bu']}%"))
+        if f.get("j_dispatch"):
+            conds.append(rj["j_dispatch"].astext == f["j_dispatch"])
+        if f.get("j_resolved"):
+            conds.append(rj["j_resolved"].astext == f["j_resolved"])
         return conds
 
-    def load_rows_filtered(self, task_id: str, page: int, page_size: int,
-                           q: str = "", intent: str = "") -> list[dict]:
-        """分页 + 关键字(问题)/业务分类过滤读逐条结果。"""
+    def load_rows_filtered(self, task_id: str, page: int, page_size: int, filters: dict) -> list[dict]:
+        """分页 + 多字段过滤读逐条结果。"""
         offset = (page - 1) * page_size
         rows = self.session.execute(
             select(EvalTaskRow.row_json)
-            .where(*self._row_filters(task_id, q, intent))
+            .where(*self._row_filters(task_id, filters))
             .order_by(EvalTaskRow.row_index)
             .offset(offset).limit(page_size)
         ).scalars().all()
         return list(rows)
 
-    def count_rows_filtered(self, task_id: str, q: str = "", intent: str = "") -> int:
+    def count_rows_filtered(self, task_id: str, filters: dict) -> int:
         from sqlalchemy import func
         return int(self.session.execute(
             select(func.count()).select_from(EvalTaskRow)
-            .where(*self._row_filters(task_id, q, intent))
+            .where(*self._row_filters(task_id, filters))
         ).scalar() or 0)
 
     def load_rows_by_indices(self, task_id: str, indices: list[int]) -> dict[int, dict]:

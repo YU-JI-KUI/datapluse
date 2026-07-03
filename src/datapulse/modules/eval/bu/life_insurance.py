@@ -37,8 +37,8 @@ LIFE = BUConfig(
     code="life",
     name="寿险",
     description="平安寿险 AI 对话/智能问答系统:覆盖保单服务、缴费理赔、销售咨询等业务。",
-    # 日志「分发BU」列里代表寿险的取值。拿到真实日志后按实际值补充。
-    dispatch_aliases=("寿险", "人寿"),
+    # 日志「分发BU」列里代表寿险的取值（真实日志用「寿」）。
+    dispatch_aliases=("寿", "寿险", "人寿"),
     intents=_INTENTS,
     mock_intent_rules=_MOCK_RULES,
     mock_module_map=_MODULE_MAP,

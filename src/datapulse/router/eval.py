@@ -125,10 +125,13 @@ async def task_rows(
     flag: str = Query("all"),
     q: str = Query("", description="按客户问题关键字过滤"),
     intent: str = Query("", description="按业务分类过滤"),
+    dispatched_bu: str = Query("", description="按分发BU关键字过滤"),
+    j_dispatch: str = Query("", description="按分发判定过滤：是/否"),
+    j_resolved: str = Query("", description="按是否解决过滤：是/否"),
 ):
     """分页查逐条评测明细（百万级下替代 /result 附带全量 rows）。
 
-    flag=all（默认）按 row_index 分页，支持 q（问题关键字）/ intent（业务分类）过滤；
+    flag=all（默认）按 row_index 分页，支持 q/intent/分发BU/分发判定/是否解决 多字段过滤；
     flag=review 只取需复核子集（有限上限）。「不一致」子集前端直接用 result.disagreements。
     """
     task = eval_engine.get_task(task_id)
@@ -137,8 +140,10 @@ async def task_rows(
     if flag == "review":
         rows = eval_engine.list_review_rows(task_id)
         return success(page_data(rows, 1, len(rows), len(rows)))
-    rows = eval_engine.list_rows(task_id, page, page_size, q=q, intent=intent)
-    total = eval_engine.count_rows(task_id, q=q, intent=intent)
+    filters = {"q": q, "intent": intent, "dispatched_bu": dispatched_bu,
+               "j_dispatch": j_dispatch, "j_resolved": j_resolved}
+    rows = eval_engine.list_rows(task_id, page, page_size, filters)
+    total = eval_engine.count_rows(task_id, filters)
     return success(page_data(rows, page, page_size, total))
 
 
