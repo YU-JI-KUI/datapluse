@@ -21,6 +21,33 @@ def _first(parsed):
 
 
 @register
+class JumpPlatformParser(AnswerParser):
+    """跳端卡（crossCardType=JUMPPLATFORM）：本 BU 拒识后给出的跨 App 跳转卡。
+
+    结构：顶层 list，first.crossCardType=="JUMPPLATFORM"，含 title/desc。
+    如寿险金管家里问题被拒识，返回跳转平安乐健康的卡片。
+    输出固定话术，标明本 BU 不承接、引导用户改用目标 App。
+    priority 小于 LlmApiResp（跳端卡也带 appType，须先于它匹配，否则被当 LLM 响应取空 msg）。
+    """
+    name = "generic.jump_platform"
+    bu_codes = ("*",)
+    priority = 5
+
+    def match(self, raw, parsed) -> bool:
+        first = _first(parsed)
+        return isinstance(first, dict) and first.get("crossCardType") == "JUMPPLATFORM"
+
+    def parse(self, raw, parsed) -> str | None:
+        first = _first(parsed)
+        title = strip_html(first.get("title") or "").strip()
+        desc = strip_html(first.get("desc") or "").strip()
+        if not title:
+            return None
+        tail = f"，{desc}" if desc else ""
+        return f"本 BU 不承接，请使用【{title}】{tail}"
+
+
+@register
 class ContentDataParser(AnswerParser):
     """文本回复：顶层 list → first[0].content_data。"""
     name = "generic.content_data"

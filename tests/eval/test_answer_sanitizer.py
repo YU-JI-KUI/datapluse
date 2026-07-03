@@ -46,7 +46,50 @@ def test_securities_list_card():
     assert sanitize_answer(raw, "securities") == "开户营业部：深圳分公司"
 
 
+def test_securities_robot_menu_items():
+    """菜单卡 template=robotMenuItems：header + 各候选问题逐行。"""
+    raw = _wrap_msgcontext({
+        "msgInfo": {"msgContent": {
+            "template": "robotMenuItems",
+            "header": "请问您是想咨询以下哪个问题：",
+            "menuItems": {"questions": ["交易股票有什么费用", "交易基金有什么费用", "交易债券有什么费用"]},
+        }},
+    })
+    assert sanitize_answer(raw, "securities") == (
+        "请问您是想咨询以下哪个问题：\n交易股票有什么费用\n交易基金有什么费用\n交易债券有什么费用"
+    )
+
+
+def test_securities_robot_text_answer():
+    """关联问卡 msgContext.template=robotTextAnswer：header + relatedQuestions.questions 逐行。"""
+    ctx = {
+        "template": "robotTextAnswer",
+        "msgInfo": {"relatedQuestions": {
+            "footer": "",
+            "questions": ["什么是当日委托", "撤单的介绍", "受理成功的订单介绍"],
+            "header": "您咨询的是否为以下问题：",
+        }},
+    }
+    raw = json.dumps([{"msgContext": json.dumps(ctx, ensure_ascii=False)}], ensure_ascii=False)
+    assert sanitize_answer(raw, "securities") == (
+        "您咨询的是否为以下问题：\n什么是当日委托\n撤单的介绍\n受理成功的订单介绍"
+    )
+
+
 # ── 通用路径（所有 BU，寿险也能走）────────────────────────────────────────────
+
+def test_generic_jump_platform():
+    """跳端卡 crossCardType=JUMPPLATFORM：本 BU 拒识 → 固定话术引导跳转目标 App。"""
+    raw = json.dumps([{
+        "crossCardType": "JUMPPLATFORM",
+        "appType": "jkbx",          # 也带 appType，须先于 LlmApiResp 命中
+        "title": "平安乐健康",
+        "desc": "平安乐健康为您提供更完整的服务",
+    }], ensure_ascii=False)
+    assert sanitize_answer(raw, "life") == (
+        "本 BU 不承接，请使用【平安乐健康】，平安乐健康为您提供更完整的服务"
+    )
+
 
 def test_generic_text_reply():
     # A1：嵌套 list → content_data
