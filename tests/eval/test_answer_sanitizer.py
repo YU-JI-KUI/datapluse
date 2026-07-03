@@ -47,14 +47,22 @@ def test_securities_list_card():
 
 
 def test_securities_robot_menu_items():
-    """菜单卡 template=robotMenuItems：header + 各候选问题逐行。"""
-    raw = _wrap_msgcontext({
-        "msgInfo": {"msgContent": {
-            "template": "robotMenuItems",
-            "header": "请问您是想咨询以下哪个问题：",
-            "menuItems": {"questions": ["交易股票有什么费用", "交易基金有什么费用", "交易债券有什么费用"]},
-        }},
-    })
+    """菜单卡 msgContext.template=robotMenuItems：header + msgInfo.menuItems.questions 逐行。
+
+    真实结构：template 在 msgContext 顶层，msgContent 是空串，header 与 questions
+    都在 msgInfo.menuItems 内。
+    """
+    ctx = {
+        "template": "robotMenuItems",
+        "msgInfo": {
+            "msgContent": "",
+            "menuItems": {
+                "questions": ["交易股票有什么费用", "交易基金有什么费用", "交易债券有什么费用"],
+                "header": "请问您是想咨询以下哪个问题：",
+            },
+        },
+    }
+    raw = json.dumps([{"msgContext": json.dumps(ctx, ensure_ascii=False)}], ensure_ascii=False)
     assert sanitize_answer(raw, "securities") == (
         "请问您是想咨询以下哪个问题：\n交易股票有什么费用\n交易基金有什么费用\n交易债券有什么费用"
     )
@@ -89,6 +97,18 @@ def test_generic_jump_platform():
     assert sanitize_answer(raw, "life") == (
         "本 BU 不承接，请使用【平安乐健康】，平安乐健康为您提供更完整的服务"
     )
+
+
+def test_generic_agreement_card():
+    """协议同意卡 顶层 agreements：输出协议标题，标明需用户同意。"""
+    raw = json.dumps([{
+        "agreements": [{
+            "appTitleName": "平安证券", "id": 17, "title": "证券大模型协议",
+            "type": 4, "version": "V1.0.0", "typeCode": "llmProtocolTypeCode",
+        }],
+        "isUpdate": 0,
+    }], ensure_ascii=False)
+    assert sanitize_answer(raw, "securities") == "请阅读并同意以下协议：证券大模型协议"
 
 
 def test_generic_msgcontext_data_content():

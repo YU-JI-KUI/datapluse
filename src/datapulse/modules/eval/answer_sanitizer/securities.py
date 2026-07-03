@@ -47,32 +47,31 @@ def _header_questions(header, questions) -> str | None:
 
 @register
 class RobotMenuItemsParser(AnswerParser):
-    """证券·菜单卡（template=robotMenuItems）：机器人反问，列出候选问题让用户选。
+    """证券·菜单卡（msgContext.template=robotMenuItems）：机器人反问，列出候选问题让用户选。
 
-    结构：msgInfo.msgContent = {template:"robotMenuItems", header:"...", menuItems:{questions:[...]}}。
-    提取 = header + 各候选问题逐行。priority 比通用小安卡小，先于它匹配（它的 msgContent
-    是对象而非纯文本，若被小安卡当文本处理会输出整坨 dict）。
+    结构：msgContext.template=="robotMenuItems"，header 与 questions 都在
+    msgInfo.menuItems 内（msgContent 常是空串）。提取 = header + 各候选问题逐行。
+    priority 小于小安卡，先匹配。
     """
     name = "securities.robot_menu"
     bu_codes = ("securities",)
     priority = 5
 
     def _menu(self, parsed):
-        mi = _msg_info(parsed)
-        mc = mi.get("msgContent") if isinstance(mi, dict) else None
-        mc = loads_maybe(mc)   # msgContent 可能是 JSON 字符串
-        if isinstance(mc, dict) and mc.get("template") == "robotMenuItems":
-            return mc
-        return None
+        ctx = _msg_context(parsed)
+        if not (isinstance(ctx, dict) and ctx.get("template") == "robotMenuItems"):
+            return None
+        mi = loads_maybe(dig(ctx, "msgInfo", "menuItems"))
+        return mi if isinstance(mi, dict) else None
 
     def match(self, raw, parsed) -> bool:
         return self._menu(parsed) is not None
 
     def parse(self, raw, parsed) -> str | None:
-        mc = self._menu(parsed)
-        if mc is None:
+        mi = self._menu(parsed)
+        if mi is None:
             return None
-        return _header_questions(mc.get("header"), dig(mc, "menuItems", "questions"))
+        return _header_questions(mi.get("header"), mi.get("questions"))
 
 
 @register

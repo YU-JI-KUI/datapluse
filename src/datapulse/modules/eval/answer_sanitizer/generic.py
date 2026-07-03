@@ -133,6 +133,35 @@ class BenefitCardParser(AnswerParser):
 
 
 @register
+class AgreementCardParser(AnswerParser):
+    """协议同意卡（顶层 agreements 数组）：首次使用/协议更新时弹出的协议列表。
+
+    结构：first.agreements=[{title:"...", version:"..."}]。非对用户问题的回答，
+    而是让用户勾选同意的协议弹窗。输出协议标题，标明需用户同意（供 Judge 判未承接）。
+    """
+    name = "generic.agreement_card"
+    bu_codes = ("*",)
+    priority = 9
+
+    def _agreements(self, parsed):
+        first = _first(parsed)
+        ags = first.get("agreements") if isinstance(first, dict) else None
+        return ags if isinstance(ags, list) and ags else None
+
+    def match(self, raw, parsed) -> bool:
+        return self._agreements(parsed) is not None
+
+    def parse(self, raw, parsed) -> str | None:
+        ags = self._agreements(parsed)
+        if ags is None:
+            return None
+        titles = [strip_html(a.get("title") or "") for a in ags if isinstance(a, dict) and a.get("title")]
+        if not titles:
+            return None
+        return "请阅读并同意以下协议：" + "、".join(titles)
+
+
+@register
 class ContentDataParser(AnswerParser):
     """文本回复：顶层 list → first[0].content_data。"""
     name = "generic.content_data"
