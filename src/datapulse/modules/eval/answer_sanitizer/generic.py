@@ -8,6 +8,7 @@ from __future__ import annotations
 from datapulse.modules.eval.answer_sanitizer.base import (
     AnswerParser,
     dig,
+    first_dict,
     loads_maybe,
     register,
     strip_html,
@@ -15,7 +16,7 @@ from datapulse.modules.eval.answer_sanitizer.base import (
 
 
 def _first(parsed):
-    """取顶层 JSON 的首元素（list 取 [0]，否则原对象）。"""
+    """取顶层 JSON 的首元素（list 取 [0]，否则原对象）。content_data 需要它返回内层 list。"""
     if isinstance(parsed, list):
         return parsed[0] if parsed else None
     return parsed
@@ -23,7 +24,7 @@ def _first(parsed):
 
 def _msg_info(parsed):
     """渲染卡统一入口：first.msgContext(可能是 JSON 字符串).msgInfo。取不到返回 None。"""
-    first = _first(parsed)
+    first = first_dict(parsed)
     ctx = loads_maybe(first.get("msgContext")) if isinstance(first, dict) else None
     mi = ctx.get("msgInfo") if isinstance(ctx, dict) else None
     return mi if isinstance(mi, dict) else None
@@ -33,7 +34,7 @@ def _msg_info(parsed):
 class JumpPlatformParser(AnswerParser):
     """跳端卡（crossCardType=JUMPPLATFORM）：本 BU 拒识后给出的跨 App 跳转卡。
 
-    结构：顶层 list，first.crossCardType=="JUMPPLATFORM"，含 title/desc。
+    结构：{crossCardType:"JUMPPLATFORM", title, desc}，真实日志外层多套一层数组。
     如寿险金管家里问题被拒识，返回跳转平安乐健康的卡片。
     输出固定话术，标明本 BU 不承接、引导用户改用目标 App。
     priority 小于 LlmApiResp（跳端卡也带 appType，须先于它匹配，否则被当 LLM 响应取空 msg）。
@@ -43,11 +44,13 @@ class JumpPlatformParser(AnswerParser):
     priority = 5
 
     def match(self, raw, parsed) -> bool:
-        first = _first(parsed)
+        first = first_dict(parsed)
         return isinstance(first, dict) and first.get("crossCardType") == "JUMPPLATFORM"
 
     def parse(self, raw, parsed) -> str | None:
-        first = _first(parsed)
+        first = first_dict(parsed)
+        if not isinstance(first, dict):
+            return None
         title = strip_html(first.get("title") or "").strip()
         desc = strip_html(first.get("desc") or "").strip()
         if not title:
@@ -107,7 +110,7 @@ class BenefitCardParser(AnswerParser):
     priority = 8
 
     def _card(self, parsed):
-        first = _first(parsed)
+        first = first_dict(parsed)
         if not (isinstance(first, dict) and first.get("catalogId")):
             return None
         data = first.get("data")
@@ -134,17 +137,18 @@ class BenefitCardParser(AnswerParser):
 
 @register
 class AgreementCardParser(AnswerParser):
-    """协议同意卡（顶层 agreements 数组）：首次使用/协议更新时弹出的协议列表。
+    """协议同意卡（agreements 数组）：首次使用/协议更新时弹出的协议列表。
 
-    结构：first.agreements=[{title:"...", version:"..."}]。非对用户问题的回答，
-    而是让用户勾选同意的协议弹窗。输出协议标题，标明需用户同意（供 Judge 判未承接）。
+    结构：{agreements:[{title:"...", version:"..."}], isUpdate:0}，真实日志外层
+    常多套一层数组 [[{...}]]。非对用户问题的回答，而是让用户勾选同意的协议弹窗。
+    输出协议标题，标明需用户同意（供 Judge 判未承接）。
     """
     name = "generic.agreement_card"
     bu_codes = ("*",)
     priority = 9
 
     def _agreements(self, parsed):
-        first = _first(parsed)
+        first = first_dict(parsed)
         ags = first.get("agreements") if isinstance(first, dict) else None
         return ags if isinstance(ags, list) and ags else None
 
@@ -189,10 +193,12 @@ class LlmApiRespParser(AnswerParser):
     priority = 20
 
     def match(self, raw, parsed) -> bool:
-        first = _first(parsed)
+        first = first_dict(parsed)
         return isinstance(first, dict) and "appType" in first
 
     def parse(self, raw, parsed) -> str | None:
-        first = _first(parsed)
+        first = first_dict(parsed)
+        if not isinstance(first, dict):
+            return None
         v = first.get("msg") or first.get("standardQuestion") or ""
         return strip_html(v) if v else None

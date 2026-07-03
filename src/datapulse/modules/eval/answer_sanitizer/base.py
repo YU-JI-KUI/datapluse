@@ -44,6 +44,20 @@ def loads_maybe(v):
     return v
 
 
+def first_dict(parsed, max_depth=3):
+    """逐层剥开嵌套数组，取到第一个 dict。真实日志的卡片外层常多套一层数组
+    （如 [[{...}]]），只剥单层会拿到内层 list、匹配失败。取不到返回 None。"""
+    cur = parsed
+    for _ in range(max_depth):
+        if isinstance(cur, dict):
+            return cur
+        if isinstance(cur, list) and cur:
+            cur = cur[0]
+        else:
+            return None
+    return cur if isinstance(cur, dict) else None
+
+
 def dig(obj, *keys):
     """安全多级取值：dig(d, 'a', 'b') ≈ d['a']['b']，任一层缺失/类型不符返回 None。
     遇到 JSON 字符串值自动下钻一层（用于 msgContext 这类嵌套 JSON 字符串）。"""

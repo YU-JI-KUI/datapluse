@@ -87,28 +87,33 @@ def test_securities_robot_text_answer():
 # ── 通用路径（所有 BU，寿险也能走）────────────────────────────────────────────
 
 def test_generic_jump_platform():
-    """跳端卡 crossCardType=JUMPPLATFORM：本 BU 拒识 → 固定话术引导跳转目标 App。"""
-    raw = json.dumps([{
+    """跳端卡 crossCardType=JUMPPLATFORM：本 BU 拒识 → 固定话术。真实日志外层双层数组。"""
+    inner = {
         "crossCardType": "JUMPPLATFORM",
         "appType": "jkbx",          # 也带 appType，须先于 LlmApiResp 命中
         "title": "平安乐健康",
         "desc": "平安乐健康为您提供更完整的服务",
-    }], ensure_ascii=False)
-    assert sanitize_answer(raw, "life") == (
-        "本 BU 不承接，请使用【平安乐健康】，平安乐健康为您提供更完整的服务"
-    )
+    }
+    expected = "本 BU 不承接，请使用【平安乐健康】，平安乐健康为您提供更完整的服务"
+    assert sanitize_answer(json.dumps([[inner]], ensure_ascii=False), "life") == expected  # 双层
+    assert sanitize_answer(json.dumps([inner], ensure_ascii=False), "life") == expected     # 单层
 
 
 def test_generic_agreement_card():
-    """协议同意卡 顶层 agreements：输出协议标题，标明需用户同意。"""
-    raw = json.dumps([{
+    """协议同意卡 agreements：输出协议标题。真实日志外层多套一层数组 [[{...}]]。"""
+    inner = {
         "agreements": [{
             "appTitleName": "平安证券", "id": 17, "title": "证券大模型协议",
             "type": 4, "version": "V1.0.0", "typeCode": "llmProtocolTypeCode",
         }],
         "isUpdate": 0,
-    }], ensure_ascii=False)
-    assert sanitize_answer(raw, "securities") == "请阅读并同意以下协议：证券大模型协议"
+    }
+    # 真实结构：双层数组 [[{...}]]
+    raw2 = json.dumps([[inner]], ensure_ascii=False)
+    assert sanitize_answer(raw2, "securities") == "请阅读并同意以下协议：证券大模型协议"
+    # 单层 [{...}] 也应兼容
+    raw1 = json.dumps([inner], ensure_ascii=False)
+    assert sanitize_answer(raw1, "securities") == "请阅读并同意以下协议：证券大模型协议"
 
 
 def test_generic_msgcontext_data_content():

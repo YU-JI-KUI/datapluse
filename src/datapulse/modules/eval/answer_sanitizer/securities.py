@@ -7,21 +7,16 @@ from __future__ import annotations
 from datapulse.modules.eval.answer_sanitizer.base import (
     AnswerParser,
     dig,
+    first_dict,
     loads_maybe,
     register,
     strip_html,
 )
 
 
-def _first_dict(parsed):
-    """取顶层首元素，且必须是 dict（证券卡片都是对象）。"""
-    first = parsed[0] if isinstance(parsed, list) and parsed else parsed
-    return first if isinstance(first, dict) else None
-
-
 def _msg_context(parsed):
     """证券卡片统一入口：first.msgContext(可能是 JSON 字符串)解析成 dict。取不到返回 None。"""
-    first = _first_dict(parsed)
+    first = first_dict(parsed)
     if first is None:
         return None
     inner = loads_maybe(first.get("msgContext"))
