@@ -1,21 +1,15 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 1ddad7d4
+# 基于 origin/main @ 95a1a1ab
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   1ddad7d4 code clean
-#   073a45c2 使用说明改为 md 单一源 + 独立 HTML 页，新标签打开
-#   45a9ddcc 文档修正：活动标问/规则短路的举例对调
-#   5f15cfa7 文档同步：子集重跑更新为明细勾选异步重跑
-#   c7e203c3 评测三项优化：修上传超时误报 + 报告页分区导航 + 明细复选异步重跑
-frontend/.gitignore
-frontend/package.json
-frontend/public/eval-guide.html
-frontend/src/pages/Eval.jsx
-docs/ai_eval_guide.md
-frontend/src/components/eval/EvalResult.jsx
-frontend/src/components/eval/EvalUploader.jsx
+#   95a1a1ab 明细表新增分发BU/分发判定/解决过滤 + 寿险分发别名加「寿」
+#   3aed8e45 新增标注规则提炼脚本 + 按分类聚合关键词说明 SQL
 frontend/src/components/eval/RowsTable.jsx
 frontend/src/lib/api.js
+src/datapulse/modules/eval/bu/life_insurance.py
+src/datapulse/modules/eval/eval_db.py
+src/datapulse/modules/eval/repository.py
 src/datapulse/pipeline/eval_engine.py
 src/datapulse/router/eval.py
-[DEL] docs/eval_subset_rerun_design.md
+scripts/common.sql
+scripts/extract_rules.py
