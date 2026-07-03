@@ -1,15 +1,12 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 95a1a1ab
+# 基于 origin/main @ 833b5b71
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   95a1a1ab 明细表新增分发BU/分发判定/解决过滤 + 寿险分发别名加「寿」
-#   3aed8e45 新增标注规则提炼脚本 + 按分类聚合关键词说明 SQL
-frontend/src/components/eval/RowsTable.jsx
-frontend/src/lib/api.js
-src/datapulse/modules/eval/bu/life_insurance.py
-src/datapulse/modules/eval/eval_db.py
-src/datapulse/modules/eval/repository.py
-src/datapulse/pipeline/eval_engine.py
-src/datapulse/router/eval.py
-scripts/common.sql
-scripts/extract_rules.py
+#   833b5b71 答案净化重构为插件式解析器 + 覆盖率排查脚本
+scripts/answer_coverage.py
+src/datapulse/modules/eval/answer_sanitizer/__init__.py
+src/datapulse/modules/eval/answer_sanitizer/base.py
+src/datapulse/modules/eval/answer_sanitizer/generic.py
+src/datapulse/modules/eval/answer_sanitizer/life_insurance.py
+src/datapulse/modules/eval/answer_sanitizer/securities.py
+[DEL] src/datapulse/modules/eval/answer_sanitizer.py
