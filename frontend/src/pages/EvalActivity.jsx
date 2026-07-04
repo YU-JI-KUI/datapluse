@@ -16,6 +16,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import TablePagination from '@/components/TablePagination'
 import { evalApi, getCurrentBu } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 
@@ -28,11 +29,15 @@ export default function EvalActivity() {
   const [editing, setEditing] = useState(null)   // { question, note } 新增中的对象
   const [delTarget, setDelTarget] = useState(null)
   const [saving, setSaving]   = useState(false)
+  const [page, setPage]         = useState(1)    // 前端本地分页：全量加载后内存切片
+  const [pageSize, setPageSize] = useState(10)
+
+  const pageList = list.slice((page - 1) * pageSize, page * pageSize)
 
   function load() {
     setLoading(true)
     evalApi.listActivityQuestions()
-      .then(res => setList(RESP(res).questions || []))
+      .then(res => { setList(RESP(res).questions || []); setPage(1) })
       .catch(e => toast.error(e.response?.data?.message || '加载活动标问失败'))
       .finally(() => setLoading(false))
   }
@@ -115,7 +120,7 @@ export default function EvalActivity() {
                     当前 BU 暂无活动标问，点右上角「新增活动标问」开始维护。
                   </TableCell>
                 </TableRow>
-              ) : list.map(q => (
+              ) : pageList.map(q => (
                 <TableRow key={q.id}>
                   <TableCell className="font-medium">{q.question}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{q.note}</TableCell>
@@ -131,6 +136,13 @@ export default function EvalActivity() {
               ))}
             </TableBody>
           </Table>
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            total={list.length}
+            onPageChange={setPage}
+            onSizeChange={size => { setPageSize(size); setPage(1) }}
+          />
         </CardContent>
       </Card>
 

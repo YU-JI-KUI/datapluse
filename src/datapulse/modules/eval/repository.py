@@ -102,14 +102,20 @@ class EvalRepository:
         t = self.session.query(EvalTask).filter(EvalTask.task_id == task_id).first()
         return _task_to_dict(t, full=True) if t else None
 
-    def list_tasks_paged(self, page: int, page_size: int, bu: str = "") -> tuple[list[dict], int]:
+    def list_tasks_paged(self, page: int, page_size: int, bu: str = "",
+                         keyword: str = "", mode: str = "") -> tuple[list[dict], int]:
         """分页查任务列表(SQL 层 ORDER BY + LIMIT/OFFSET + COUNT)。
 
         替代「全量查出来再 Python 切片」:任务表只增不减,全量加载迟早拖慢列表页。
-        bu 非空则按业务单元过滤。返回 (当前页任务, 总数)。
+        bu 非空则按业务单元过滤;keyword 非空则按文件名模糊匹配;mode 非空则按评测模式精确过滤。
+        返回 (当前页任务, 总数)。
         """
         from sqlalchemy import func
         conds = [EvalTask.bu == bu] if bu else []
+        if keyword:
+            conds.append(EvalTask.filename.ilike(f"%{keyword}%"))
+        if mode:
+            conds.append(EvalTask.mode == mode)
         total = int(self.session.execute(
             select(func.count()).select_from(EvalTask).where(*conds)
         ).scalar() or 0)

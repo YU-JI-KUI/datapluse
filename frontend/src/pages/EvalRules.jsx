@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import TablePagination from '@/components/TablePagination'
 import { evalApi, getCurrentBu } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 
@@ -48,11 +49,15 @@ export default function EvalRules() {
   const [editing, setEditing] = useState(null)   // { id?, question, expected_answer, note, judge }
   const [delTarget, setDelTarget] = useState(null)
   const [saving, setSaving]   = useState(false)
+  const [page, setPage]         = useState(1)    // 前端本地分页：全量加载后内存切片
+  const [pageSize, setPageSize] = useState(10)
+
+  const pageList = list.slice((page - 1) * pageSize, page * pageSize)
 
   function load() {
     setLoading(true)
     evalApi.listRules()
-      .then(res => setList(RESP(res).rules || []))
+      .then(res => { setList(RESP(res).rules || []); setPage(1) })
       .catch(e => toast.error(e.response?.data?.message || '加载规则失败'))
       .finally(() => setLoading(false))
   }
@@ -149,7 +154,7 @@ export default function EvalRules() {
                 <TableRow><TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
                   当前 BU 暂无规则，点右上角「新增规则」开始维护。
                 </TableCell></TableRow>
-              ) : list.map(r => (
+              ) : pageList.map(r => (
                 <TableRow key={r.id}>
                   <TableCell className="font-medium">{r.question}</TableCell>
                   <TableCell className="text-sm text-muted-foreground max-w-xs truncate">{r.expected_answer}</TableCell>
@@ -169,6 +174,13 @@ export default function EvalRules() {
               ))}
             </TableBody>
           </Table>
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            total={list.length}
+            onPageChange={setPage}
+            onSizeChange={size => { setPageSize(size); setPage(1) }}
+          />
         </CardContent>
       </Card>
 

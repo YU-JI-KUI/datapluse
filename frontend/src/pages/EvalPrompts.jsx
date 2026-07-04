@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
-import { Loader2, Save, RotateCcw, FileText, CheckCircle2, ArrowLeft } from 'lucide-react'
+import { Loader2, Save, RotateCcw, FileText, CheckCircle2, ArrowLeft, Pencil, Columns2, Eye } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -46,6 +46,7 @@ export default function EvalPrompts() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving]   = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
+  const [viewMode, setViewMode] = useState('edit')   // edit（默认纯写作）/ split / preview
 
   const dirty = detail && draft !== detail.content
 
@@ -129,7 +130,7 @@ export default function EvalPrompts() {
           <h1 className="text-2xl font-bold">提示词管理</h1>
           <p className="text-muted-foreground text-sm mt-1">
             编辑当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的提示词，
-            左侧编辑、右侧实时预览 Markdown，保存后<strong>下次评测即生效</strong>。
+            默认纯写作、需要时切换预览，保存后<strong>下次评测即生效</strong>。
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>
@@ -211,6 +212,25 @@ export default function EvalPrompts() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {/* 视图切换：编辑（默认纯写作）/ 分栏 / 预览，预览按需而非常驻 */}
+                    <div className="flex items-center rounded-md border p-0.5">
+                      {[
+                        { k: 'edit',    label: '编辑', icon: Pencil },
+                        { k: 'split',   label: '分栏', icon: Columns2 },
+                        { k: 'preview', label: '预览', icon: Eye },
+                      ].map(v => (
+                        <button
+                          key={v.k}
+                          onClick={() => setViewMode(v.k)}
+                          className={[
+                            'flex items-center gap-1 rounded px-2.5 py-1 text-xs transition-colors',
+                            viewMode === v.k ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground',
+                          ].join(' ')}
+                        >
+                          <v.icon className="w-3.5 h-3.5" />{v.label}
+                        </button>
+                      ))}
+                    </div>
                     {detail.source === 'own' && (
                       <Button variant="outline" size="sm" onClick={() => setResetOpen(true)}>
                         <RotateCcw className="w-4 h-4 mr-1.5" />恢复继承
@@ -224,23 +244,29 @@ export default function EvalPrompts() {
                 </div>
               </CardHeader>
               <CardContent>
-                {/* 左编辑 / 右预览 */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col">
-                    <div className="text-xs text-muted-foreground mb-1">编辑（Markdown 源码）</div>
+                {/* 按视图切换：edit 独占整列写作 / split 并排 / preview 只读渲染 */}
+                <div className={viewMode === 'split' ? 'grid grid-cols-2 gap-3' : ''}>
+                  {viewMode !== 'preview' && (
                     <textarea
                       value={draft}
                       onChange={e => setDraft(e.target.value)}
                       spellCheck={false}
-                      className="h-[560px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                      className={[
+                        'h-[560px] w-full rounded-md bg-background px-3 py-2 font-mono text-sm leading-relaxed resize-none',
+                        'focus:outline-none focus:ring-2 focus:ring-ring',
+                        // split 态需描边区分左右两栏；edit 态由外层 Card 提供唯一边界，去掉自身框避免框中框
+                        viewMode === 'split' ? 'border border-input' : '',
+                      ].join(' ')}
                     />
-                  </div>
-                  <div className="flex flex-col">
-                    <div className="text-xs text-muted-foreground mb-1">预览</div>
-                    <div className="h-[560px] overflow-y-auto rounded-md border border-input bg-muted/30 px-4 py-3 text-sm">
+                  )}
+                  {viewMode !== 'edit' && (
+                    <div className={[
+                      'h-[560px] overflow-y-auto rounded-md bg-muted/30 px-4 py-3 text-sm',
+                      viewMode === 'split' ? 'border border-input' : '',
+                    ].join(' ')}>
                       <ReactMarkdown components={MD}>{draft || '_（空）_'}</ReactMarkdown>
                     </div>
-                  </div>
+                  )}
                 </div>
                 <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
                   <span>{dirty ? '有未保存的修改' : '无改动'}</span>

@@ -91,9 +91,10 @@ def get_task(task_id: str) -> dict | None:
         return _repo(s).get_task(task_id)
 
 
-def list_tasks_paged(page: int, page_size: int, bu: str = "") -> tuple[list[dict], int]:
+def list_tasks_paged(page: int, page_size: int, bu: str = "",
+                     keyword: str = "", mode: str = "") -> tuple[list[dict], int]:
     with eval_session() as s:
-        return _repo(s).list_tasks_paged(page, page_size, bu=bu)
+        return _repo(s).list_tasks_paged(page, page_size, bu=bu, keyword=keyword, mode=mode)
 
 
 # ── 多 POD 抢占式调度 ─────────────────────────────────────────────────────────

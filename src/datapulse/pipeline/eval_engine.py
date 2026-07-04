@@ -75,9 +75,13 @@ def get_task(task_id: str) -> dict | None:
     return _public(t) if t else None
 
 
-def list_tasks_paged(page: int, page_size: int, bu: str = "") -> tuple[list[dict], int]:
-    """分页任务列表(SQL 层分页 + 过滤),返回 (对外状态列表, 总数)。"""
-    rows, total = eval_db.list_tasks_paged(page, page_size, bu=bu)
+def list_tasks_paged(page: int, page_size: int, bu: str = "",
+                     keyword: str = "", mode: str = "") -> tuple[list[dict], int]:
+    """分页任务列表(SQL 层分页 + 过滤),返回 (对外状态列表, 总数)。
+
+    keyword 按文件名模糊匹配,mode 按评测模式(calibration/production)精确过滤。
+    """
+    rows, total = eval_db.list_tasks_paged(page, page_size, bu=bu, keyword=keyword, mode=mode)
     return [_public(t) for t in rows], total
 
 

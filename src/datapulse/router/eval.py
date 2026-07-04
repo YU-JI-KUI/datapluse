@@ -89,8 +89,10 @@ async def list_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
     bu: str = Query("", description="按业务单元过滤；空则返回全部"),
+    keyword: str = Query("", description="按文件名模糊匹配；空则不过滤"),
+    mode: str = Query("", description="按评测模式过滤：calibration/production；空则不过滤"),
 ):
-    tasks, total = eval_engine.list_tasks_paged(page, page_size, bu=bu)
+    tasks, total = eval_engine.list_tasks_paged(page, page_size, bu=bu, keyword=keyword, mode=mode)
     return success(page_data(tasks, page, page_size, total))
 
 

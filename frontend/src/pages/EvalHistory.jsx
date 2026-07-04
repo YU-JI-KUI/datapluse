@@ -6,9 +6,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, Loader2, User, Eye, RotateCcw, Trash2 } from 'lucide-react'
+import { ArrowLeft, Loader2, User, Eye, RotateCcw, Trash2, Search, X } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
@@ -36,11 +40,23 @@ export default function EvalHistory() {
   const [loading, setLoading]   = useState(false)
   const [delTarget, setDelTarget] = useState(null)   // 待删除的任务
   const [rerunTarget, setRerunTarget] = useState(null)   // 待重测的任务
+  const [keyword, setKeyword]   = useState('')       // 文件名搜索框实时值（受控）
+  const [debKeyword, setDebKeyword] = useState('')   // 防抖后的关键字，真正参与查询
+  const [mode, setMode]         = useState('all')    // 模式过滤：all/calibration/production
+
+  // 输入防抖 300ms：停止输入后才更新 debKeyword，触发查询并回到第 1 页
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebKeyword(keyword.trim())
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [keyword])
 
   // silent=true：轮询静默刷新，不显示「加载中」遮罩，只更新数据（状态列随之变化）
   function load(silent = false) {
     if (!silent) setLoading(true)
-    evalApi.listTasks(page, pageSize)
+    evalApi.listTasks(page, pageSize, { keyword: debKeyword, mode: mode === 'all' ? '' : mode })
       .then(res => {
         const d = RESP(res)
         setList(d.list || [])
@@ -50,7 +66,7 @@ export default function EvalHistory() {
       .finally(() => { if (!silent) setLoading(false) })
   }
 
-  useEffect(() => { load() }, [page, pageSize])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [page, pageSize, debKeyword, mode])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // 全局 BU 切换时刷新（列表已按当前 BU 过滤）
   useEffect(() => {
@@ -103,6 +119,38 @@ export default function EvalHistory() {
         <Button variant="outline" size="sm" asChild>
           <Link to="/eval"><ArrowLeft className="w-4 h-4 mr-1.5" />返回评测</Link>
         </Button>
+      </div>
+
+      {/* 搜索筛选栏：文件名关键字（防抖）+ 模式 */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative w-72">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            value={keyword}
+            onChange={e => setKeyword(e.target.value)}
+            placeholder="按文件名搜索…"
+            className="pl-8 pr-8 h-9"
+          />
+          {keyword && (
+            <button
+              title="清空"
+              onClick={() => setKeyword('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-accent text-muted-foreground"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+        <Select value={mode} onValueChange={v => { setMode(v); setPage(1) }}>
+          <SelectTrigger className="h-9 w-32">
+            <SelectValue placeholder="全部模式" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部模式</SelectItem>
+            <SelectItem value="calibration">校准</SelectItem>
+            <SelectItem value="production">生产</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <Card>

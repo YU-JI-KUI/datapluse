@@ -448,8 +448,8 @@ export const evalApi = {
   deleteRule: (id) => api.delete(`/eval/rules/${id}`),
 
   // 任务列表 / 状态 / 结果 / 续跑。bu 默认当前全局 BU（传空字符串可查全部）
-  listTasks: (page = 1, pageSize = 50, bu = getCurrentBu()) =>
-    api.get('/eval/tasks', { params: { page, page_size: pageSize, bu } }),
+  listTasks: (page = 1, pageSize = 50, { keyword = '', mode = '' } = {}, bu = getCurrentBu()) =>
+    api.get('/eval/tasks', { params: { page, page_size: pageSize, bu, keyword, mode } }),
   getTask:   (taskId) => api.get(`/eval/tasks/${taskId}`),
   getResult: (taskId) => api.get(`/eval/tasks/${taskId}/result`),
   // 逐条明细分页（百万级下不再随 result 返回全量 rows）。flag: all | review

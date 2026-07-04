@@ -15,6 +15,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import TablePagination from '@/components/TablePagination'
 import { evalApi, getCurrentBu } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 
@@ -27,11 +28,16 @@ export default function EvalCategories() {
   const [editing, setEditing] = useState(null)   // { id?, name, definition } 编辑/新增中的对象
   const [delTarget, setDelTarget] = useState(null)
   const [saving, setSaving]   = useState(false)
+  const [page, setPage]         = useState(1)    // 前端本地分页：全量加载后内存切片
+  const [pageSize, setPageSize] = useState(10)
+
+  // 全量数据的当前页切片
+  const pageList = list.slice((page - 1) * pageSize, page * pageSize)
 
   function load() {
     setLoading(true)
     evalApi.listCategories()
-      .then(res => setList(RESP(res).categories || []))
+      .then(res => { setList(RESP(res).categories || []); setPage(1) })
       .catch(e => toast.error(e.response?.data?.message || '加载业务分类失败'))
       .finally(() => setLoading(false))
   }
@@ -116,7 +122,7 @@ export default function EvalCategories() {
                     当前 BU 暂无业务分类，点右上角「新增分类」开始维护。
                   </TableCell>
                 </TableRow>
-              ) : list.map(c => (
+              ) : pageList.map(c => (
                 <TableRow key={c.id}>
                   <TableCell className="font-medium">{c.name}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{c.definition}</TableCell>
@@ -135,6 +141,13 @@ export default function EvalCategories() {
               ))}
             </TableBody>
           </Table>
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            total={list.length}
+            onPageChange={setPage}
+            onSizeChange={size => { setPageSize(size); setPage(1) }}
+          />
         </CardContent>
       </Card>
 
