@@ -26,6 +26,33 @@ api.interceptors.response.use(
   }
 )
 
+// ── 统一文件下载 ─────────────────────────────────────────────────────────────
+//
+// 全站唯一的下载实现。用 axios(responseType:blob) 拉取 → 同域 blob URL + <a download>
+// 触发保存。相比 window.location.href 整页导航到无扩展名 URL（会被 Chrome Safe
+// Browsing 判为可疑、弹「保留/放弃」不安全提示），blob + 明确文件名 + 用户手势是浏览器
+// 最信任的方式，不会触发警告；且复用 axios 拦截器自动带 token、走同域相对路径 /api。
+//
+// url         相对 /api 的路径（如 `/export/download/${token}`），或已生成好文件的 GET 端点
+// fallbackName 服务端未给 Content-Disposition 时用的文件名
+async function downloadFile(url, fallbackName = 'download') {
+  // 下载是长操作（大文件生成/传输），放宽超时到 5 分钟，不受常规 API 30s 限制
+  const res = await api.get(url, { responseType: 'blob', timeout: 300000 })
+  const disposition = res.headers['content-disposition'] || ''
+  const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i)
+  const name = match ? decodeURIComponent(match[1]) : fallbackName
+
+  const blobUrl = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = blobUrl
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(blobUrl)
+  return name
+}
+
 // ── 当前 Dataset（存 localStorage，始终为 integer）────────────────────────────
 
 export const getCurrentDatasetId = () => {
@@ -306,8 +333,7 @@ export const exportApi = {
   /**
    * 两步下载：
    *  1. POST /export/prepare → 服务端生成临时文件，返回 token
-   *  2. window.location.href → 浏览器原生 GET 导航触发下载
-   * 这样浏览器把下载视为用户主动导航，不会触发 Chrome "不安全下载" 拦截。
+   *  2. downloadFile → blob + <a download> 触发保存（全站统一实现）
    */
   download: async (params, datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return null
@@ -315,9 +341,7 @@ export const exportApi = {
     const res = await api.post('/export/prepare', body)
     const { token, filename } = res.data?.data ?? {}
     if (!token) throw new Error('导出失败：未获取到下载 token')
-    // 浏览器原生导航下载（无需 Authorization header，token 即凭据）
-    window.location.href = `/api/export/download/${token}`
-    return filename
+    return downloadFile(`/export/download/${token}`, filename)
   },
   fields: (datasetId = getCurrentDatasetId()) => {
     if (!datasetId) return _empty([])
@@ -333,7 +357,7 @@ export const exportApi = {
     const res = await api.post('/export/conflicts/prepare', body)
     const { token, filename, count } = res.data?.data ?? {}
     if (!token) throw new Error('导出失败：未获取到下载 token')
-    window.location.href = `/api/export/download/${token}`
+    await downloadFile(`/export/download/${token}`, filename)
     return { filename, count }
   },
 }
@@ -393,27 +417,6 @@ export const dashboardApi = {
 }
 
 // ── AI 评测 ─────────────────────────────────────────────────────────────────────
-
-// 导出文件需带 token（FileResponse 走 <a href> 时拦截器不生效），用 fetch+blob 触发下载
-async function _downloadWithToken(path, fallbackName) {
-  const token = localStorage.getItem('token')
-  const res = await fetch(`/api${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!res.ok) throw new Error(`下载失败（${res.status}）`)
-  const blob = await res.blob()
-  const disposition = res.headers.get('Content-Disposition') || ''
-  const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i)
-  const name = match ? decodeURIComponent(match[1]) : fallbackName
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = name
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
-}
 
 export const evalApi = {
   // 配置 / BU / 意图（meta）
@@ -486,15 +489,15 @@ export const evalApi = {
   rerunRows: (taskId, rowIndices) =>
     api.post(`/eval/tasks/${taskId}/rerun-rows`, { row_indices: rowIndices }),
 
-  // 三种导出（带 token 的 blob 下载）
+  // 三种导出（统一 blob 下载）
   // 文件名以后端 Content-Disposition 为准（含原始上传文件名前缀）；下方 fallback 仅在
   // 响应头缺失时兜底。
   exportDisagreements: (taskId) =>
-    _downloadWithToken(`/eval/tasks/${taskId}/export`, `不一致case_${taskId}.xlsx`),
+    downloadFile(`/eval/tasks/${taskId}/export`, `不一致case_${taskId}.xlsx`),
   exportRows: (taskId) =>
-    _downloadWithToken(`/eval/tasks/${taskId}/export/rows`, `评测明细_${taskId}.xlsx`),
+    downloadFile(`/eval/tasks/${taskId}/export/rows`, `评测明细_${taskId}.xlsx`),
   exportReport: (taskId) =>
-    _downloadWithToken(`/eval/tasks/${taskId}/export/report`, `评估报告_${taskId}.xlsx`),
+    downloadFile(`/eval/tasks/${taskId}/export/report`, `评估报告_${taskId}.xlsx`),
 
   // 提示词管理（按 BU 列全部模板槽位，改后不重启即生效）
   listPrompts: (bu = getCurrentBu()) => api.get('/eval/prompts', { params: { bu } }),
