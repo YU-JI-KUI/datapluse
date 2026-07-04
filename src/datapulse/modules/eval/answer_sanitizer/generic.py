@@ -167,7 +167,11 @@ class AgreementCardParser(AnswerParser):
 
 @register
 class ContentDataParser(AnswerParser):
-    """文本回复：顶层 list → first[0].content_data。"""
+    """文本回复：顶层 list → first[0].content_data。
+
+    content_data 为 jgj_ 前缀的转人工标识串（金管家转人工工单号）时，正文对模型无意义，
+    统一归一为「金管家转人工」，让 Judge 识别为转人工而非正常文本回复。
+    """
     name = "generic.content_data"
     bu_codes = ("*",)
     priority = 10
@@ -182,7 +186,48 @@ class ContentDataParser(AnswerParser):
 
     def parse(self, raw, parsed) -> str | None:
         inner = self._inner(parsed)
-        return strip_html(inner.get("content_data") or "") if inner else None
+        if not inner:
+            return None
+        content = strip_html(inner.get("content_data") or "")
+        if content.startswith("jgj_"):
+            return "金管家转人工"
+        return content
+
+
+@register
+class ServiceNavCardParser(AnswerParser):
+    """服务导航卡（title + subTitle + tabs.funcList 功能菜单）：如「平安救急服务」导航页。
+
+    结构：first 含非空 tabs 数组、每个 tab 有 funcList（功能菜单）。跨 BU 通用。
+    只取 title + subTitle 概括，功能菜单跨 tab 大量重复、对判定无益，不进正文。
+    """
+    name = "generic.service_nav"
+    bu_codes = ("*",)
+    priority = 12
+
+    def _card(self, parsed):
+        first = first_dict(parsed)
+        if not isinstance(first, dict):
+            return None
+        tabs = first.get("tabs")
+        has_func = isinstance(tabs, list) and any(
+            isinstance(t, dict) and t.get("funcList") for t in tabs
+        )
+        return first if has_func else None
+
+    def match(self, raw, parsed) -> bool:
+        return self._card(parsed) is not None
+
+    def parse(self, raw, parsed) -> str | None:
+        first = self._card(parsed)
+        if first is None:
+            return None
+        lines = []
+        for key in ("title", "subTitle"):
+            v = strip_html(first.get(key) or "")
+            if v:
+                lines.append(v)
+        return "\n".join(lines) or None
 
 
 @register
