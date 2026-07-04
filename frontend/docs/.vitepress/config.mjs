@@ -13,6 +13,7 @@ export default defineConfig({
 
     nav: [
       { text: '使用指南', link: '/guide/overview' },
+      { text: 'AI 评测', link: '/guide/eval' },
       { text: '更新日志', link: '/changelog' },
       { text: '常见问题', link: '/faq' },
     ],
@@ -26,7 +27,7 @@ export default defineConfig({
         ],
       },
       {
-        text: '核心功能',
+        text: '标注平台',
         items: [
           { text: '数据集管理', link: '/guide/dataset'         },
           { text: '数据上传',   link: '/guide/upload'          },
@@ -35,6 +36,14 @@ export default defineConfig({
           { text: '人工标注',   link: '/guide/annotation'      },
           { text: '冲突检测',   link: '/guide/conflicts'       },
           { text: '导出数据',   link: '/guide/export'          },
+        ],
+      },
+      {
+        text: 'AI 评测',
+        items: [
+          { text: '评测概述',   link: '/guide/eval'            },
+          { text: '指标口径',   link: '/guide/eval-metrics'    },
+          { text: '调优与重跑', link: '/guide/eval-tuning'     },
         ],
       },
       {
@@ -54,11 +63,6 @@ export default defineConfig({
     },
 
     search: { provider: 'local' },
-
-    editLink: {
-      pattern: 'https://github.com/your-org/datapulse/edit/main/docs/:path',
-      text:    '在 GitHub 上编辑此页',
-    },
 
     lastUpdated: { text: '最后更新于' },
 

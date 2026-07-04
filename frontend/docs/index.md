@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Datapulse
-  text: AI 数据生产平台
-  tagline: 从原始数据到高质量训练集的完整工作流
+  text: AI 数据生产与评测平台
+  tagline: 标注平台生产高质量训练集，AI 评测衡量对话系统回答质量
   actions:
     - theme: brand
       text: 快速开始
@@ -12,6 +12,9 @@ hero:
     - theme: alt
       text: 平台简介
       link: /guide/overview
+    - theme: alt
+      text: AI 评测
+      link: /guide/eval
 
 features:
   - icon: 🧹
@@ -26,10 +29,10 @@ features:
   - icon: 🔍
     title: 冲突检测
     details: 自动发现标签冲突和语义冲突，支持批量裁决，保障标注一致性。
-  - icon: 📦
-    title: 灵活导出
-    details: 自由选择导出字段，支持 Excel 和 JSON 格式，直接用于模型训练。
-  - icon: ⚡
-    title: 全流程自动化
-    details: Pipeline 一键触发，清洗 → 预标注 → 冲突检测，后台异步执行不阻塞。
+  - icon: 📊
+    title: AI 评测
+    details: 上传对话日志，逐条判定回答质量，汇总分发准确率与问题解决率等指标。
+  - icon: 🎯
+    title: 评测调优
+    details: 业务分类、规则短路、提示词分槽位管理，人工复核实时改指标，勾选重跑验证。
 ---

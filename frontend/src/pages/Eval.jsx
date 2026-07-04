@@ -14,8 +14,8 @@ import EvalUploader from '@/components/eval/EvalUploader'
 import EvalProgress from '@/components/eval/EvalProgress'
 import EvalResult from '@/components/eval/EvalResult'
 
-// 使用说明是独立 HTML（public/eval-guide.html，fetch docs 的 md 渲染，md 唯一维护源）
-const GUIDE_URL = '/eval-guide.html'
+// 使用说明指向 Datapulse 文档站的「AI 评测」章节（VitePress 构建产物，统一维护源）
+const GUIDE_URL = '/docs/guide/eval.html'
 const _GUIDE_SEEN_KEY = 'eval_guide_seen'
 function openGuide() { window.open(GUIDE_URL, '_blank', 'noopener') }
 
