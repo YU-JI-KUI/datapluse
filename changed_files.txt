@@ -1,11 +1,6 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 881cacc2
+# 基于 origin/main @ a55e4ac7
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   881cacc2 统一嵌套数组剥离，修复双层结构卡片全线漏网
-src/datapulse/modules/eval/answer_sanitizer/base.py
-src/datapulse/modules/eval/answer_sanitizer/generic.py
-src/datapulse/modules/eval/answer_sanitizer/samples/generic.agreement_card.md
-src/datapulse/modules/eval/answer_sanitizer/samples/generic.jump_platform.md
-src/datapulse/modules/eval/answer_sanitizer/securities.py
-tests/eval/test_answer_sanitizer.py
+#   a55e4ac7 导航重构：子系统提升为顶栏一级切换
+frontend/src/components/Layout.jsx
