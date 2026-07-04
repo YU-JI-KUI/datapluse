@@ -224,13 +224,21 @@ CREATE TABLE IF NOT EXISTS t_annotation (
     data_id    BIGINT       NOT NULL,
     username   VARCHAR(100) NOT NULL,
     label      VARCHAR(200) NOT NULL,
-    cot        TEXT,
-    version    INT          NOT NULL DEFAULT 1,
-    is_active  BOOLEAN      NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    created_by VARCHAR(45)  NOT NULL DEFAULT '',
+    cot           TEXT,
+    version       INT          NOT NULL DEFAULT 1,
+    is_active     BOOLEAN      NOT NULL DEFAULT TRUE,
+    category      VARCHAR(200) DEFAULT NULL,
+    keywords      VARCHAR(500) DEFAULT NULL,
+    keywords_desc TEXT         DEFAULT NULL,
+    created_at    TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by    VARCHAR(45)  NOT NULL DEFAULT '',
     CONSTRAINT pk_t_annotation PRIMARY KEY (id)
 );
+-- 兜底后期新增列：来源 20260508_add_annotation_cot_fields（category/keywords/keywords_desc）。
+-- 老库 t_annotation 已存在 → CREATE TABLE 跳过 → 这三列由下方 ALTER 补齐；新库幂等跳过。
+ALTER TABLE t_annotation ADD COLUMN IF NOT EXISTS category      VARCHAR(200) DEFAULT NULL;
+ALTER TABLE t_annotation ADD COLUMN IF NOT EXISTS keywords      VARCHAR(500) DEFAULT NULL;
+ALTER TABLE t_annotation ADD COLUMN IF NOT EXISTS keywords_desc TEXT         DEFAULT NULL;
 COMMENT ON TABLE  t_annotation            IS '人工标注表（支持多人标注，每人可多版本）';
 COMMENT ON COLUMN t_annotation.id         IS '主键ID';
 COMMENT ON COLUMN t_annotation.data_id    IS '数据ID（逻辑外键）';
@@ -239,6 +247,9 @@ COMMENT ON COLUMN t_annotation.label      IS '标注标签';
 COMMENT ON COLUMN t_annotation.cot        IS 'Chain of Thought 标注理由';
 COMMENT ON COLUMN t_annotation.version    IS '版本号，同一用户对同一数据多次标注时递增';
 COMMENT ON COLUMN t_annotation.is_active  IS '是否为有效版本：TRUE=当前版本，FALSE=历史版本';
+COMMENT ON COLUMN t_annotation.category      IS '业务分类名称（来自 t_category.name，标注员点选）';
+COMMENT ON COLUMN t_annotation.keywords      IS '关键词（标注员从文本中提取的核心词，逗号分隔或自由输入）';
+COMMENT ON COLUMN t_annotation.keywords_desc IS '关键词说明（对关键词的进一步解释，TEXT 类型）';
 COMMENT ON COLUMN t_annotation.created_at IS '标注时间';
 COMMENT ON COLUMN t_annotation.created_by IS '操作人（通常与 username 相同）';
 CREATE INDEX IF NOT EXISTS idx_t_annotation_data   ON t_annotation(data_id);
@@ -583,6 +594,15 @@ CREATE TABLE IF NOT EXISTS t_eval_task (
     updated_by     VARCHAR(100) NOT NULL DEFAULT '',
     CONSTRAINT pk_t_eval_task PRIMARY KEY (id)
 );
+-- 兜底后期新增列：老库 t_eval_task 已存在时 CREATE TABLE IF NOT EXISTS 整条跳过，
+-- init 之外的增量脚本加的列（claimed_*/started_at）不会补上，紧随其后的 COMMENT 会报错。
+-- 这里只对「init 之外新增的列」补 ADD COLUMN IF NOT EXISTS：老库补齐、新库幂等跳过。
+-- 来源：20260630_eval_worker_claim（claimed_by/claimed_at/heartbeat_at）、20260704_started_at。
+-- 今后再给本表加列，除了写增量脚本，也要在此追加一行。
+ALTER TABLE t_eval_task ADD COLUMN IF NOT EXISTS claimed_by   VARCHAR(128);
+ALTER TABLE t_eval_task ADD COLUMN IF NOT EXISTS claimed_at   TIMESTAMP(6);
+ALTER TABLE t_eval_task ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMP(6);
+ALTER TABLE t_eval_task ADD COLUMN IF NOT EXISTS started_at   TIMESTAMP(6);
 COMMENT ON TABLE  t_eval_task                IS 'AI对话评测任务表（每个评测任务一行）';
 COMMENT ON COLUMN t_eval_task.id             IS '主键ID';
 COMMENT ON COLUMN t_eval_task.task_id        IS '业务任务ID（uuid截断，对外标识）';
