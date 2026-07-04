@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import exists
 
 from datapulse.model.entities import (
-    Annotation, AnnotationResult, Conflict, DataComment, DataItem, DataState, PreAnnotation,
+    Annotation, AnnotationResult, Conflict, DataComment, DataItem, DataState,
+    Embedding, PreAnnotation, WorkVolume,
 )
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -291,25 +292,64 @@ class DataRepository:
             item.updated_at = _now()
             item.updated_by = updated_by
 
+    def _cascade_delete_by_ids(self, ids: list[int]) -> int:
+        """按 data_id 彻底删除数据条目及全部关联数据，返回删除的条目数。
+
+        原始数据删了，其标注/预标注/冲突/评论等衍生数据也失去意义，一并清除避免孤儿。
+        表清单与「删除整个数据集」（dataset_repository）保持一致，均按 IN 批量删除。
+        """
+        if not ids:
+            return 0
+        for entity in (AnnotationResult, Annotation, PreAnnotation, Conflict,
+                       DataComment, WorkVolume, Embedding, DataState):
+            self.session.query(entity).filter(
+                entity.data_id.in_(ids)
+            ).delete(synchronize_session=False)
+        return (
+            self.session.query(DataItem)
+            .filter(DataItem.id.in_(ids))
+            .delete(synchronize_session=False)
+        )
+
     def delete(self, item_id: int) -> bool:
-        item = self.session.get(DataItem, item_id)
-        if item is None:
+        if self.session.get(DataItem, item_id) is None:
             return False
-        state = self.session.get(DataState, item_id)
-        if state:
-            self.session.delete(state)
-        self.session.delete(item)
+        self._cascade_delete_by_ids([item_id])
         return True
 
     def batch_delete(self, ids: list[int]) -> int:
-        """批量删除数据条目（同时删除关联的 DataState 记录）"""
-        if not ids:
+        """批量删除数据条目及全部关联数据"""
+        return self._cascade_delete_by_ids(ids)
+
+    def list_sources(self, dataset_id: int) -> list[dict]:
+        """列出数据集内各上传来源（source_ref）及其条数，按条数降序。
+
+        供前端「按文件筛选 / 删除该文件全部」用。source_ref 即上传文件名（手动录入为固定串）。
+        """
+        rows = (
+            self.session.query(DataItem.source_ref, func.count(DataItem.id))
+            .filter(DataItem.dataset_id == dataset_id)
+            .group_by(DataItem.source_ref)
+            .order_by(func.count(DataItem.id).desc())
+            .all()
+        )
+        return [{"source_ref": ref or "", "count": cnt} for ref, cnt in rows]
+
+    def delete_by_source_ref(self, dataset_id: int, source_ref: str) -> int:
+        """删除某数据集中来自指定上传文件（source_ref）的全部数据及关联数据。
+
+        误传整个文件时一键清除，不受分页/勾选数量限制。source_ref 存的即上传文件名。
+        """
+        if not source_ref:
             return 0
-        items = self.session.query(DataItem).filter(DataItem.id.in_(ids)).all()
-        self.session.query(DataState).filter(DataState.data_id.in_(ids)).delete(synchronize_session=False)
-        for item in items:
-            self.session.delete(item)
-        return len(items)
+        ids = [
+            r[0]
+            for r in self.session.query(DataItem.id).filter(
+                DataItem.dataset_id == dataset_id,
+                DataItem.source_ref == source_ref,
+            ).all()
+        ]
+        return self._cascade_delete_by_ids(ids)
 
     def bulk_create(
         self,

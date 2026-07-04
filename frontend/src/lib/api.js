@@ -124,6 +124,10 @@ export const dataApi = {
   getItem:     (id)  => api.get(`/data-items/${id}`),
   deleteItem:  (id)  => api.delete(`/data-items/${id}`),
   deleteBatch: (ids) => api.post('/data-items/batch-delete', { ids }),
+  deleteBySource: (datasetId, sourceRef) =>
+    api.post('/data-items/delete-by-source', { dataset_id: datasetId, source_ref: sourceRef }),
+  listSources: (datasetId) =>
+    api.get('/data-items/sources', { params: { dataset_id: datasetId } }),
 }
 
 // ── Pipeline ───────────────────────────────────────────────────────────────────

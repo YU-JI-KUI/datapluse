@@ -652,6 +652,8 @@ export default function DataExplorer() {
   const [filters, setFilters]               = useState({})
   const [labelFilter, setLabelFilter]       = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
+  const [sourceFilter, setSourceFilter]     = useState('all')   // 按上传文件（source_ref）筛选
+  const [sourceDeleteOpen, setSourceDeleteOpen] = useState(false)
   const [page, setPage]                     = useState(1)
   const [pageSize, setPageSize]             = useState(10)
   const [sideItem, setSideItem]             = useState(null)
@@ -674,6 +676,7 @@ export default function DataExplorer() {
       setSelectedIds(new Set())
       setLabelFilter('all')
       setCategoryFilter('all')
+      setSourceFilter('all')
       setPage(1)
     }
     window.addEventListener('datasetChanged', handler)
@@ -726,6 +729,16 @@ export default function DataExplorer() {
     staleTime: 60_000,
   })
   const categoryOptions = categoriesData?.data?.data?.list ?? []
+
+  // 上传来源文件列表（含各自条数），供「删除该文件全部」用
+  const { data: sourcesRes, refetch: refetchSources } = useQuery({
+    queryKey: ['data-sources', datasetId],
+    queryFn:  () => dataApi.listSources(datasetId),
+    enabled:  !!datasetId,
+    staleTime: 30_000,
+  })
+  const sourceOptions = sourcesRes?.data?.data?.sources ?? []
+  const selectedSource = sourceOptions.find(s => s.source_ref === sourceFilter)
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['explorer', datasetId, filters, labelFilter, categoryFilter, page, pageSize],
@@ -838,6 +851,28 @@ export default function DataExplorer() {
       toast.error('批量删除失败')
     } finally {
       setBatchDeleting(false)
+    }
+  }
+
+  // ── 按上传文件删除（误传整个文件时一键清除）──────────────────────────────────
+  const [sourceDeleting, setSourceDeleting] = useState(false)
+
+  async function handleDeleteBySource() {
+    if (sourceFilter === 'all') return
+    setSourceDeleting(true)
+    try {
+      const res = await dataApi.deleteBySource(datasetId, sourceFilter)
+      const n = res?.data?.data?.deleted_count ?? 0
+      toast.success(`已删除来自「${sourceFilter}」的 ${n} 条数据`)
+      setSourceFilter('all')
+      setSelectedIds(new Set())
+      setPage(1)
+      qc.invalidateQueries(['explorer'])
+      refetchSources()
+    } catch {
+      toast.error('删除失败')
+    } finally {
+      setSourceDeleting(false)
     }
   }
 
@@ -985,6 +1020,39 @@ export default function DataExplorer() {
                     )}
                   </div>
                 )}
+
+                {/* 来源文件：选中某上传文件后可一键删除其全部数据（误传整文件时用）*/}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">来源文件：</span>
+                  <Select
+                    value={sourceFilter}
+                    onValueChange={setSourceFilter}
+                  >
+                    <SelectTrigger className="w-56 h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部来源</SelectItem>
+                      {sourceOptions.map(s => (
+                        <SelectItem key={s.source_ref} value={s.source_ref}>
+                          {(s.source_ref || '（空）')}（{s.count} 条）
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {sourceFilter !== 'all' && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => setSourceDeleteOpen(true)}
+                      disabled={sourceDeleting}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                      删除该文件全部{selectedSource ? ` ${selectedSource.count} 条` : ''}
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -1190,6 +1258,15 @@ export default function DataExplorer() {
         description="选中的数据及其标注结果将被永久删除，此操作无法撤销。"
         confirmLabel={batchDeleting ? '删除中…' : `确认删除 ${selectedIds.size} 条`}
         onConfirm={handleBatchDelete}
+      />
+
+      <ConfirmDialog
+        open={sourceDeleteOpen}
+        onOpenChange={setSourceDeleteOpen}
+        title="删除该文件的全部数据"
+        description={`将永久删除来自「${sourceFilter}」的${selectedSource ? ` ${selectedSource.count} 条` : ''}数据及其标注结果，此操作无法撤销。`}
+        confirmLabel={sourceDeleting ? '删除中…' : '确认删除'}
+        onConfirm={handleDeleteBySource}
       />
 
       {/* 单条修改标注标签对话框 */}

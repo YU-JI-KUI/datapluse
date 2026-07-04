@@ -36,6 +36,11 @@ class BatchDeleteBody(BaseModel):
     ids: list[int]
 
 
+class DeleteBySourceBody(BaseModel):
+    dataset_id: int
+    source_ref: str
+
+
 @router.post("")
 async def create_data_item(body: CreateDataItemBody, user: CurrentUser):
     """手动录入单条数据"""
@@ -99,6 +104,16 @@ async def get_label_options(
     db = get_db()
     labels = db.get_distinct_labels(dataset_id)
     return success(labels)
+
+
+@router.get("/sources")
+async def list_data_sources(user: CurrentUser, dataset_id: int = Query(..., description="数据集 ID")):
+    """列出数据集内各上传来源文件及条数，供「按文件筛选 / 删除该文件全部」用。
+
+    须放在 /{item_id} 之前注册，否则 GET /sources 会被通配路由当成 item_id 匹配。
+    """
+    db = get_db()
+    return success({"sources": db.list_data_sources(dataset_id)})
 
 
 @router.get("/{item_id}")
@@ -197,6 +212,19 @@ async def batch_delete_data_items(body: BatchDeleteBody, user: CurrentUser):
     db = get_db()
     deleted = db.batch_delete_data(body.ids)
     return success({"deleted_count": deleted, "ids": body.ids})
+
+
+@router.post("/delete-by-source")
+async def delete_data_by_source(body: DeleteBySourceBody, user: CurrentUser):
+    """删除某数据集中来自指定上传文件（source_ref）的全部数据及关联数据。
+
+    误传整个文件时一键清除，一条 SQL 按 source_ref 精确匹配，不受分页/勾选数量限制。
+    """
+    if not body.source_ref:
+        raise ParamError("source_ref 不能为空")
+    db = get_db()
+    deleted = db.delete_data_by_source_ref(body.dataset_id, body.source_ref)
+    return success({"deleted_count": deleted, "source_ref": body.source_ref})
 
 
 @router.delete("/{item_id}")

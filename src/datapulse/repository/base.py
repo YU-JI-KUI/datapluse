@@ -457,6 +457,18 @@ class DBManager:
         with self._session() as s:
             return DataRepository(s).batch_delete(ids)
 
+    def list_data_sources(self, dataset_id: int) -> list[dict]:
+        """列出数据集内各上传来源（source_ref）及条数，按条数降序。"""
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).list_sources(dataset_id)
+
+    def delete_data_by_source_ref(self, dataset_id: int, source_ref: str) -> int:
+        """删除某数据集中来自指定上传文件的全部数据及关联数据，返回删除条数。"""
+        from datapulse.repository.data_repository import DataRepository
+        with self._session() as s:
+            return DataRepository(s).delete_by_source_ref(dataset_id, source_ref)
+
     def list_all_data(self, dataset_id: int, status: str | None = None,
                       keyword: str | None = None,
                       start_date: str | None = None, end_date: str | None = None,
