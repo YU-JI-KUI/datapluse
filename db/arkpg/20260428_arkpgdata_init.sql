@@ -575,6 +575,7 @@ CREATE TABLE IF NOT EXISTS t_eval_task (
     claimed_by     VARCHAR(128),
     claimed_at     TIMESTAMP(6),
     heartbeat_at   TIMESTAMP(6),
+    started_at     TIMESTAMP(6),
     finished_at    TIMESTAMP(6),
     created_at     TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     created_by     VARCHAR(100) NOT NULL DEFAULT '',
@@ -598,6 +599,7 @@ COMMENT ON COLUMN t_eval_task.result_json    IS '聚合结果（summary/metrics/
 COMMENT ON COLUMN t_eval_task.claimed_by     IS '抢占该任务的worker标识（主机:进程:随机后缀），多POD调度用';
 COMMENT ON COLUMN t_eval_task.claimed_at     IS '抢占时间';
 COMMENT ON COLUMN t_eval_task.heartbeat_at   IS '最近心跳时间（运行中定期续约，超时视为持有POD已死，任务被回收重抢）';
+COMMENT ON COLUMN t_eval_task.started_at     IS '任务真正开跑（pending→running）时间，排队等待不计入，用于统计单次评测耗时';
 COMMENT ON COLUMN t_eval_task.finished_at    IS '完成时间';
 COMMENT ON COLUMN t_eval_task.created_at     IS '创建时间';
 COMMENT ON COLUMN t_eval_task.created_by     IS '创建人';

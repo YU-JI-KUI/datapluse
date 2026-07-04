@@ -5,8 +5,7 @@
  */
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Pencil, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
 import { evalApi, getCurrentBu } from '@/lib/api'
-import { formatDate } from '@/lib/utils'
+import { formatDate, scopeName } from '@/lib/utils'
 
 const RESP = (r) => r?.data?.data ?? {}
 
@@ -120,17 +119,12 @@ export default function EvalRules() {
         <div>
           <h1 className="text-2xl font-bold">规则短路管理</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            维护当前业务单元（<span className="font-medium">{bu}</span>）的短路规则。
+            维护当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的短路规则。
             评测时客户问题<span className="font-medium">精确等于</span>触发问题、且答案等于期望答案 →
             直接用写死的评测结果，<span className="font-medium">不调 LLM</span>（省调用），结果照常计入指标。改后下次评测即生效。
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1.5" />新增规则</Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/eval"><ArrowLeft className="w-4 h-4 mr-1.5" />返回评测</Link>
-          </Button>
-        </div>
+        <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1.5" />新增规则</Button>
       </div>
 
       <Card>
@@ -141,17 +135,18 @@ export default function EvalRules() {
                 <TableHead>触发问题（精确匹配）</TableHead>
                 <TableHead>期望答案</TableHead>
                 <TableHead className="w-32">业务分类</TableHead>
+                <TableHead className="w-28">修改人</TableHead>
                 <TableHead className="w-40 whitespace-nowrap">更新时间</TableHead>
                 <TableHead className="w-24 text-center">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
+                <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
                   <Loader2 className="w-5 h-5 animate-spin inline mr-2" />加载中…
                 </TableCell></TableRow>
               ) : list.length === 0 ? (
-                <TableRow><TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
+                <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
                   当前 BU 暂无规则，点右上角「新增规则」开始维护。
                 </TableCell></TableRow>
               ) : pageList.map(r => (
@@ -159,6 +154,7 @@ export default function EvalRules() {
                   <TableCell className="font-medium">{r.question}</TableCell>
                   <TableCell className="text-sm text-muted-foreground max-w-xs truncate">{r.expected_answer}</TableCell>
                   <TableCell className="text-sm">{r.judge_json?.business_type || '—'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{r.updated_by || '—'}</TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.updated_at)}</TableCell>
                   <TableCell>
                     <div className="flex items-center justify-center gap-1">

@@ -3,9 +3,8 @@
  * 三态：upload（上传）/ running（评测中）/ result（结果）。
  */
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import {
-  AlertTriangle, RotateCcw, ArrowLeft, History, Loader2, BookOpen,
+  AlertTriangle, RotateCcw, ArrowLeft, Loader2, BookOpen,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -141,9 +140,6 @@ export default function Eval() {
           )}
           <Button variant="outline" size="sm" onClick={openGuide}>
             <BookOpen className="w-4 h-4 mr-1.5" />使用说明
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/eval/history"><History className="w-4 h-4 mr-1.5" />历史评测</Link>
           </Button>
         </div>
       </div>

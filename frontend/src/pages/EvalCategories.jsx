@@ -5,8 +5,7 @@
  */
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Pencil, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +16,7 @@ import {
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
 import { evalApi, getCurrentBu } from '@/lib/api'
-import { formatDate } from '@/lib/utils'
+import { formatDate, scopeName } from '@/lib/utils'
 
 const RESP = (r) => r?.data?.data ?? {}
 
@@ -84,18 +83,13 @@ export default function EvalCategories() {
         <div>
           <h1 className="text-2xl font-bold">业务分类管理</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            维护当前业务单元（<span className="font-medium">{bu}</span>）的业务分类与定义；
+            维护当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的业务分类与定义；
             评测时模型据此对每条问题打标，改后下次评测即生效。
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={() => setEditing({ name: '', definition: '' })}>
-            <Plus className="w-4 h-4 mr-1.5" />新增分类
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/eval"><ArrowLeft className="w-4 h-4 mr-1.5" />返回评测</Link>
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => setEditing({ name: '', definition: '' })}>
+          <Plus className="w-4 h-4 mr-1.5" />新增分类
+        </Button>
       </div>
 
       <Card>
@@ -105,6 +99,7 @@ export default function EvalCategories() {
               <TableRow>
                 <TableHead className="w-48">业务分类</TableHead>
                 <TableHead>定义</TableHead>
+                <TableHead className="w-28">修改人</TableHead>
                 <TableHead className="w-40 whitespace-nowrap">更新时间</TableHead>
                 <TableHead className="w-20 text-center">操作</TableHead>
               </TableRow>
@@ -112,13 +107,13 @@ export default function EvalCategories() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-10 text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
                     <Loader2 className="w-5 h-5 animate-spin inline mr-2" />加载中…
                   </TableCell>
                 </TableRow>
               ) : list.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-10 text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
                     当前 BU 暂无业务分类，点右上角「新增分类」开始维护。
                   </TableCell>
                 </TableRow>
@@ -126,6 +121,7 @@ export default function EvalCategories() {
                 <TableRow key={c.id}>
                   <TableCell className="font-medium">{c.name}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{c.definition}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{c.updated_by || '—'}</TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(c.updated_at)}</TableCell>
                   <TableCell>
                     <div className="flex items-center justify-center gap-1">

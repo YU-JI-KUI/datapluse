@@ -61,6 +61,7 @@ _TASK_PUBLIC_KEYS = (
 def _task_to_dict(t: EvalTask, *, full: bool = False) -> dict[str, Any]:
     d: dict[str, Any] = {k: getattr(t, k) for k in _TASK_PUBLIC_KEYS}
     d["created_at"] = _iso(t.created_at)
+    d["started_at"] = _iso(t.started_at)
     d["finished_at"] = _iso(t.finished_at)
     if full:
         d["file_path"] = t.file_path
@@ -148,6 +149,7 @@ class EvalRepository:
         row.claimed_by = worker_id
         row.claimed_at = ts
         row.heartbeat_at = ts
+        row.started_at = ts   # 真正开跑时间：排队等待不计入，一眼看清单次评测耗时
         row.updated_at = ts
         row.updated_by = worker_id
         row.error = None

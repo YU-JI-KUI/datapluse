@@ -5,19 +5,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
-import { Loader2, Save, RotateCcw, FileText, CheckCircle2, ArrowLeft, Pencil, Columns2, Eye } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Loader2, Save, RotateCcw, FileText, CheckCircle2, Pencil, Columns2, Eye } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { EvalBadge } from '@/components/eval/EvalPrimitives'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { evalApi, getCurrentBu } from '@/lib/api'
-import { formatDate } from '@/lib/utils'
+import { formatDate, scopeName } from '@/lib/utils'
 
 const RESP = (r) => r?.data?.data ?? {}
-
-const SCOPE_LABEL = { _root: '通用（根）', _default: '通用兜底', securities: '证券', life: '寿险' }
-const scopeName = (bu) => SCOPE_LABEL[bu] || bu
 
 // Markdown 渲染样式（无 typography 插件，内联给关键元素，避免新增依赖）
 const MD = {
@@ -125,17 +121,12 @@ export default function EvalPrompts() {
 
   return (
     <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">提示词管理</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            编辑当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的提示词，
-            默认纯写作、需要时切换预览，保存后<strong>下次评测即生效</strong>。
-          </p>
-        </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/eval"><ArrowLeft className="w-4 h-4 mr-1.5" />返回评测</Link>
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold">提示词管理</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          编辑当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的提示词，
+          默认纯写作、需要时切换预览，保存后<strong>下次评测即生效</strong>。
+        </p>
       </div>
 
       <div className="grid grid-cols-[260px_1fr] gap-6">

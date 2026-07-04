@@ -42,6 +42,7 @@ class EvalTask(EvalBase):
     claimed_by     = Column(String(128))
     claimed_at     = Column(_TS)
     heartbeat_at   = Column(_TS)
+    started_at     = Column(_TS)   # 真正开跑（pending→running）的时间，排队等待不计入
     finished_at    = Column(_TS)
     created_at     = Column(_TS, nullable=False)
     created_by     = Column(String(100), nullable=False, default="")

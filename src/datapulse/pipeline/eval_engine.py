@@ -55,6 +55,7 @@ def _public(t: dict) -> dict:
         "progress_total": total,
         "progress_pct":   pct,
         "created_at":     t.get("created_at"),
+        "started_at":     t.get("started_at"),   # 真正开跑时间（排队等待不计入）
         "finished_at":    t.get("finished_at"),
         "created_by":     t.get("created_by") or "",   # 评测发起人
         "error":          t.get("error"),
@@ -431,6 +432,7 @@ def rerun_task(task_id: str) -> bool:
     eval_db.update_task(
         task_id, status="pending", stage="", mode="",
         progress_done=0, progress_total=0, error=None,
+        started_at=None, finished_at=None,   # 重跑：开始/完成时间重新计（下次被抢占开跑时写新 started_at）
     )
     return True
 

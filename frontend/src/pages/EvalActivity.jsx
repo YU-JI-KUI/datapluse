@@ -6,8 +6,7 @@
  */
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, Plus, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,7 +17,7 @@ import {
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
 import { evalApi, getCurrentBu } from '@/lib/api'
-import { formatDate } from '@/lib/utils'
+import { formatDate, scopeName } from '@/lib/utils'
 
 const RESP = (r) => r?.data?.data ?? {}
 
@@ -81,19 +80,14 @@ export default function EvalActivity() {
         <div>
           <h1 className="text-2xl font-bold">活动标问管理</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            维护当前业务单元（<span className="font-medium">{bu}</span>）的活动标问清单。
+            维护当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的活动标问清单。
             活动标问是前端写死按钮触发的写死回复，不经 AI；评测时客户问题与清单
             <span className="font-medium">精确相等</span>即整条跳过，不计入分发准确率与解决率。改后下次评测即生效。
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={() => setEditing({ question: '', note: '' })}>
-            <Plus className="w-4 h-4 mr-1.5" />新增活动标问
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/eval"><ArrowLeft className="w-4 h-4 mr-1.5" />返回评测</Link>
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => setEditing({ question: '', note: '' })}>
+          <Plus className="w-4 h-4 mr-1.5" />新增活动标问
+        </Button>
       </div>
 
       <Card>
@@ -103,6 +97,7 @@ export default function EvalActivity() {
               <TableRow>
                 <TableHead>活动标问（与客户问题精确相等即跳过）</TableHead>
                 <TableHead className="w-56">备注</TableHead>
+                <TableHead className="w-28">修改人</TableHead>
                 <TableHead className="w-40 whitespace-nowrap">更新时间</TableHead>
                 <TableHead className="w-20 text-center">操作</TableHead>
               </TableRow>
@@ -110,13 +105,13 @@ export default function EvalActivity() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-10 text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
                     <Loader2 className="w-5 h-5 animate-spin inline mr-2" />加载中…
                   </TableCell>
                 </TableRow>
               ) : list.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center py-10 text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
                     当前 BU 暂无活动标问，点右上角「新增活动标问」开始维护。
                   </TableCell>
                 </TableRow>
@@ -124,6 +119,7 @@ export default function EvalActivity() {
                 <TableRow key={q.id}>
                   <TableCell className="font-medium">{q.question}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{q.note}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{q.updated_by || '—'}</TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(q.updated_at)}</TableCell>
                   <TableCell>
                     <div className="flex items-center justify-center">

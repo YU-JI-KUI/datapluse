@@ -4,11 +4,10 @@
  * 列表按左侧全局 BU 过滤，故不再单列业务单元。
  */
 import { useEffect, useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, Loader2, User, Eye, RotateCcw, Trash2, Search, X } from 'lucide-react'
+import { Loader2, User, Eye, RotateCcw, Trash2, Search, X } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -17,8 +16,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import TablePagination from '@/components/TablePagination'
 import { EvalBadge } from '@/components/eval/EvalPrimitives'
-import { evalApi } from '@/lib/api'
-import { formatDate, cn } from '@/lib/utils'
+import { evalApi, getCurrentBu } from '@/lib/api'
+import { formatDate, cn, scopeName } from '@/lib/utils'
 
 const RESP = (r) => r?.data?.data ?? {}
 
@@ -33,6 +32,7 @@ const STATUS = {
 
 export default function EvalHistory() {
   const navigate = useNavigate()
+  const [bu, setBu]             = useState(getCurrentBu())
   const [list, setList]         = useState([])
   const [total, setTotal]       = useState(0)
   const [page, setPage]         = useState(1)
@@ -70,15 +70,16 @@ export default function EvalHistory() {
 
   // 全局 BU 切换时刷新（列表已按当前 BU 过滤）
   useEffect(() => {
-    const onBuChange = () => { setPage(1); load() }
+    const onBuChange = (e) => { setBu(e.detail?.bu || getCurrentBu()); setPage(1); load() }
     window.addEventListener('buChanged', onBuChange)
     return () => window.removeEventListener('buChanged', onBuChange)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 有进行中/暂停/恢复中的任务时每 10 秒静默刷新（这些状态会自动流转）
+  // 有未完成任务时每 10 秒静默刷新（这些状态会自动流转，直到 done/failed 终态）。
+  // pending 必须包含：重测后任务先回到 pending 等 worker 抢占，漏掉它则排队期间不轮询、状态卡住不动。
   useEffect(() => {
-    const active = new Set(['running', 'paused', 'interrupted'])
+    const active = new Set(['pending', 'running', 'paused', 'interrupted'])
     if (!list.some(t => active.has(t.status))) return
     const timer = setInterval(() => load(true), 10000)
     return () => clearInterval(timer)
@@ -109,16 +110,11 @@ export default function EvalHistory() {
 
   return (
     <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">历史评测</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            全部评测记录，可查看报告、重新评测或删除。
-          </p>
-        </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/eval"><ArrowLeft className="w-4 h-4 mr-1.5" />返回评测</Link>
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold">历史评测</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的全部评测记录，可查看报告、重新评测或删除。
+        </p>
       </div>
 
       {/* 搜索筛选栏：文件名关键字（防抖）+ 模式 */}
@@ -214,7 +210,7 @@ export default function EvalHistory() {
                         <User className="w-3.5 h-3.5 text-muted-foreground" />{t.created_by || '—'}
                       </span>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(t.created_at)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{t.started_at ? formatDate(t.started_at) : '—'}</TableCell>
                     <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{t.finished_at ? formatDate(t.finished_at) : '—'}</TableCell>
                     <TableCell>
                       <div className="flex items-center justify-center gap-1">

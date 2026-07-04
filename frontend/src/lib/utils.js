@@ -13,6 +13,11 @@ export function formatDate(iso) {
   })
 }
 
+// BU code → 中文展示名。全局统一：页面一律展示 name（证券/寿险），不展示 code（securities/life）。
+// 当前 BU 少，写死映射；将来 BU 变多再改为从 evalApi.bus() 动态取。
+const SCOPE_LABEL = { _root: '通用（根）', _default: '通用兜底', securities: '证券', life: '寿险' }
+export const scopeName = (bu) => SCOPE_LABEL[bu] || bu
+
 export function formatBytes(bytes) {
   if (!bytes) return '0 B'
   const k = 1024
