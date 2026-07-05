@@ -11,18 +11,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.core.exceptions import ForbiddenError, NotFoundError
 from datapulse.core.response import success
 from datapulse.repository.base import get_db
 from datapulse.schemas.annotation import CommentCreate
 
-router      = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+router       = APIRouter()
+CommentRead  = Annotated[UserInfo, Depends(require_perm("annotation:read"))]
+CommentWrite = Annotated[UserInfo, Depends(require_perm("comment:write"))]
 
 
 @router.post("")
-async def add_comment(body: CommentCreate, user: CurrentUser):
+async def add_comment(body: CommentCreate, user: CommentWrite):
     """添加评论"""
     db   = get_db()
     item = db.get_data(body.data_id, enrich=False)
@@ -34,7 +35,7 @@ async def add_comment(body: CommentCreate, user: CurrentUser):
 
 @router.get("")
 async def list_comments(
-    user:    CurrentUser,
+    user:    CommentRead,
     data_id: int = Query(..., description="数据 ID"),
 ):
     """获取某条数据的所有评论"""

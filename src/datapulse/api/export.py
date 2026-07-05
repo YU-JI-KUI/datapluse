@@ -25,11 +25,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.repository.base import AVAILABLE_FIELDS, DEFAULT_COLUMNS, get_db
 
 router = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+ExportRead   = Annotated[UserInfo, Depends(require_perm("export:read"))]
+ExportCreate = Annotated[UserInfo, Depends(require_perm("export:create"))]
 _SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 # ── 临时文件管理（内存 token → 文件路径，TTL 300s）────────────────────────────
@@ -99,13 +100,11 @@ def _apply_columns(item: dict, columns: list[dict]) -> dict:
 
 
 @router.post("/prepare")
-async def prepare_export(body: ExportRequest, user: CurrentUser):
+async def prepare_export(body: ExportRequest, user: ExportCreate):
     """生成导出文件，写入服务端临时目录，返回一次性下载 token。
     前端拿到 token 后用 window.location.href 导航到 /api/export/download/{token}
     由浏览器原生触发下载，绕过 Chrome "不安全下载" 拦截。
     """
-    if not user.has_permission("export:create"):
-        raise HTTPException(403, "无权限导出数据")
     db = get_db()
 
     items = db.list_data_for_export(body.dataset_id, body.status_filter)
@@ -150,13 +149,11 @@ async def prepare_export(body: ExportRequest, user: CurrentUser):
 
 
 @router.post("/conflicts/prepare")
-async def prepare_conflict_export(body: ConflictExportRequest, user: CurrentUser):
+async def prepare_conflict_export(body: ConflictExportRequest, user: ExportCreate):
     """生成冲突列表导出文件（全量，不分页），返回一次性下载 token。
 
     与 prepare_export 共用 token 机制与 /download/{token} 端点。
     """
-    if not user.has_permission("export:create"):
-        raise HTTPException(403, "无权限导出数据")
     db = get_db()
 
     records = db.list_conflicts_for_export(
@@ -231,7 +228,7 @@ async def download_export(token: str):
 
 # 保留旧接口兼容（直接流式返回）
 @router.post("/create")
-async def create_export(body: ExportRequest, user: CurrentUser):
+async def create_export(body: ExportRequest, user: ExportCreate):
     """兼容旧接口：直接流式返回文件（不推荐，Excel 可能被浏览器拦截）"""
     result = await prepare_export(body, user)
     token = result["data"]["token"]
@@ -256,6 +253,6 @@ async def create_export(body: ExportRequest, user: CurrentUser):
 
 
 @router.get("/fields")
-async def get_available_fields(user: CurrentUser):
+async def get_available_fields(user: ExportRead):
     """返回所有可用的源字段（用于前端模板编辑器）"""
     return {"success": True, "data": AVAILABLE_FIELDS}

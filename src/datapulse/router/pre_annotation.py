@@ -10,19 +10,20 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.core.exceptions import PipelineRunningError
 from datapulse.core.response import success
 from datapulse.repository.base import get_db
 
 router      = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+AnnoRead    = Annotated[UserInfo, Depends(require_perm("annotation:read"))]
+PreAnnoRun  = Annotated[UserInfo, Depends(require_perm("pre_annotation:run"))]
 
 
 @router.post("/run")
 async def run_pre_annotation(
     background_tasks: BackgroundTasks,
-    user:             CurrentUser,
+    user:             PreAnnoRun,
     dataset_id:       int = Query(..., description="数据集 ID"),
 ):
     """
@@ -58,7 +59,7 @@ async def _run_pre_annotate(dataset_id: int, operator: str) -> None:
 
 @router.get("")
 async def list_pre_annotations(
-    user:    CurrentUser,
+    user:    AnnoRead,
     data_id: int = Query(..., description="数据 ID"),
 ):
     """查询某条数据的预标注历史"""

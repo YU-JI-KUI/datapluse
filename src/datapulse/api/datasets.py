@@ -12,12 +12,12 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, get_current_user, require_admin
+from datapulse.api.auth import UserInfo, get_current_user, require_perm
 from datapulse.repository.base import get_db
 
 router = APIRouter()
 CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
-AdminUser = Annotated[UserInfo, Depends(require_admin)]
+AdminUser = Annotated[UserInfo, Depends(require_perm("dataset:manage"))]
 
 
 class DatasetCreate(BaseModel):

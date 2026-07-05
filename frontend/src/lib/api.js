@@ -119,6 +119,14 @@ export const userApi = {
   resetPassword:  (id, data) => api.post(`/users/${id}/reset-password`, data),
 }
 
+// ── Roles & Permissions ─────────────────────────────────────────────────────────
+
+export const roleApi = {
+  listPermissions:       ()                  => api.get('/permissions'),
+  listRoles:             ()                  => api.get('/roles'),
+  updatePermissions:     (name, permissions) => api.put(`/roles/${name}/permissions`, { permissions }),
+}
+
 // ── Data Items (v2) ────────────────────────────────────────────────────────────
 
 export const dataApi = {

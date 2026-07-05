@@ -16,19 +16,20 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.core.exceptions import NotFoundError
 from datapulse.core.response import page_data, success
 from datapulse.repository.base import get_db
 from datapulse.schemas.annotation import AnnotationCreate
 
 router      = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+AnnoRead  = Annotated[UserInfo, Depends(require_perm("annotation:read"))]
+AnnoWrite = Annotated[UserInfo, Depends(require_perm("annotation:write"))]
 _SHANGHAI   = ZoneInfo("Asia/Shanghai")
 
 
 @router.post("")
-async def submit_annotation(body: AnnotationCreate, user: CurrentUser):
+async def submit_annotation(body: AnnotationCreate, user: AnnoWrite):
     """提交标注结果（自动处理版本递增；同一用户修改时老版本变为历史；自动添加标注日志评论）"""
     db   = get_db()
     item = db.get_data(body.data_id, enrich=False)
@@ -67,7 +68,7 @@ async def submit_annotation(body: AnnotationCreate, user: CurrentUser):
 
 @router.delete("")
 async def revoke_annotation(
-    user:    CurrentUser,
+    user:    AnnoWrite,
     data_id: int = Query(..., description="数据 ID"),
 ):
     """撤销当前用户对指定数据的有效标注。
@@ -92,7 +93,7 @@ async def revoke_annotation(
 
 @router.get("")
 async def list_annotations(
-    user:    CurrentUser,
+    user:    AnnoRead,
     data_id: int = Query(..., description="数据 ID"),
 ):
     """获取某条数据的所有有效标注"""
@@ -102,7 +103,7 @@ async def list_annotations(
 
 @router.get("/history")
 async def get_annotation_history(
-    user:     CurrentUser,
+    user:     AnnoRead,
     data_id:  int           = Query(..., description="数据 ID"),
     username: str | None    = Query(None, description="过滤标注人"),
 ):
@@ -113,7 +114,7 @@ async def get_annotation_history(
 
 @router.get("/my-items")
 async def get_my_annotation_items(
-    user:       CurrentUser,
+    user:       AnnoRead,
     dataset_id: int           = Query(..., description="数据集 ID"),
     view:       str           = Query("all", description="all | unannotated | my_annotated"),
     page:       int           = Query(1, ge=1),
@@ -139,7 +140,7 @@ async def get_my_annotation_items(
 
 @router.get("/queue")
 async def get_annotation_queue(
-    user:       CurrentUser,
+    user:       AnnoRead,
     dataset_id: int = Query(..., description="数据集 ID"),
     page:       int = Query(1, ge=1),
     page_size:  int = Query(20, ge=1, le=500),
@@ -155,7 +156,7 @@ async def get_annotation_queue(
 
 @router.get("/next")
 async def get_next_item(
-    user:       CurrentUser,
+    user:       AnnoRead,
     dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """获取下一条待标注数据（按创建时间最早）"""
@@ -169,7 +170,7 @@ async def get_next_item(
 @router.post("/batch")
 async def batch_submit(
     body: list[AnnotationCreate],
-    user: CurrentUser,
+    user: AnnoWrite,
 ):
     """批量提交标注（自动记录标注日志评论，与单条提交行为一致）"""
     db           = get_db()

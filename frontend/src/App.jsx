@@ -14,6 +14,7 @@ import Users from '@/pages/Users'
 import DatasetManagement from '@/pages/DatasetManagement'
 import Categories       from '@/pages/Categories'
 import AdminSQL        from '@/pages/AdminSQL'
+import RolePermissions from '@/pages/RolePermissions'
 import Eval            from '@/pages/Eval'
 import EvalPrompts     from '@/pages/EvalPrompts'
 import EvalHistory     from '@/pages/EvalHistory'
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="export"         element={<Export />} />
           <Route path="datasets"        element={<RequireAdmin><DatasetManagement /></RequireAdmin>} />
           <Route path="users"          element={<RequireAdmin><Users /></RequireAdmin>} />
+          <Route path="roles"          element={<RequireAdmin><RolePermissions /></RequireAdmin>} />
           <Route path="admin-sql"      element={<RequireAdmin><AdminSQL /></RequireAdmin>} />
         </Route>
       </Routes>

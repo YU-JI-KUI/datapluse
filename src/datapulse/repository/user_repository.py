@@ -191,3 +191,22 @@ class UserRepository:
     def list_roles(self) -> list[dict[str, Any]]:
         rows = self.session.query(Role).order_by(Role.id).all()
         return [_role_to_dict(r) for r in rows]
+
+    def get_role(self, name: str) -> dict[str, Any] | None:
+        r = self.session.query(Role).filter(Role.name == name).first()
+        return _role_to_dict(r) if r else None
+
+    def update_role_permissions(
+        self, name: str, permissions: list[str], updated_by: str = "system"
+    ) -> dict[str, Any] | None:
+        """覆盖式更新某角色的权限集。admin 角色不可改（永远 ["*"]）。"""
+        r = self.session.query(Role).filter(Role.name == name).first()
+        if r is None:
+            return None
+        if r.name == "admin":
+            raise ValueError("admin 角色权限不可修改")
+        r.permissions = permissions
+        r.updated_at  = _now()
+        r.updated_by  = updated_by
+        self.session.flush()
+        return _role_to_dict(r)

@@ -16,14 +16,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.core.exceptions import NotFoundError, ParamError
 from datapulse.core.response import page_data, success
 from datapulse.modules.processing import is_valid, parse_file, parse_file_rows
 from datapulse.repository.base import get_db
 
-router     = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+router      = APIRouter()
+DataRead    = Annotated[UserInfo, Depends(require_perm("data:read"))]
+DataWrite   = Annotated[UserInfo, Depends(require_perm("data:write"))]
+DataDelete  = Annotated[UserInfo, Depends(require_perm("data:delete"))]
 
 
 class CreateDataItemBody(BaseModel):
@@ -42,7 +44,7 @@ class DeleteBySourceBody(BaseModel):
 
 
 @router.post("")
-async def create_data_item(body: CreateDataItemBody, user: CurrentUser):
+async def create_data_item(body: CreateDataItemBody, user: DataWrite):
     """手动录入单条数据"""
     if not body.content or not body.content.strip():
         raise ParamError("内容不能为空")
@@ -63,7 +65,7 @@ async def create_data_item(body: CreateDataItemBody, user: CurrentUser):
 
 @router.get("")
 async def list_data_items(
-    user:       CurrentUser,
+    user:       DataRead,
     dataset_id: int           = Query(..., description="数据集 ID"),
     status:     str | None    = Query(None, description="按阶段过滤"),
     keyword:    str | None    = Query(None, description="文本关键词搜索"),
@@ -87,7 +89,7 @@ async def list_data_items(
 
 @router.get("/stats")
 async def get_stats(
-    user:       CurrentUser,
+    user:       DataRead,
     dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """各阶段数据量统计"""
@@ -97,7 +99,7 @@ async def get_stats(
 
 @router.get("/label-options")
 async def get_label_options(
-    user:       CurrentUser,
+    user:       DataRead,
     dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """返回该 dataset 中所有已使用的标注标签（用于前端动态下拉过滤）"""
@@ -107,7 +109,7 @@ async def get_label_options(
 
 
 @router.get("/sources")
-async def list_data_sources(user: CurrentUser, dataset_id: int = Query(..., description="数据集 ID")):
+async def list_data_sources(user: DataRead, dataset_id: int = Query(..., description="数据集 ID")):
     """列出数据集内各上传来源文件及条数，供「按文件筛选 / 删除该文件全部」用。
 
     须放在 /{item_id} 之前注册，否则 GET /sources 会被通配路由当成 item_id 匹配。
@@ -117,7 +119,7 @@ async def list_data_sources(user: CurrentUser, dataset_id: int = Query(..., desc
 
 
 @router.get("/{item_id}")
-async def get_data_item(item_id: int, user: CurrentUser):
+async def get_data_item(item_id: int, user: DataRead):
     """获取数据详情（含标注列表、评论列表、冲突信息）"""
     db   = get_db()
     item = db.get_data(item_id, enrich=True)
@@ -132,7 +134,7 @@ async def get_data_item(item_id: int, user: CurrentUser):
 
 @router.post("/upload")
 async def upload_data(
-    user:         CurrentUser,
+    user:         DataWrite,
     dataset_id:   int        = Query(..., description="目标数据集 ID"),
     file:         UploadFile  = File(...),
     text_column:  str         = Form("text"),
@@ -205,7 +207,7 @@ async def upload_data(
 
 
 @router.post("/batch-delete")
-async def batch_delete_data_items(body: BatchDeleteBody, user: CurrentUser):
+async def batch_delete_data_items(body: BatchDeleteBody, user: DataDelete):
     """批量删除数据条目"""
     if not body.ids:
         raise ParamError("ids 不能为空")
@@ -215,7 +217,7 @@ async def batch_delete_data_items(body: BatchDeleteBody, user: CurrentUser):
 
 
 @router.post("/delete-by-source")
-async def delete_data_by_source(body: DeleteBySourceBody, user: CurrentUser):
+async def delete_data_by_source(body: DeleteBySourceBody, user: DataDelete):
     """删除某数据集中来自指定上传文件（source_ref）的全部数据及关联数据。
 
     误传整个文件时一键清除，一条 SQL 按 source_ref 精确匹配，不受分页/勾选数量限制。
@@ -228,7 +230,7 @@ async def delete_data_by_source(body: DeleteBySourceBody, user: CurrentUser):
 
 
 @router.delete("/{item_id}")
-async def delete_data_item(item_id: int, user: CurrentUser):
+async def delete_data_item(item_id: int, user: DataDelete):
     """删除数据条目"""
     db = get_db()
     ok = db.delete_data(item_id)

@@ -21,6 +21,7 @@ function RoleBadge({ role }) {
   const map = {
     admin:     'bg-red-100 text-red-700',
     annotator: 'bg-blue-100 text-blue-700',
+    evaluator: 'bg-green-100 text-green-700',
     viewer:    'bg-gray-100 text-gray-600',
   }
   return (
@@ -36,32 +37,40 @@ function RoleBadge({ role }) {
 function UserFormDialog({ open, onClose, onSave, user, roles }) {
   const isEdit = !!user
   const [form, setForm] = useState({
-    username:  '',
-    password:  '',
-    role_name: 'annotator',
-    is_active: true,
+    username:   '',
+    password:   '',
+    role_names: ['annotator'],
+    is_active:  true,
   })
   const [showPwd, setShowPwd] = useState(false)
 
   useEffect(() => {
     if (user) {
       setForm({
-        username:  user.username,
-        password:  '',
-        role_name: user.roles?.[0] || 'annotator',
-        is_active: user.is_active !== false,
+        username:   user.username,
+        password:   '',
+        role_names: user.roles?.length ? [...user.roles] : ['annotator'],
+        is_active:  user.is_active !== false,
       })
     } else {
-      setForm({ username: '', password: '', role_name: 'annotator', is_active: true })
+      setForm({ username: '', password: '', role_names: ['annotator'], is_active: true })
     }
     setShowPwd(false)
   }, [user, open])
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
+  function toggleRole(name) {
+    setForm(f => {
+      const has = f.role_names.includes(name)
+      return { ...f, role_names: has ? f.role_names.filter(r => r !== name) : [...f.role_names, name] }
+    })
+  }
+
   async function handleSave() {
     if (!form.username.trim()) { toast.error('用户名不能为空'); return }
     if (!isEdit && !form.password.trim()) { toast.error('新建用户必须设置密码'); return }
+    if (!form.role_names.length) { toast.error('至少选择一个角色'); return }
     await onSave(form, user?.id)
   }
 
@@ -100,16 +109,23 @@ function UserFormDialog({ open, onClose, onSave, user, roles }) {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">角色</label>
-            <select
-              value={form.role_name}
-              onChange={e => set('role_name', e.target.value)}
-              className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-            >
+            <label className="block text-sm font-medium text-gray-700 mb-1">角色（可多选）</label>
+            <div className="space-y-1.5 rounded-md border border-input bg-background p-2">
               {roles.map(r => (
-                <option key={r.name} value={r.name}>{r.name} — {r.description || ''}</option>
+                <label key={r.name} className="flex items-start gap-2 cursor-pointer rounded px-1.5 py-1 hover:bg-gray-50">
+                  <input
+                    type="checkbox"
+                    checked={form.role_names.includes(r.name)}
+                    onChange={() => toggleRole(r.name)}
+                    className="mt-0.5"
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium">{r.name}</span>
+                    {r.description ? <span className="text-gray-500"> — {r.description}</span> : null}
+                  </span>
+                </label>
               ))}
-            </select>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <label className="text-sm font-medium text-gray-700">账号状态</label>
@@ -226,7 +242,7 @@ export default function Users() {
   async function handleSave(form, userId) {
     try {
       if (userId) {
-        const payload = { role_names: [form.role_name], is_active: form.is_active }
+        const payload = { role_names: form.role_names, is_active: form.is_active }
         if (form.password) payload.password = form.password
         await userApi.update(userId, payload)
         toast.success('用户已更新')
@@ -234,7 +250,7 @@ export default function Users() {
         await userApi.create({
           username:   form.username,
           password:   form.password,
-          role_names: [form.role_name],
+          role_names: form.role_names,
         })
         toast.success('用户已创建')
       }

@@ -11,13 +11,13 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.core.response import success
 from datapulse.repository.base import get_db
 
-router      = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
-_SHANGHAI   = ZoneInfo("Asia/Shanghai")
+router        = APIRouter()
+DashboardRead = Annotated[UserInfo, Depends(require_perm("annotation:read"))]
+_SHANGHAI     = ZoneInfo("Asia/Shanghai")
 
 
 def _compute_window_starts() -> tuple[datetime, datetime, datetime]:
@@ -37,7 +37,7 @@ def _compute_window_starts() -> tuple[datetime, datetime, datetime]:
 
 @router.get("/annotator-stats")
 async def annotator_stats(
-    user:       CurrentUser,
+    user:       DashboardRead,
     dataset_id: int | None = Query(None, description="数据集 ID；不传则跨数据集汇总"),
 ):
     """返回所有标注员的今日 / 本周 / 本月标注与裁决次数。

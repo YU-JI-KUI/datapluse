@@ -18,14 +18,16 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.core.exceptions import NotFoundError, PipelineRunningError
 from datapulse.core.response import page_data, success
 from datapulse.modules.conflict import run_conflict_detection, run_quality_self_check
 from datapulse.repository.base import get_db
 
 router      = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+ConflictRead    = Annotated[UserInfo, Depends(require_perm("conflict:read"))]
+ConflictDetect  = Annotated[UserInfo, Depends(require_perm("conflict:detect"))]
+ConflictResolve = Annotated[UserInfo, Depends(require_perm("conflict:resolve"))]
 _SHANGHAI   = ZoneInfo("Asia/Shanghai")
 
 
@@ -48,7 +50,7 @@ class BatchRevokeBody(BaseModel):
 
 @router.get("")
 async def list_conflicts(
-    user:          CurrentUser,
+    user:          ConflictRead,
     dataset_id:    int        = Query(...,  description="数据集 ID"),
     status:        str | None = Query(None, description="open / resolved / revoked"),
     conflict_type: str | None = Query(None, description="label_conflict / semantic_conflict"),
@@ -71,7 +73,7 @@ async def list_conflicts(
 
 @router.get("/by-data")
 async def list_conflicts_by_data(
-    user:    CurrentUser,
+    user:    ConflictRead,
     data_id: int = Query(..., description="数据条目 ID"),
 ):
     """查询单条数据的所有 open 冲突（不分页，供详情面板使用）"""
@@ -84,7 +86,7 @@ async def list_conflicts_by_data(
 @router.post("/detect")
 async def trigger_conflict_detection(
     background_tasks: BackgroundTasks,
-    user:             CurrentUser,
+    user:             ConflictDetect,
     dataset_id:       int = Query(..., description="数据集 ID"),
 ):
     """触发冲突检测（异步执行）"""
@@ -116,7 +118,7 @@ async def _run_check(dataset_id: int, operator: str) -> None:
 @router.post("/self-check")
 async def trigger_quality_self_check(
     background_tasks: BackgroundTasks,
-    user:             CurrentUser,
+    user:             ConflictDetect,
     dataset_id:       int = Query(..., description="数据集 ID"),
 ):
     """高质量数据自检（异步执行）"""
@@ -150,7 +152,7 @@ async def _run_self_check(dataset_id: int, operator: str) -> None:
 # ── 裁决（单条） ──────────────────────────────────────────────────────────────
 
 @router.patch("/{conflict_id}/resolve")
-async def resolve_conflict(conflict_id: int, body: ResolveBody, user: CurrentUser):
+async def resolve_conflict(conflict_id: int, body: ResolveBody, user: ConflictResolve):
     """单条裁决冲突：写入 manual 标注结果，推进 stage 到 checked，记录评论。"""
     db       = get_db()
     conflict = db.get_conflict_by_id(conflict_id)
@@ -188,7 +190,7 @@ async def resolve_conflict(conflict_id: int, body: ResolveBody, user: CurrentUse
 # ── 裁决（批量） ──────────────────────────────────────────────────────────────
 
 @router.post("/batch-resolve")
-async def batch_resolve_conflicts(body: BatchResolveBody, user: CurrentUser):
+async def batch_resolve_conflicts(body: BatchResolveBody, user: ConflictResolve):
     """批量裁决冲突：对所有选中的 open 冲突统一写入同一标签，批量推进 stage。
 
     适用场景：多条冲突确认正确标签相同时，一键全部解决，无需逐条操作。
@@ -256,7 +258,7 @@ async def batch_resolve_conflicts(body: BatchResolveBody, user: CurrentUser):
 # ── 撤销（批量）──────────────────────────────────────────────────────────────
 
 @router.post("/batch-revoke")
-async def batch_revoke_conflicts(body: BatchRevokeBody, user: CurrentUser):
+async def batch_revoke_conflicts(body: BatchRevokeBody, user: ConflictResolve):
     """批量撤销自检冲突，将数据恢复到 checked stage。
 
     适用场景：调整相似度阈值后重新自检前，先撤销当前自检结果，

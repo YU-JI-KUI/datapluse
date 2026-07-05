@@ -47,26 +47,30 @@ class UserInfo(BaseModel):
         return "admin" in self.roles
 
     def has_permission(self, perm: str) -> bool:
-        """检查是否拥有某权限。admin 角色拥有全部权限。"""
-        from sqlalchemy.orm import sessionmaker
+        """检查是否拥有某权限。admin（或含 "*" 的角色）拥有全部权限。
 
-        from datapulse.repository.base import _db
-        from datapulse.service.user_service import UserService
+        权限从进程级缓存的 role→permissions 映射读取，避免每个受保护接口都打库。
+        改角色权限的接口会调用 invalidate_role_cache() 主动失效缓存。
+        """
+        role_perms = _get_role_permissions()
+        for role in self.roles:
+            perms = role_perms.get(role)
+            if perms and ("*" in perms or perm in perms):
+                return True
+        return False
 
-        if _db is None:
-            return False
-        session_class = sessionmaker(bind=_db._engine)
-        session = session_class()
-        try:
-            user_service = UserService(session)
-            for role in user_service.list_roles():
-                if role["name"] in self.roles:
-                    perms = role.get("permissions", [])
-                    if "*" in perms or perm in perms:
-                        return True
-            return False
-        finally:
-            session.close()
+    def effective_permissions(self) -> list[str]:
+        """当前用户展开后的有效权限集（供前端按权限控制 UI）。含 "*" 时返回全集。"""
+        role_perms = _get_role_permissions()
+        acc: set[str] = set()
+        for role in self.roles:
+            for p in role_perms.get(role, []):
+                if p == "*":
+                    from datapulse.core.permissions import ALL_CODES
+
+                    return sorted(ALL_CODES)
+                acc.add(p)
+        return sorted(acc)
 
 
 # ── Token 工具 ─────────────────────────────────────────────────────────────
@@ -132,6 +136,49 @@ def require_admin(user: Annotated[UserInfo, Depends(get_current_user)]) -> UserI
     return user
 
 
+# ── 权限缓存与 require_perm ─────────────────────────────────────────────────
+# role→permissions 进程级缓存。权限跟角色走、变更低频，缓存避免每个受保护接口打库。
+# 改角色权限的接口须调 invalidate_role_cache() 主动失效。
+_role_perm_cache: dict[str, list[str]] | None = None
+
+
+def _get_role_permissions() -> dict[str, list[str]]:
+    global _role_perm_cache
+    if _role_perm_cache is None:
+        from sqlalchemy.orm import sessionmaker
+
+        from datapulse.repository.base import _db
+        from datapulse.service.user_service import UserService
+
+        if _db is None:
+            return {}
+        session = sessionmaker(bind=_db._engine)()
+        try:
+            _role_perm_cache = {
+                r["name"]: r.get("permissions", []) for r in UserService(session).list_roles()
+            }
+        finally:
+            session.close()
+    return _role_perm_cache
+
+
+def invalidate_role_cache() -> None:
+    """角色权限变更后调用，清空缓存下次重新加载。"""
+    global _role_perm_cache
+    _role_perm_cache = None
+
+
+def require_perm(perm: str):
+    """按权限串保护接口的依赖工厂：admin（含 "*"）自动通过。"""
+
+    def _dep(user: Annotated[UserInfo, Depends(get_current_user)]) -> UserInfo:
+        if not user.has_permission(perm):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, f"缺少权限：{perm}")
+        return user
+
+    return _dep
+
+
 # ── 路由 ───────────────────────────────────────────────────────────────────
 
 
@@ -181,6 +228,7 @@ async def me(user: Annotated[UserInfo, Depends(get_current_user)]):
             "user_id": user.user_id,
             "username": user.username,
             "roles": user.roles,
+            "permissions": user.effective_permissions(),
         },
     }
 

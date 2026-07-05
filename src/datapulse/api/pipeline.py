@@ -14,14 +14,15 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.pipeline.engine import STEPS, run_all_sync, run_embed_job_sync, run_step
 from datapulse.repository.base import get_db
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
-router = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+router      = APIRouter()
+PipelineRead = Annotated[UserInfo, Depends(require_perm("pipeline:read"))]
+PipelineRun  = Annotated[UserInfo, Depends(require_perm("pipeline:run"))]
 
 
 class RunStepRequest(BaseModel):
@@ -31,13 +32,11 @@ class RunStepRequest(BaseModel):
 
 @router.post("/run")
 async def run_pipeline(
-    user: CurrentUser,
+    user: PipelineRun,
     background_tasks: BackgroundTasks,
     dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """触发全量 Pipeline（后台异步执行）"""
-    if not user.has_permission("pipeline:run"):
-        raise HTTPException(403, "无权限触发 Pipeline")
     db = get_db()
     current = db.get_pipeline_status(dataset_id)
     if current.get("status") == "running":
@@ -49,10 +48,8 @@ async def run_pipeline(
 
 
 @router.post("/run-step")
-async def run_single_step(body: RunStepRequest, user: CurrentUser):
+async def run_single_step(body: RunStepRequest, user: PipelineRun):
     """同步运行单个步骤（适合调试）"""
-    if not user.has_permission("pipeline:run"):
-        raise HTTPException(403, "无权限触发 Pipeline")
     try:
         result = await run_step(body.dataset_id, body.step, operator=user.username)
         return {"success": True, "data": result}
@@ -64,7 +61,7 @@ async def run_single_step(body: RunStepRequest, user: CurrentUser):
 
 @router.get("/status")
 async def get_status(
-    user: CurrentUser,
+    user: PipelineRead,
     dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """查询指定 dataset 的 Pipeline 状态"""
@@ -74,7 +71,7 @@ async def get_status(
 
 @router.post("/embed")
 async def run_embed(
-    user: CurrentUser,
+    user: PipelineRun,
     background_tasks: BackgroundTasks,
     dataset_id: int = Query(..., description="数据集 ID"),
 ):
@@ -84,8 +81,6 @@ async def run_embed(
     embedding 推理 + FAISS 索引重建是 CPU/GPU 密集型操作，已从主流程解耦。
     任务状态通过 GET /pipeline/status 的 embed_job 字段查询。
     """
-    if not user.has_permission("pipeline:run"):
-        raise HTTPException(403, "无权限触发 Embed Job")
     db      = get_db()
     current = db.get_pipeline_status(dataset_id) or {}
     embed   = current.get("embed_job", {})
@@ -97,7 +92,7 @@ async def run_embed(
 
 @router.post("/reset")
 async def reset_pipeline(
-    user: CurrentUser,
+    user: PipelineRun,
     dataset_id: int = Query(..., description="数据集 ID"),
     reset_embed: bool = Query(False, description="同时重置 embed_job 状态"),
 ):
@@ -111,8 +106,6 @@ async def reset_pipeline(
 
     注意：此操作不修改数据本身（t_data_item / t_data_state），仅重置状态记录。
     """
-    if not user.has_permission("pipeline:run"):
-        raise HTTPException(403, "无权限重置 Pipeline 状态")
     db      = get_db()
     current = db.get_pipeline_status(dataset_id) or {}
 
@@ -134,6 +127,6 @@ async def reset_pipeline(
 
 
 @router.get("/steps")
-async def get_steps(user: CurrentUser):
+async def get_steps(user: PipelineRead):
     """返回所有可用步骤名称"""
     return {"success": True, "steps": STEPS}

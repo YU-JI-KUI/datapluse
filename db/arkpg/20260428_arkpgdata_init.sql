@@ -493,17 +493,23 @@ DO $$ BEGIN RAISE NOTICE '[OK ]  t_work_volume'; END $$;
 DO $$ BEGIN RAISE NOTICE '-----------------------------------------------------------------------'; END $$;
 DO $$ BEGIN RAISE NOTICE '[DATA] seed data init ...'; END $$;
 
--- default roles
+-- default roles（四角色；权限集与 core/permissions.py + base.py _PRESET_ROLES 保持同源）
 DO $$ BEGIN RAISE NOTICE '[DATA] insert default roles ...'; END $$;
 INSERT INTO t_role (name, description, permissions, created_by, updated_by) VALUES
     ('admin',     '超级管理员，拥有所有权限', '["*"]', 'system', 'system'),
-    ('annotator', '标注员，可查看数据、提交标注、执行导出',
-     '["data:read","annotation:read","annotation:write","pipeline:read","export:read","export:create","config:read"]',
+    ('annotator', '标注员，负责标注平台全流程（标注、冲突裁决、分类、导出）',
+     '["data:read","data:write","annotation:read","annotation:write","conflict:read","conflict:detect","conflict:resolve","category:read","category:write","comment:write","pre_annotation:run","pipeline:read","pipeline:run","export:read","export:create","template:write","config:read"]',
      'system', 'system'),
-    ('viewer',    '只读访问，可查看数据和导出结果，不可操作',
-     '["data:read","annotation:read","pipeline:read","export:read","config:read"]',
+    ('evaluator', '评测员，仅负责 AI 对话评测模块',
+     '["data:read","eval:read","eval:write","export:read","export:create","config:read"]',
+     'system', 'system'),
+    ('viewer',    '只读访问，可查看各模块数据但不可操作',
+     '["data:read","annotation:read","conflict:read","category:read","pipeline:read","export:read","config:read","eval:read"]',
      'system', 'system')
-ON CONFLICT (name) DO NOTHING;
+ON CONFLICT (name) DO UPDATE
+    SET permissions = EXCLUDED.permissions,
+        description = EXCLUDED.description,
+        updated_by  = 'system';
 DO $$ BEGIN RAISE NOTICE '[OK ]  t_role seed data'; END $$;
 
 -- default dataset (WHERE NOT EXISTS guards against re-run; t_dataset.name has no UNIQUE constraint)

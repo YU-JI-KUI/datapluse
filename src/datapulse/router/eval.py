@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.config.settings import get_settings
 from datapulse.core.exceptions import NotFoundError, ParamError
 from datapulse.core.response import page_data, success
@@ -33,8 +33,9 @@ from datapulse.modules.eval.bu.registry import get_bu, list_bus
 from datapulse.modules.eval.llm.judge_runner import active_backend
 from datapulse.pipeline import eval_engine
 
-router      = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+router    = APIRouter()
+EvalRead  = Annotated[UserInfo, Depends(require_perm("eval:read"))]
+EvalWrite = Annotated[UserInfo, Depends(require_perm("eval:write"))]
 
 _ALLOWED = (".xlsx", ".xls")
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -49,7 +50,7 @@ def _start_task(filename: str, file_path: str, bu: str, operator: str) -> dict:
 
 @router.post("/upload")
 async def upload(
-    user: CurrentUser,
+    user: EvalWrite,
     file: UploadFile = File(...),
     bu: str = "securities",
 ):
@@ -65,7 +66,7 @@ async def upload(
 
 @router.get("/sample")
 async def run_sample(
-    user: CurrentUser,
+    user: EvalWrite,
     bu: str = "securities",
     kind: str = "calib",
 ):
@@ -85,7 +86,7 @@ async def run_sample(
 
 @router.get("/tasks")
 async def list_tasks(
-    user: CurrentUser,
+    user: EvalRead,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
     bu: str = Query("", description="按业务单元过滤；空则返回全部"),
@@ -97,7 +98,7 @@ async def list_tasks(
 
 
 @router.get("/tasks/{task_id}")
-async def task_status(task_id: str, user: CurrentUser):
+async def task_status(task_id: str, user: EvalRead):
     task = eval_engine.get_task(task_id)
     if not task:
         raise NotFoundError("任务不存在")
@@ -106,7 +107,7 @@ async def task_status(task_id: str, user: CurrentUser):
 
 
 @router.get("/tasks/{task_id}/result")
-async def task_result(task_id: str, user: CurrentUser):
+async def task_result(task_id: str, user: EvalRead):
     task = eval_engine.get_task(task_id)
     if not task:
         raise NotFoundError("任务不存在")
@@ -121,7 +122,7 @@ async def task_result(task_id: str, user: CurrentUser):
 @router.get("/tasks/{task_id}/rows")
 async def task_rows(
     task_id: str,
-    user: CurrentUser,
+    user: EvalRead,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
     flag: str = Query("all"),
@@ -157,7 +158,7 @@ class ReviewBody(BaseModel):
 
 
 @router.put("/tasks/{task_id}/rows/{row_index}/review")
-async def submit_review(task_id: str, row_index: int, body: ReviewBody, user: CurrentUser):
+async def submit_review(task_id: str, row_index: int, body: ReviewBody, user: EvalWrite):
     """提交/更新某条明细的人工复核（覆盖 AI 判定，指标按最终值重算）。"""
     if not eval_engine.get_task(task_id):
         raise NotFoundError("任务不存在")
@@ -174,7 +175,7 @@ async def submit_review(task_id: str, row_index: int, body: ReviewBody, user: Cu
 
 
 @router.delete("/tasks/{task_id}/rows/{row_index}/review")
-async def delete_review(task_id: str, row_index: int, user: CurrentUser):
+async def delete_review(task_id: str, row_index: int, user: EvalWrite):
     """撤销某条明细的人工复核（该行恢复用 AI 判定，指标随之还原）。"""
     eval_engine.delete_review(task_id, row_index)
     return success({"deleted": True})
@@ -185,7 +186,7 @@ class DryrunBody(BaseModel):
 
 
 @router.post("/tasks/{task_id}/rows/{row_index}/dryrun")
-async def dryrun_row(task_id: str, row_index: int, user: CurrentUser,
+async def dryrun_row(task_id: str, row_index: int, user: EvalWrite,
                      body: DryrunBody | None = None):
     """用当前提示词对该条重新试跑 Judge，返回新旧对比，不落库。
     body.business_knowledge 非空时用这段临时业务知识试跑（详情页改后未保存即可验证）。"""
@@ -214,7 +215,7 @@ def _rerun_result_or_raise(r: dict) -> dict:
 
 
 @router.post("/tasks/{task_id}/rerun-subset")
-async def rerun_subset(task_id: str, user: CurrentUser, flag: str = Query("review")):
+async def rerun_subset(task_id: str, user: EvalWrite, flag: str = Query("review")):
     """按筛选(flag=review 待复核)异步重跑该子集。已排除人工复核过的行。
     立即返回，前端轮询任务状态看进度。"""
     if not eval_engine.get_task(task_id):
@@ -223,7 +224,7 @@ async def rerun_subset(task_id: str, user: CurrentUser, flag: str = Query("revie
 
 
 @router.post("/tasks/{task_id}/rerun-rows")
-async def rerun_rows(task_id: str, body: RerunRowsBody, user: CurrentUser):
+async def rerun_rows(task_id: str, body: RerunRowsBody, user: EvalWrite):
     """异步重跑用户勾选的明细行（任意视图勾选）。已排除人工复核过的行。
     立即返回，前端轮询任务状态看进度；完成后指标全量重算。"""
     if not eval_engine.get_task(task_id):
@@ -235,7 +236,7 @@ async def rerun_rows(task_id: str, body: RerunRowsBody, user: CurrentUser):
 
 
 @router.post("/tasks/{task_id}/resume")
-async def resume_task(task_id: str, user: CurrentUser):
+async def resume_task(task_id: str, user: EvalWrite):
     """断点续跑：对中断的任务，跳过已完成行继续。"""
     task = eval_engine.get_task(task_id)
     if not task:
@@ -247,7 +248,7 @@ async def resume_task(task_id: str, user: CurrentUser):
 
 
 @router.post("/tasks/{task_id}/rerun")
-async def rerun_task(task_id: str, user: CurrentUser):
+async def rerun_task(task_id: str, user: EvalWrite):
     """重新评测：清空已落盘结果，用当前提示词从头重跑。"""
     if not eval_engine.rerun_task(task_id):
         raise NotFoundError("任务不存在")
@@ -256,7 +257,7 @@ async def rerun_task(task_id: str, user: CurrentUser):
 
 
 @router.delete("/tasks/{task_id}")
-async def delete_task(task_id: str, user: CurrentUser):
+async def delete_task(task_id: str, user: EvalWrite):
     """删除评测任务（连逐条结果一起硬删）。"""
     if not eval_engine.delete_task(task_id):
         raise NotFoundError("任务不存在")
@@ -264,7 +265,7 @@ async def delete_task(task_id: str, user: CurrentUser):
 
 
 @router.get("/tasks/{task_id}/export")
-async def export_disagreements(task_id: str, user: CurrentUser):
+async def export_disagreements(task_id: str, user: EvalRead):
     path = eval_engine.export_disagreements(task_id)
     if not path:
         raise NotFoundError("无可导出结果")
@@ -272,7 +273,7 @@ async def export_disagreements(task_id: str, user: CurrentUser):
 
 
 @router.get("/tasks/{task_id}/export/rows")
-async def export_rows(task_id: str, user: CurrentUser):
+async def export_rows(task_id: str, user: EvalRead):
     """逐条评测明细全量导出（两种模式都可用）。"""
     path = eval_engine.export_rows(task_id)
     if not path:
@@ -281,7 +282,7 @@ async def export_rows(task_id: str, user: CurrentUser):
 
 
 @router.get("/tasks/{task_id}/export/report")
-async def export_report(task_id: str, user: CurrentUser):
+async def export_report(task_id: str, user: EvalRead):
     """完整评估报告导出（概览/分发漏斗/洞察/建议 多 sheet）。"""
     path = eval_engine.export_report(task_id)
     if not path:
@@ -290,19 +291,19 @@ async def export_report(task_id: str, user: CurrentUser):
 
 
 @router.get("/meta/bus")
-async def get_bus(user: CurrentUser):
+async def get_bus(user: EvalRead):
     """列出可选业务单元（BU），供前端上传时选择。"""
     return success({"bus": list_bus()})
 
 
 @router.get("/meta/intents")
-async def get_intents(user: CurrentUser, bu: str = "securities"):
+async def get_intents(user: EvalRead, bu: str = "securities"):
     """返回指定 BU 的意图体系全集。"""
     return success({"bu": get_bu(bu).code, "intents": get_bu(bu).intent_list()})
 
 
 @router.get("/meta/config")
-async def get_config(user: CurrentUser):
+async def get_config(user: EvalRead):
     settings = get_settings()
     return success({
         "app_name":           settings.app_name,
@@ -320,13 +321,13 @@ class PromptSaveBody(BaseModel):
 
 
 @router.get("/prompts")
-async def list_prompts(user: CurrentUser, bu: str = "securities"):
+async def list_prompts(user: EvalRead, bu: str = "securities"):
     """某 BU 的全部模板槽位（专属/继承通用）+ 跨 BU 共享槽位。"""
     return success(eval_engine.list_prompts(bu))
 
 
 @router.get("/prompts/{bu}/{name}")
-async def get_prompt(bu: str, name: str, user: CurrentUser):
+async def get_prompt(bu: str, name: str, user: EvalRead):
     """单条提示词：当前有效内容 + 文件出厂默认 + 是否自定义。"""
     p = eval_engine.get_prompt(bu, name)
     if not p:
@@ -335,7 +336,7 @@ async def get_prompt(bu: str, name: str, user: CurrentUser):
 
 
 @router.put("/prompts/{bu}/{name}")
-async def save_prompt(bu: str, name: str, body: PromptSaveBody, user: CurrentUser):
+async def save_prompt(bu: str, name: str, body: PromptSaveBody, user: EvalWrite):
     """保存提示词，立即生效（下次评测读到新值，无需重启）。"""
     if not body.content.strip():
         raise ParamError("提示词内容不能为空")
@@ -343,7 +344,7 @@ async def save_prompt(bu: str, name: str, body: PromptSaveBody, user: CurrentUse
 
 
 @router.post("/prompts/{bu}/{name}/reset")
-async def reset_prompt(bu: str, name: str, user: CurrentUser):
+async def reset_prompt(bu: str, name: str, user: EvalWrite):
     """重置为文件出厂默认（删除库中自定义）。"""
     eval_engine.reset_prompt(bu, name)
     return success(eval_engine.get_prompt(bu, name))
@@ -357,13 +358,13 @@ class CategoryBody(BaseModel):
 
 
 @router.get("/categories")
-async def list_categories(user: CurrentUser, bu: str = "securities"):
+async def list_categories(user: EvalRead, bu: str = "securities"):
     """列出某 BU 的全部业务分类。"""
     return success({"bu": bu, "categories": eval_engine.list_categories(bu)})
 
 
 @router.post("/categories")
-async def create_category(user: CurrentUser, body: CategoryBody, bu: str = "securities"):
+async def create_category(user: EvalWrite, body: CategoryBody, bu: str = "securities"):
     """新增一个业务分类。"""
     if not body.name.strip():
         raise ParamError("分类名不能为空")
@@ -371,7 +372,7 @@ async def create_category(user: CurrentUser, body: CategoryBody, bu: str = "secu
 
 
 @router.put("/categories/{cat_id}")
-async def update_category(cat_id: int, body: CategoryBody, user: CurrentUser):
+async def update_category(cat_id: int, body: CategoryBody, user: EvalWrite):
     """更新业务分类名/定义。"""
     if not body.name.strip():
         raise ParamError("分类名不能为空")
@@ -382,7 +383,7 @@ async def update_category(cat_id: int, body: CategoryBody, user: CurrentUser):
 
 
 @router.delete("/categories/{cat_id}")
-async def delete_category(cat_id: int, user: CurrentUser):
+async def delete_category(cat_id: int, user: EvalWrite):
     """删除业务分类。"""
     if not eval_engine.delete_category(cat_id):
         raise NotFoundError("分类不存在")
@@ -397,13 +398,13 @@ class ActivityBody(BaseModel):
 
 
 @router.get("/activity-questions")
-async def list_activity_questions(user: CurrentUser, bu: str = "securities"):
+async def list_activity_questions(user: EvalRead, bu: str = "securities"):
     """列出某 BU 的全部活动标问。"""
     return success({"bu": bu, "questions": eval_engine.list_activity_questions(bu)})
 
 
 @router.post("/activity-questions")
-async def create_activity_question(user: CurrentUser, body: ActivityBody, bu: str = "securities"):
+async def create_activity_question(user: EvalWrite, body: ActivityBody, bu: str = "securities"):
     """新增一条活动标问（与客户问题精确相等即命中、整条跳过评测）。已存在则更新备注。"""
     if not body.question.strip():
         raise ParamError("活动标问不能为空")
@@ -412,7 +413,7 @@ async def create_activity_question(user: CurrentUser, body: ActivityBody, bu: st
 
 
 @router.delete("/activity-questions/{act_id}")
-async def delete_activity_question(act_id: int, user: CurrentUser):
+async def delete_activity_question(act_id: int, user: EvalWrite):
     """删除一条活动标问。"""
     if not eval_engine.delete_activity_question(act_id):
         raise NotFoundError("活动标问不存在")
@@ -429,13 +430,13 @@ class RuleBody(BaseModel):
 
 
 @router.get("/rules")
-async def list_rules(user: CurrentUser, bu: str = "securities"):
+async def list_rules(user: EvalRead, bu: str = "securities"):
     """列出某 BU 的全部短路规则。"""
     return success({"bu": bu, "rules": eval_engine.list_rules(bu)})
 
 
 @router.post("/rules")
-async def upsert_rule(user: CurrentUser, body: RuleBody, bu: str = "securities"):
+async def upsert_rule(user: EvalWrite, body: RuleBody, bu: str = "securities"):
     """新增/更新一条短路规则（按 (bu, question) upsert）。"""
     if not body.question.strip():
         raise ParamError("触发问题不能为空")
@@ -447,7 +448,7 @@ async def upsert_rule(user: CurrentUser, body: RuleBody, bu: str = "securities")
 
 
 @router.delete("/rules/{rule_id}")
-async def delete_rule(rule_id: int, user: CurrentUser):
+async def delete_rule(rule_id: int, user: EvalWrite):
     """删除一条短路规则。"""
     if not eval_engine.delete_rule(rule_id):
         raise NotFoundError("规则不存在")

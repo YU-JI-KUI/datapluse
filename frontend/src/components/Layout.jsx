@@ -7,7 +7,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Check,
   LayoutDashboard, Search, Database, Cpu, Tag, AlertTriangle,
   Tags, Download, Settings, Gauge, History, Filter, Zap, FileText,
-  FolderOpen, Users, Terminal,
+  FolderOpen, Users, Terminal, ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { datasetApi, authApi, evalApi, getCurrentDatasetId, setCurrentDatasetId, getCurrentBu, setCurrentBu } from '@/lib/api'
@@ -57,6 +57,7 @@ const subsystems = [
     items: [
       { to: '/datasets',  label: '数据集管理', icon: FolderOpen },
       { to: '/users',     label: '用户管理',   icon: Users },
+      { to: '/roles',     label: '角色权限',   icon: ShieldCheck },
       { to: '/admin-sql', label: 'SQL 工具',   icon: Terminal },
     ],
   },

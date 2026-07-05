@@ -9,20 +9,20 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.core.exceptions import NotFoundError, ParamError
 from datapulse.core.response import success
 from datapulse.repository.base import get_db
 from datapulse.schemas.annotation import DataStateUpdate
 
-router      = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+router    = APIRouter()
+DataWrite = Annotated[UserInfo, Depends(require_perm("data:write"))]
 
 _VALID_STAGES = {"raw", "cleaned", "pre_annotated", "annotated", "checked"}
 
 
 @router.patch("")
-async def update_data_state(body: DataStateUpdate, user: CurrentUser):
+async def update_data_state(body: DataStateUpdate, user: DataWrite):
     """手动更新数据流转阶段（管理员或 pipeline 内部使用）"""
     if body.stage not in _VALID_STAGES:
         raise ParamError(f"无效的 stage: {body.stage}，可选: {sorted(_VALID_STAGES)}")

@@ -13,13 +13,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.modules.embedding import reload_model
 from datapulse.modules.vector import rebuild_index, invalidate_index
 from datapulse.repository.base import get_db
 
 router      = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+ConfigRead  = Annotated[UserInfo, Depends(require_perm("config:read"))]
+ConfigWrite = Annotated[UserInfo, Depends(require_perm("config:write"))]
 _log        = structlog.get_logger(__name__)
 
 
@@ -29,7 +30,7 @@ class ConfigUpdateRequest(BaseModel):
 
 @router.get("")
 async def get_config(
-    user:       CurrentUser,
+    user:       ConfigRead,
     dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """获取指定 dataset 的完整配置（直接读 DB，热更新）"""
@@ -41,12 +42,10 @@ async def get_config(
 @router.post("/update")
 async def update_config(
     body:       ConfigUpdateRequest,
-    user:       CurrentUser,
+    user:       ConfigWrite,
     dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """更新指定 dataset 的配置并立即生效（写入 DB）"""
-    if not user.has_permission("config:write"):
-        raise HTTPException(403, "无权限修改配置")
     db = get_db()
     if not db.get_dataset(dataset_id):
         raise HTTPException(404, f"数据集不存在: {dataset_id}")
@@ -55,7 +54,7 @@ async def update_config(
 
 
 @router.post("/reload-model")
-async def reload_embedding_model(user: CurrentUser):
+async def reload_embedding_model(user: ConfigWrite):
     """清除 embedding 模型缓存，下次调用时自动按 EMBEDDING_MODEL_PATH 重新加载"""
     try:
         reload_model()
@@ -76,15 +75,13 @@ def _do_rebuild_index(dataset_id: int) -> None:
 @router.post("/rebuild-index")
 async def rebuild_vector_index(
     background_tasks: BackgroundTasks,
-    user:             CurrentUser,
+    user:             ConfigWrite,
     dataset_id:       int = Query(..., description="数据集 ID"),
 ):
     """后台异步重建指定 dataset 的 FAISS 索引（立即返回，重建在后台执行）。
     对于 6 万条数据，从 PostgreSQL 加载向量 + 重建 FAISS 索引可能耗时数十秒，
     改为异步后台执行可避免请求超时和界面卡死。
     """
-    if not user.has_permission("config:write"):
-        raise HTTPException(403, "无权限执行索引重建")
     db = get_db()
     if not db.get_dataset(dataset_id):
         raise HTTPException(404, f"数据集不存在: {dataset_id}")

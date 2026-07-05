@@ -17,13 +17,14 @@ import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.core.exceptions import NotFoundError, ParamError
 from datapulse.core.response import page_data, success
 from datapulse.repository.base import get_db
 
-router      = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+router        = APIRouter()
+CategoryRead  = Annotated[UserInfo, Depends(require_perm("category:read"))]
+CategoryWrite = Annotated[UserInfo, Depends(require_perm("category:write"))]
 
 
 # ── schemas ───────────────────────────────────────────────────────────────────
@@ -43,7 +44,7 @@ class CategoryUpdate(BaseModel):
 
 @router.get("")
 async def list_categories(
-    _user:      CurrentUser,
+    _user:      CategoryRead,
     dataset_id: int        = Query(...),
     keyword:    str | None = Query(None),
     page:       int        = Query(1,  ge=1),
@@ -55,7 +56,7 @@ async def list_categories(
 
 
 @router.post("")
-async def create_category(body: CategoryCreate, user: CurrentUser):
+async def create_category(body: CategoryCreate, user: CategoryWrite):
     if not body.name.strip():
         raise ParamError("分类名称不能为空")
     db  = get_db()
@@ -69,7 +70,7 @@ async def create_category(body: CategoryCreate, user: CurrentUser):
 
 
 @router.patch("/{category_id}")
-async def update_category(category_id: int, body: CategoryUpdate, user: CurrentUser):
+async def update_category(category_id: int, body: CategoryUpdate, user: CategoryWrite):
     db  = get_db()
     row = db.update_category(
         category_id = category_id,
@@ -83,7 +84,7 @@ async def update_category(category_id: int, body: CategoryUpdate, user: CurrentU
 
 
 @router.delete("/{category_id}")
-async def delete_category(category_id: int, user: CurrentUser):
+async def delete_category(category_id: int, user: CategoryWrite):
     db  = get_db()
     ok  = db.delete_category(category_id)
     if not ok:
@@ -96,7 +97,7 @@ class BulkDeleteBody(BaseModel):
 
 
 @router.post("/bulk-delete")
-async def bulk_delete_categories(body: BulkDeleteBody, user: CurrentUser):
+async def bulk_delete_categories(body: BulkDeleteBody, user: CategoryWrite):
     if not body.ids:
         raise ParamError("ids 不能为空")
     deleted = get_db().bulk_delete_categories(body.ids)
@@ -105,7 +106,7 @@ async def bulk_delete_categories(body: BulkDeleteBody, user: CurrentUser):
 
 @router.post("/upload")
 async def upload_categories(
-    user:       CurrentUser,
+    user:       CategoryWrite,
     dataset_id: int        = Form(...),
     file:       UploadFile = File(...),
 ):

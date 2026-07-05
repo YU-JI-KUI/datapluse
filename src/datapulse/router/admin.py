@@ -12,12 +12,12 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from datapulse.api.auth import UserInfo, require_admin
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.core.response import success
 from datapulse.repository.base import get_db
 
 router    = APIRouter()
-AdminUser = Annotated[UserInfo, Depends(require_admin)]
+AdminUser = Annotated[UserInfo, Depends(require_perm("system:sql"))]
 
 
 class ExecuteSQLBody(BaseModel):

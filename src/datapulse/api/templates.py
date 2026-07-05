@@ -10,11 +10,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, get_current_user
+from datapulse.api.auth import UserInfo, require_perm
 from datapulse.repository import get_db
 
 router = APIRouter()
-CurrentUser = Annotated[UserInfo, Depends(get_current_user)]
+TemplateRead  = Annotated[UserInfo, Depends(require_perm("export:read"))]
+TemplateWrite = Annotated[UserInfo, Depends(require_perm("template:write"))]
 
 
 class ColumnDef(BaseModel):
@@ -47,7 +48,7 @@ class TemplateUpdate(BaseModel):
 
 @router.get("")
 async def list_templates(
-    user: CurrentUser,
+    user: TemplateRead,
     dataset_id: int = Query(..., description="数据集 ID"),
 ):
     """获取指定 dataset 的所有导出模板"""
@@ -56,7 +57,7 @@ async def list_templates(
 
 
 @router.post("")
-async def create_template(body: TemplateCreate, user: CurrentUser):
+async def create_template(body: TemplateCreate, user: TemplateWrite):
     """创建新模板"""
     db = get_db()
     data = {
@@ -71,7 +72,7 @@ async def create_template(body: TemplateCreate, user: CurrentUser):
 
 
 @router.get("/{template_id}")
-async def get_template(template_id: int, user: CurrentUser):
+async def get_template(template_id: int, user: TemplateRead):
     """获取单个模板"""
     db = get_db()
     tpl = db.get_template(template_id)
@@ -81,7 +82,7 @@ async def get_template(template_id: int, user: CurrentUser):
 
 
 @router.put("/{template_id}")
-async def update_template(template_id: int, body: TemplateUpdate, user: CurrentUser):
+async def update_template(template_id: int, body: TemplateUpdate, user: TemplateWrite):
     """更新模板"""
     db = get_db()
     patch: dict = {}
@@ -102,7 +103,7 @@ async def update_template(template_id: int, body: TemplateUpdate, user: CurrentU
 
 
 @router.delete("/{template_id}")
-async def delete_template(template_id: int, user: CurrentUser):
+async def delete_template(template_id: int, user: TemplateWrite):
     """删除模板"""
     db = get_db()
     ok = db.delete_template(template_id)
