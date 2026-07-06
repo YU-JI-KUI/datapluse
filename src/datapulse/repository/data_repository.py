@@ -697,6 +697,7 @@ class DataRepository:
         end_date: str | None = None,
         label: str | None = None,
         category: str | None = None,
+        source_ref: str | None = None,
         page: int = 1,
         page_size: int = 20,
         enrich: bool = True,
@@ -704,6 +705,8 @@ class DataRepository:
         q = self.session.query(DataItem).filter(DataItem.dataset_id == dataset_id)
         if status:
             q = q.filter(DataItem.status == status)
+        if source_ref:
+            q = q.filter(DataItem.source_ref == source_ref)
         if keyword:
             q = q.filter(DataItem.content.ilike(f"%{keyword}%"))
         if start_date:

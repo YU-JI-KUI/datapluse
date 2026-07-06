@@ -741,12 +741,13 @@ export default function DataExplorer() {
   const selectedSource = sourceOptions.find(s => s.source_ref === sourceFilter)
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['explorer', datasetId, filters, labelFilter, categoryFilter, page, pageSize],
+    queryKey: ['explorer', datasetId, filters, labelFilter, categoryFilter, sourceFilter, page, pageSize],
     queryFn: () => dataApi.list({
       status:     filters.status     || undefined,
       keyword:    filters.keyword    || undefined,
       label:      labelFilter !== 'all' ? labelFilter : undefined,
       category:   (requireCot && categoryFilter !== 'all') ? categoryFilter : undefined,
+      source_ref: sourceFilter !== 'all' ? sourceFilter : undefined,
       start_date: filters.start_date || undefined,
       end_date:   filters.end_date   || undefined,
       page,
@@ -1021,12 +1022,12 @@ export default function DataExplorer() {
                   </div>
                 )}
 
-                {/* 来源文件：选中某上传文件后可一键删除其全部数据（误传整文件时用）*/}
+                {/* 来源文件：选中后列表即按该来源筛选（先查看再决定），也可一键删除其全部数据 */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground whitespace-nowrap">来源文件：</span>
                   <Select
                     value={sourceFilter}
-                    onValueChange={setSourceFilter}
+                    onValueChange={v => { setSourceFilter(v); setPage(1) }}
                   >
                     <SelectTrigger className="w-56 h-8 text-xs">
                       <SelectValue />

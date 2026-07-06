@@ -502,13 +502,14 @@ class DBManager:
                       start_date: str | None = None, end_date: str | None = None,
                       label: str | None = None,
                       category: str | None = None,
+                      source_ref: str | None = None,
                       page: int = 1, page_size: int = 20, enrich: bool = True) -> dict:
         from datapulse.repository.data_repository import DataRepository
         with self._session() as s:
             return DataRepository(s).list_all(
                 dataset_id, status=status, keyword=keyword,
                 start_date=start_date, end_date=end_date,
-                label=label, category=category,
+                label=label, category=category, source_ref=source_ref,
                 page=page, page_size=page_size, enrich=enrich,
             )
 
