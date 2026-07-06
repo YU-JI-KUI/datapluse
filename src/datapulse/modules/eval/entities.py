@@ -68,8 +68,9 @@ class EvalTaskRow(EvalBase):
 
     __table_args__ = (
         UniqueConstraint("task_id", "row_index", name="uk_t_eval_task_row_task_idx"),
-        # 问题洞察按 question / j_intent GROUP BY，表达式索引加速聚合
-        Index("idx_t_eval_row_question", text("(row_json->>'question')")),
+        # 问题洞察按 j_intent 跨任务 GROUP BY，表达式索引加速聚合。
+        # question 不建 B-tree：真实客户问题可能超长（>2704 字节上限），且高频问
+        # 按原文分组走 HashAggregate 用不到该索引。
         Index("idx_t_eval_row_j_intent", text("(row_json->>'j_intent')")),
     )
 
