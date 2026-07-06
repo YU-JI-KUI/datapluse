@@ -1,7 +1,9 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ c41c60bf
+# 基于 origin/main @ 6e9a9098
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
+#   6e9a9098 修复问题洞察索引：question 超 B-tree 上限建不了
+#   abe158be sync: changed_files for 10 commit(s)
 #   c41c60bf AI 评测新增问题洞察页：高频问 / 每日频率 / 关键词
 #   fac8c5fd RBAC 权限体系：角色权限后台可配 + 执行层接入
 #   75820a25 统一文件下载实现，消除浏览器不安全提示
@@ -13,13 +15,13 @@
 #   233b7fd9 新增寿险 FAQ 答案卡与多轮文本卡解析器
 #   f5488dc1 sync: changed_files for 1 commit(s)
 db/arkpg/20260705_arkpgdata_eval_row_expr_index.sql
+src/datapulse/modules/eval/entities.py
 deploy_desc/SUPER-AGENT1.0.0.json
 frontend/src/App.jsx
 frontend/src/components/Layout.jsx
 frontend/src/lib/api.js
 frontend/src/pages/EvalInsights.jsx
 pyproject.toml
-src/datapulse/modules/eval/entities.py
 src/datapulse/modules/eval/eval_db.py
 src/datapulse/modules/eval/evaluator.py
 src/datapulse/modules/eval/keyword_extract.py
