@@ -14,7 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, invalidate_role_cache, require_perm
+from datapulse.router.auth import UserInfo, invalidate_role_cache, require_perm
 from datapulse.core.exceptions import NotFoundError, ParamError
 from datapulse.core.permissions import ALL_CODES, grouped_permissions
 from datapulse.core.response import success

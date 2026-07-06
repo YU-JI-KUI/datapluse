@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, require_perm
+from datapulse.router.auth import UserInfo, require_perm
 from datapulse.core.exceptions import NotFoundError, PipelineRunningError
 from datapulse.core.response import page_data, success
 from datapulse.modules.conflict import run_conflict_detection, run_quality_self_check

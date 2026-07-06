@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from datapulse.api.auth import UserInfo, require_perm
+from datapulse.router.auth import UserInfo, require_perm
 from datapulse.core.response import success
 from datapulse.repository.base import get_db
 

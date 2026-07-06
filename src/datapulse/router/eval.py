@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, require_perm
+from datapulse.router.auth import UserInfo, require_perm
 from datapulse.config.settings import get_settings
 from datapulse.core.exceptions import NotFoundError, ParamError
 from datapulse.core.response import page_data, success

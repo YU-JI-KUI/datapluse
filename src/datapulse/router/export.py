@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, require_perm
+from datapulse.router.auth import UserInfo, require_perm
 from datapulse.repository.base import AVAILABLE_FIELDS, DEFAULT_COLUMNS, get_db
 
 router = APIRouter()

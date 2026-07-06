@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 
-from datapulse.api.auth import UserInfo, require_perm
+from datapulse.router.auth import UserInfo, require_perm
 from datapulse.core.exceptions import PipelineRunningError
 from datapulse.core.response import success
 from datapulse.repository.base import get_db

@@ -17,7 +17,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, require_perm
+from datapulse.router.auth import UserInfo, require_perm
 from datapulse.core.exceptions import NotFoundError, ParamError
 from datapulse.core.response import page_data, success
 from datapulse.repository.base import get_db

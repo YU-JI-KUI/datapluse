@@ -16,7 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, require_perm
+from datapulse.router.auth import UserInfo, require_perm
 from datapulse.core.exceptions import NotFoundError, ParamError
 from datapulse.core.response import page_data, success
 from datapulse.modules.processing import is_valid, parse_file, parse_file_rows

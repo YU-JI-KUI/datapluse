@@ -12,7 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, get_current_user, require_perm
+from datapulse.router.auth import UserInfo, get_current_user, require_perm
 from datapulse.repository.base import get_db
 
 router = APIRouter()

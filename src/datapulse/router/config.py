@@ -13,7 +13,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from datapulse.api.auth import UserInfo, require_perm
+from datapulse.router.auth import UserInfo, require_perm
 from datapulse.modules.embedding import reload_model
 from datapulse.modules.vector import rebuild_index, invalidate_index
 from datapulse.repository.base import get_db

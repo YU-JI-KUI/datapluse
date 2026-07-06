@@ -33,17 +33,18 @@ from fastapi.staticfiles import StaticFiles
 
 import structlog
 
-from datapulse.api import auth, config, datasets, export, pipeline, templates, users
 from datapulse.config.settings import get_settings
 from datapulse.core.exceptions import register_exception_handlers
 from datapulse.logging import setup_logging, shutdown_logging
 from datapulse.middleware.access_log import AccessLogMiddleware
 from datapulse.middleware.trace import TraceMiddleware
 from datapulse.repository import get_db, init_db
+from datapulse.router import (
+    admin, annotation, auth, category, comment, config, conflict, dashboard,
+    data_item, data_state, datasets, eval, export, pipeline, pre_annotation,
+    role, templates, users,
+)
 from datapulse.scheduler import start_scheduler, stop_scheduler
-
-# 新版 router（遵循统一响应规范）
-from datapulse.router import admin, annotation, category, comment, conflict, dashboard, data_item, data_state, eval, pre_annotation, role
 
 
 @asynccontextmanager
@@ -106,7 +107,7 @@ app.add_middleware(
 # ── 全局异常处理 ───────────────────────────────────────────────────────────────
 register_exception_handlers(app)
 
-# ── API 路由（新版，统一响应规范）─────────────────────────────────────────────
+# ── API 路由（全部在 datapulse.router，统一响应规范）──────────────────────────
 app.include_router(data_item.router,      prefix="/api/data-items",       tags=["数据管理"])
 app.include_router(annotation.router,     prefix="/api/annotations",      tags=["标注系统"])
 app.include_router(comment.router,        prefix="/api/comments",         tags=["评论系统"])
@@ -118,8 +119,6 @@ app.include_router(category.router,       prefix="/api/categories",       tags=[
 app.include_router(admin.router,          prefix="/api/admin",            tags=["管理员工具"])
 app.include_router(eval.router,           prefix="/api/eval",             tags=["AI评测"])
 app.include_router(role.router,           prefix="/api",                  tags=["角色权限"])
-
-# ── API 路由（旧版，保持兼容）────────────────────────────────────────────────
 app.include_router(auth.router,       prefix="/api/auth",      tags=["认证"])
 app.include_router(users.router,      prefix="/api/users",     tags=["用户管理"])
 app.include_router(datasets.router,   prefix="/api/datasets",  tags=["数据集"])
