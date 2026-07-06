@@ -182,12 +182,16 @@ class _StreamAggregator:
         self.errors = 0
         self.disagreement_count = 0
         self.disagreements: list[dict] = []   # 仅留前 _MAX_DISAGREEMENTS 条
+        self.dispatched_bus: set[str] = set()  # 全量 dispatched_bu 去重，供前端筛选下拉
 
     def update(self, rows: list[dict]) -> None:
         for r in rows:
             self.total += 1
             judge = r["judge"]
             is_judge_dict = isinstance(judge, dict)
+            _dbu = (r.get("dispatched_bu") or "").strip()
+            if _dbu:
+                self.dispatched_bus.add(_dbu)
 
             intent = r["j_intent"]
             if intent:
@@ -441,6 +445,7 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
         "filter_stats": filter_stats,
         "metrics": metrics,
         "intent_distribution": intent_dist,
+        "dispatched_bu_options": sorted(agg.dispatched_bus),   # 全量去重，供明细页分发BU下拉
         "insights": insights,
         "advice": advice,
         # rows 不再随结果返回(百万级 OOM);逐条在 t_eval_task_row,前端分页查。
@@ -479,6 +484,7 @@ def recompute_result_from_rows(old_result: dict, rows_batches, mode: str) -> dic
     out["summary"] = s
     out["insights"] = insights
     out["intent_distribution"] = agg.intent_distribution()
+    out["dispatched_bu_options"] = sorted(agg.dispatched_bus)   # 重算后也保留分发BU下拉选项
     if mode == "calibration":
         out["metrics"] = agg.metrics()
     out["disagreements"] = agg.disagreements

@@ -22,11 +22,11 @@ import { cn } from '@/lib/utils'
 
 const RESP = (r) => r?.data?.data ?? {}
 
-export default function RowsTable({ taskId, disagreements = [], totalSamples = 0, reviewCount = 0, intentOptions = [] }) {
+export default function RowsTable({ taskId, disagreements = [], totalSamples = 0, reviewCount = 0, intentOptions = [], buOptions = [] }) {
   const [filter, setFilter] = useState('all')
   const [kw, setKw] = useState('')
   const [intent, setIntent] = useState('all')   // 'all' = 不过滤
-  const [buKw, setBuKw] = useState('')          // 分发BU 关键字
+  const [buKw, setBuKw] = useState('all')       // 分发BU：'all'=不过滤，否则为具体 BU 值
   const [dispatchF, setDispatchF] = useState('all')  // 分发判定 是/否/all
   const [resolvedF, setResolvedF] = useState('all')  // 是否解决 是/否/all
   const [page, setPage] = useState(1)
@@ -96,7 +96,7 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
     const q = kw.trim()
     const it = intent === 'all' ? '' : intent
     const extra = {
-      dispatched_bu: buKw.trim(),
+      dispatched_bu: buKw === 'all' ? '' : buKw,
       j_dispatch: dispatchF === 'all' ? '' : dispatchF,
       j_resolved: resolvedF === 'all' ? '' : resolvedF,
     }
@@ -128,19 +128,25 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
   const subsetFiltered = useMemo(() => {
     if (isAll) return []
     const q = kw.trim().toLowerCase()
-    if (!q) return subsetAll
-    return subsetAll.filter(x =>
-      (x.question || '').toLowerCase().includes(q) ||
-      (x.j_intent || '').toLowerCase().includes(q) ||
-      (x.session || '').toLowerCase().includes(q))
-  }, [isAll, subsetAll, kw])
+    return subsetAll.filter(x => {
+      if (q && !(
+        (x.question || '').toLowerCase().includes(q) ||
+        (x.j_intent || '').toLowerCase().includes(q) ||
+        (x.session || '').toLowerCase().includes(q))) return false
+      if (intent !== 'all' && (x.j_intent || '') !== intent) return false
+      if (buKw !== 'all' && (x.dispatched_bu || '') !== buKw) return false
+      if (dispatchF !== 'all' && (x.j_dispatch || '') !== dispatchF) return false
+      if (resolvedF !== 'all' && (x.j_resolved || '') !== resolvedF) return false
+      return true
+    })
+  }, [isAll, subsetAll, kw, intent, buKw, dispatchF, resolvedF])
 
   const total = isAll ? serverTotal : subsetFiltered.length
   const display = isAll ? pageRows : subsetFiltered.slice((page - 1) * pageSize, page * pageSize)
 
   function changeFilter(k) {
     setFilter(k); setPage(1); setKw(''); setIntent('all')
-    setBuKw(''); setDispatchF('all'); setResolvedF('all')
+    setBuKw('all'); setDispatchF('all'); setResolvedF('all')
   }
 
   return (
@@ -175,43 +181,42 @@ export default function RowsTable({ taskId, disagreements = [], totalSamples = 0
               className="pl-7 h-8 text-sm"
             />
           </div>
-          {isAll && (
-            <Select value={intent} onValueChange={v => { setIntent(v); setPage(1) }}>
-              <SelectTrigger className="h-8 w-44 text-sm">
-                <SelectValue placeholder="业务分类" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部业务分类</SelectItem>
-                {intentOptions.map(name => (
-                  <SelectItem key={name} value={name}>{name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          {isAll && (
-            <Input value={buKw} onChange={e => { setBuKw(e.target.value); setPage(1) }}
-              placeholder="分发BU" className="h-8 w-28 text-sm" />
-          )}
-          {isAll && (
-            <Select value={dispatchF} onValueChange={v => { setDispatchF(v); setPage(1) }}>
-              <SelectTrigger className="h-8 w-32 text-sm"><SelectValue placeholder="分发判定" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">分发判定(全部)</SelectItem>
-                <SelectItem value="是">分发·是</SelectItem>
-                <SelectItem value="否">分发·否</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
-          {isAll && (
-            <Select value={resolvedF} onValueChange={v => { setResolvedF(v); setPage(1) }}>
-              <SelectTrigger className="h-8 w-32 text-sm"><SelectValue placeholder="是否解决" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">是否解决(全部)</SelectItem>
-                <SelectItem value="是">解决·是</SelectItem>
-                <SelectItem value="否">解决·否</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
+          <Select value={intent} onValueChange={v => { setIntent(v); setPage(1) }}>
+            <SelectTrigger className="h-8 w-44 text-sm">
+              <SelectValue placeholder="业务分类" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部业务分类</SelectItem>
+              {intentOptions.map(name => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={buKw} onValueChange={v => { setBuKw(v); setPage(1) }}>
+            <SelectTrigger className="h-8 w-36 text-sm"><SelectValue placeholder="分发BU" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部分发BU</SelectItem>
+              {buOptions.map(name => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={dispatchF} onValueChange={v => { setDispatchF(v); setPage(1) }}>
+            <SelectTrigger className="h-8 w-32 text-sm"><SelectValue placeholder="分发判定" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">分发判定(全部)</SelectItem>
+              <SelectItem value="是">分发·是</SelectItem>
+              <SelectItem value="否">分发·否</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={resolvedF} onValueChange={v => { setResolvedF(v); setPage(1) }}>
+            <SelectTrigger className="h-8 w-32 text-sm"><SelectValue placeholder="是否解决" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">是否解决(全部)</SelectItem>
+              <SelectItem value="是">解决·是</SelectItem>
+              <SelectItem value="否">解决·否</SelectItem>
+            </SelectContent>
+          </Select>
           {selected.size > 0 && (
             <Button variant="outline" size="sm" className="ml-auto h-8"
               onClick={() => setRerunOpen(true)} disabled={rerunning}>
