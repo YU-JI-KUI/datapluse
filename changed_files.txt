@@ -1,6 +1,87 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ a55e4ac7
+# 基于 origin/main @ c41c60bf
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   a55e4ac7 导航重构：子系统提升为顶栏一级切换
+#   c41c60bf AI 评测新增问题洞察页：高频问 / 每日频率 / 关键词
+#   fac8c5fd RBAC 权限体系：角色权限后台可配 + 执行层接入
+#   75820a25 统一文件下载实现，消除浏览器不安全提示
+#   2f6f869b 文档重构：合并 AI 评测、区分两大模块、更新日志
+#   de3375f0 数据管理：按上传文件删除 + 级联清理 + 孤儿清理脚本
+#   9520c67d 修复 init.sql 老库部署：后加列补 ALTER 兜底
+#   ef9b3202 AI 评测模块优化：真实耗时、修改人、BU 名与轮询修复
+#   b1042a65 优化 AI 评测模块页面布局与检索
+#   233b7fd9 新增寿险 FAQ 答案卡与多轮文本卡解析器
+#   f5488dc1 sync: changed_files for 1 commit(s)
+db/arkpg/20260705_arkpgdata_eval_row_expr_index.sql
+deploy_desc/SUPER-AGENT1.0.0.json
+frontend/src/App.jsx
 frontend/src/components/Layout.jsx
+frontend/src/lib/api.js
+frontend/src/pages/EvalInsights.jsx
+pyproject.toml
+src/datapulse/modules/eval/entities.py
+src/datapulse/modules/eval/eval_db.py
+src/datapulse/modules/eval/evaluator.py
+src/datapulse/modules/eval/keyword_extract.py
+src/datapulse/modules/eval/pipeline.py
+src/datapulse/modules/eval/repository.py
+src/datapulse/pipeline/eval_engine.py
+src/datapulse/router/eval.py
+db/arkpg/20260428_arkpgdata_init.sql
+db/arkpg/20260705_arkpgdata_rbac_roles.sql
+frontend/src/pages/RolePermissions.jsx
+frontend/src/pages/Users.jsx
+src/datapulse/api/auth.py
+src/datapulse/api/config.py
+src/datapulse/api/datasets.py
+src/datapulse/api/export.py
+src/datapulse/api/pipeline.py
+src/datapulse/api/templates.py
+src/datapulse/api/users.py
+src/datapulse/core/permissions.py
+src/datapulse/main.py
+src/datapulse/repository/base.py
+src/datapulse/repository/user_repository.py
+src/datapulse/router/admin.py
+src/datapulse/router/annotation.py
+src/datapulse/router/category.py
+src/datapulse/router/comment.py
+src/datapulse/router/conflict.py
+src/datapulse/router/dashboard.py
+src/datapulse/router/data_item.py
+src/datapulse/router/data_state.py
+src/datapulse/router/pre_annotation.py
+src/datapulse/router/role.py
+frontend/.gitignore
+frontend/docs/.vitepress/config.mjs
+frontend/docs/changelog.md
+frontend/docs/guide/eval-metrics.md
+frontend/docs/guide/eval-tuning.md
+frontend/docs/guide/eval.md
+frontend/docs/index.md
+frontend/package.json
+frontend/src/pages/Eval.jsx
+frontend/src/pages/DataExplorer.jsx
+scripts/clean_orphan_data.py
+src/datapulse/repository/data_repository.py
+db/arkpg/20260704_arkpgdata_add_eval_started_at.sql
+frontend/src/lib/utils.js
+frontend/src/pages/EvalActivity.jsx
+frontend/src/pages/EvalCategories.jsx
+frontend/src/pages/EvalHistory.jsx
+frontend/src/pages/EvalPrompts.jsx
+frontend/src/pages/EvalRules.jsx
+src/datapulse/modules/eval/answer_sanitizer/generic.py
+src/datapulse/modules/eval/answer_sanitizer/life_insurance.py
+src/datapulse/modules/eval/answer_sanitizer/samples/generic.benefit_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/generic.content_data.md
+src/datapulse/modules/eval/answer_sanitizer/samples/generic.service_nav.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.clarify_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.faq_answer_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.faq_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.multi_round_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.policy_list_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.service_flow_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/样例索引.md
+[DEL] docs/ai_eval_guide.md
+[DEL] frontend/public/eval-guide.html
