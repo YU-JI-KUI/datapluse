@@ -642,26 +642,53 @@ DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_task'; END $$;
 -- ---------------------------------------------------------------------------
 DO $$ BEGIN RAISE NOTICE '[DDL] 20/20 t_eval_task_row ...'; END $$;
 CREATE TABLE IF NOT EXISTS t_eval_task_row (
-    id         BIGSERIAL    NOT NULL,
-    task_id    VARCHAR(64)  NOT NULL,
-    row_index  BIGINT       NOT NULL,
-    row_json   JSONB        NOT NULL,
-    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    created_by VARCHAR(100) NOT NULL DEFAULT '',
+    id            BIGSERIAL    NOT NULL,
+    task_id       VARCHAR(64)  NOT NULL,
+    row_index     BIGINT       NOT NULL,
+    session       VARCHAR(128),
+    turn          INTEGER,
+    question      TEXT,
+    ask_time      VARCHAR(32),
+    dispatched_bu VARCHAR(64),
+    j_intent      VARCHAR(128),
+    j_dispatch    VARCHAR(8),
+    j_resolved    VARCHAR(8),
+    judge_json    JSONB,
+    context_json  JSONB,
+    gold_json     JSONB,
+    row_json      JSONB        NOT NULL,
+    created_at    TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by    VARCHAR(100) NOT NULL DEFAULT '',
     CONSTRAINT pk_t_eval_task_row PRIMARY KEY (id)
 );
-COMMENT ON TABLE  t_eval_task_row            IS 'AI对话评测逐条结果表（每行明细一条，断点续跑依据）';
-COMMENT ON COLUMN t_eval_task_row.id         IS '主键ID';
-COMMENT ON COLUMN t_eval_task_row.task_id    IS '所属评测任务ID（逻辑外键 → t_eval_task.task_id）';
-COMMENT ON COLUMN t_eval_task_row.row_index  IS '行序号（在该任务内唯一）';
-COMMENT ON COLUMN t_eval_task_row.row_json   IS '单行完整评测结果（含 judge 输出、金标、分发场景等）';
-COMMENT ON COLUMN t_eval_task_row.created_at IS '落盘时间';
-COMMENT ON COLUMN t_eval_task_row.created_by IS '操作人';
+COMMENT ON TABLE  t_eval_task_row               IS 'AI对话评测逐条结果表（每行明细一条，断点续跑依据）';
+COMMENT ON COLUMN t_eval_task_row.id            IS '主键ID';
+COMMENT ON COLUMN t_eval_task_row.task_id       IS '所属评测任务ID（逻辑外键 → t_eval_task.task_id）';
+COMMENT ON COLUMN t_eval_task_row.row_index     IS '行序号（在该任务内唯一）';
+COMMENT ON COLUMN t_eval_task_row.session       IS '会话ID（原 Excel 应用会话ID列）';
+COMMENT ON COLUMN t_eval_task_row.turn          IS '会话内客户咨询轮次';
+COMMENT ON COLUMN t_eval_task_row.question      IS '客户提问原文';
+COMMENT ON COLUMN t_eval_task_row.ask_time      IS '客户提问时间原文，问题洞察按日聚合';
+COMMENT ON COLUMN t_eval_task_row.dispatched_bu IS 'Excel 分发BU列原值';
+COMMENT ON COLUMN t_eval_task_row.j_intent      IS 'AI 判定业务分类';
+COMMENT ON COLUMN t_eval_task_row.j_dispatch    IS '分发判定结果：是 / 否';
+COMMENT ON COLUMN t_eval_task_row.j_resolved    IS '答案解决判定结果：是 / 否';
+COMMENT ON COLUMN t_eval_task_row.judge_json    IS 'LLM 完整判定输出（11 字段）';
+COMMENT ON COLUMN t_eval_task_row.context_json  IS '多轮对话上下文 [{turn,user,ai}]';
+COMMENT ON COLUMN t_eval_task_row.gold_json     IS '人工金标 dict';
+COMMENT ON COLUMN t_eval_task_row.row_json      IS '单行完整评测结果快照（旧行兜底 + 过渡期双写）';
+COMMENT ON COLUMN t_eval_task_row.created_at    IS '落盘时间';
+COMMENT ON COLUMN t_eval_task_row.created_by    IS '操作人';
 CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_task_row_task_idx ON t_eval_task_row(task_id, row_index);
--- 明细页过滤：业务分类精确匹配 / 需复核筛选，避免 5万行任务全表扫 JSONB
-CREATE INDEX IF NOT EXISTS idx_t_eval_row_intent ON t_eval_task_row (task_id, (row_json->>'j_intent'));
+-- 明细页过滤（j_dispatch/j_resolved 按 task）+ 洞察聚合（j_intent/ask_time）走平铺列原生索引
+CREATE INDEX IF NOT EXISTS idx_t_eval_row_task_dispatch ON t_eval_task_row (task_id, j_dispatch);
+CREATE INDEX IF NOT EXISTS idx_t_eval_row_task_resolved ON t_eval_task_row (task_id, j_resolved);
+CREATE INDEX IF NOT EXISTS idx_t_eval_row_j_intent       ON t_eval_task_row (j_intent);
+CREATE INDEX IF NOT EXISTS idx_t_eval_row_ask_time       ON t_eval_task_row (ask_time);
+-- 需复核筛选走 row_json（查询侧读 row_json['judge']，新旧行 row_json 均完整，双写保证）
 CREATE INDEX IF NOT EXISTS idx_t_eval_row_review ON t_eval_task_row (task_id)
     WHERE (row_json->'judge'->>'needs_human_review') = 'true';
+-- question 不建索引：可能超长（>2704 B-tree 上限），聚合走 HashAggregate
 DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_task_row'; END $$;
 
 -- 21. t_eval_prompt -- AI eval editable prompts (DB-backed, hot-editable)

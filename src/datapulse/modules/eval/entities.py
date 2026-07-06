@@ -6,7 +6,7 @@ eval 三张表无外键到标注表，自成体系。挂独立 EvalBase（而非
 """
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Column, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Column, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.orm import declarative_base
 
@@ -62,16 +62,33 @@ class EvalTaskRow(EvalBase):
     id         = Column(BigInteger, primary_key=True, autoincrement=True)
     task_id    = Column(String(64), nullable=False, index=True)
     row_index  = Column(BigInteger, nullable=False)
-    row_json   = Column(JSONB, nullable=False)
+    # ── 平铺列（被明细过滤 / 洞察聚合当列查，拆出走原生索引）───────────────────────
+    session       = Column(String(128))   # 会话ID
+    turn          = Column(Integer)        # 会话内轮次
+    question      = Column(Text)           # 客户提问原文（可能超长，不建 B-tree 索引）
+    ask_time      = Column(String(32))     # 提问时间原文，洞察按日聚合
+    dispatched_bu = Column(String(64))     # Excel 分发BU列原值
+    j_intent      = Column(String(128))    # AI 判定业务分类
+    j_dispatch    = Column(String(8))      # 分发判定 是/否
+    j_resolved    = Column(String(8))      # 解决判定 是/否
+    # ── JSON 列（嵌套结构 / AI 完整输出，整体读写不拆）─────────────────────────────
+    judge_json    = Column(JSONB)          # LLM 完整判定输出（11 字段）
+    context_json  = Column(JSONB)          # 多轮对话上下文 [{turn,user,ai}]
+    gold_json     = Column(JSONB)          # 人工金标 dict
+    # ── 兜底 / 审计 ───────────────────────────────────────────────────────────────
+    row_json   = Column(JSONB, nullable=False)   # 完整快照，旧行读它兜底 + 过渡期双写
     created_at = Column(_TS, nullable=False)
     created_by = Column(String(100), nullable=False, default="")
 
     __table_args__ = (
         UniqueConstraint("task_id", "row_index", name="uk_t_eval_task_row_task_idx"),
-        # 问题洞察按 j_intent 跨任务 GROUP BY，表达式索引加速聚合。
-        # question 不建 B-tree：真实客户问题可能超长（>2704 字节上限），且高频问
-        # 按原文分组走 HashAggregate 用不到该索引。
-        Index("idx_t_eval_row_j_intent", text("(row_json->>'j_intent')")),
+        # 明细页高频过滤 j_dispatch / j_resolved（按 task 内），复合索引走原生 B-tree
+        Index("idx_t_eval_row_task_dispatch", "task_id", "j_dispatch"),
+        Index("idx_t_eval_row_task_resolved", "task_id", "j_resolved"),
+        # 问题洞察跨任务 GROUP BY j_intent / 按 ask_time 日聚合
+        Index("idx_t_eval_row_j_intent", "j_intent"),
+        Index("idx_t_eval_row_ask_time", "ask_time"),
+        # question 不建索引：可能超长（>2704 B-tree 上限），聚合走 HashAggregate
     )
 
 

@@ -217,19 +217,42 @@ class EvalRepository:
     # ── 逐条结果 ──────────────────────────────────────────────────────────────
 
     def save_rows(self, task_id: str, rows: list[dict], created_by: str = "system") -> None:
-        """批量 upsert 逐条结果（断点续跑的依据）。"""
+        """批量 upsert 逐条结果（断点续跑的依据）。
+
+        双写：拆出平铺列（明细过滤/洞察聚合用）+ judge/context/gold 三个 JSON 列，
+        同时保留 row_json 整体快照（旧行兜底 + 过渡期回退安全）。
+        """
         if not rows:
             return
         ts = _now()
         payload = [
-            {"task_id": task_id, "row_index": r["row_index"], "row_json": _clean_json(r),
-             "created_at": ts, "created_by": created_by}
+            {
+                "task_id": task_id, "row_index": r["row_index"],
+                "session": r.get("session"), "turn": r.get("turn"),
+                "question": r.get("question"), "ask_time": r.get("ask_time", ""),
+                "dispatched_bu": r.get("dispatched_bu", ""),
+                "j_intent": r.get("j_intent"), "j_dispatch": r.get("j_dispatch"),
+                "j_resolved": r.get("j_resolved"),
+                "judge_json": _clean_json(r.get("judge")),
+                "context_json": _clean_json(r.get("context")),
+                "gold_json": _clean_json(r.get("gold")),
+                "row_json": _clean_json(r),
+                "created_at": ts, "created_by": created_by,
+            }
             for r in rows
         ]
         stmt = pg_insert(EvalTaskRow).values(payload)
+        # 重跑覆盖：所有拆出列 + row_json 都要同步更新，否则平铺列与 row_json 不一致
+        ex = stmt.excluded
         stmt = stmt.on_conflict_do_update(
             index_elements=["task_id", "row_index"],
-            set_={"row_json": stmt.excluded.row_json},
+            set_={
+                "session": ex.session, "turn": ex.turn, "question": ex.question,
+                "ask_time": ex.ask_time, "dispatched_bu": ex.dispatched_bu,
+                "j_intent": ex.j_intent, "j_dispatch": ex.j_dispatch, "j_resolved": ex.j_resolved,
+                "judge_json": ex.judge_json, "context_json": ex.context_json,
+                "gold_json": ex.gold_json, "row_json": ex.row_json,
+            },
         )
         self.session.execute(stmt)
 
@@ -244,19 +267,27 @@ class EvalRepository:
         """构造逐条结果的过滤条件。f 支持：
         q(问题关键字, 模糊) / intent(业务分类, 精确) / dispatched_bu(分发BU, 模糊) /
         j_dispatch(分发判定 是/否, 精确) / j_resolved(是否解决 是/否, 精确)。
+
+        新行读平铺列（走索引），旧行平铺列可能为空 → COALESCE 兜底 row_json。
+        过滤已按 task_id 缩到单任务范围，COALESCE 让索引失效在此不构成问题。
         """
+        from sqlalchemy import func
         conds = [EvalTaskRow.task_id == task_id]
         rj = EvalTaskRow.row_json
+
+        def col(flat, key):
+            return func.coalesce(flat, rj[key].astext)
+
         if f.get("q"):
-            conds.append(rj["question"].astext.ilike(f"%{f['q']}%"))
+            conds.append(col(EvalTaskRow.question, "question").ilike(f"%{f['q']}%"))
         if f.get("intent"):
-            conds.append(rj["j_intent"].astext == f["intent"])
+            conds.append(col(EvalTaskRow.j_intent, "j_intent") == f["intent"])
         if f.get("dispatched_bu"):
-            conds.append(rj["dispatched_bu"].astext.ilike(f"%{f['dispatched_bu']}%"))
+            conds.append(col(EvalTaskRow.dispatched_bu, "dispatched_bu").ilike(f"%{f['dispatched_bu']}%"))
         if f.get("j_dispatch"):
-            conds.append(rj["j_dispatch"].astext == f["j_dispatch"])
+            conds.append(col(EvalTaskRow.j_dispatch, "j_dispatch") == f["j_dispatch"])
         if f.get("j_resolved"):
-            conds.append(rj["j_resolved"].astext == f["j_resolved"])
+            conds.append(col(EvalTaskRow.j_resolved, "j_resolved") == f["j_resolved"])
         return conds
 
     def load_rows_filtered(self, task_id: str, page: int, page_size: int, filters: dict) -> list[dict]:
@@ -387,14 +418,14 @@ class EvalRepository:
     def _bu_row_query(self, bu: str, intent: str = "", start: str = "", end: str = ""):
         """构造 t_eval_task_row JOIN t_eval_task 按 bu 过滤的基础查询条件（供聚合复用）。
 
-        intent 非空按业务分类（row_json->>'j_intent'）过滤；start/end 非空按提问日期
-        （row_json->>'ask_time' 前 10 位）过滤。返回 (join_from, where_conds)。
+        查平铺列（question/j_intent/ask_time）走原生索引；旧行这三列已由迁移脚本回填。
+        intent 非空按业务分类过滤；start/end 非空按提问日期（ask_time 前 10 位）过滤。
         """
         from sqlalchemy import func
-        q_ask_date = func.substr(EvalTaskRow.row_json["ask_time"].astext, 1, 10)
+        q_ask_date = func.substr(EvalTaskRow.ask_time, 1, 10)
         conds = [EvalTask.bu == bu]
         if intent:
-            conds.append(EvalTaskRow.row_json["j_intent"].astext == intent)
+            conds.append(EvalTaskRow.j_intent == intent)
         if start:
             conds.append(q_ask_date >= start)
         if end:
@@ -406,8 +437,8 @@ class EvalRepository:
         """按问题原文聚合高频问榜单（不做相似归一）。返回 (榜单, 该 BU 匹配总条数)。"""
         from sqlalchemy import func
         conds, _ = self._bu_row_query(bu, intent, start, end)
-        q_text = EvalTaskRow.row_json["question"].astext
-        q_intent = EvalTaskRow.row_json["j_intent"].astext
+        q_text = EvalTaskRow.question
+        q_intent = EvalTaskRow.j_intent
         base = select(q_text.label("question"), q_intent.label("intent"),
                       func.count().label("cnt")).select_from(EvalTaskRow).join(
             EvalTask, EvalTaskRow.task_id == EvalTask.task_id).where(*conds)
@@ -427,8 +458,8 @@ class EvalRepository:
         """按提问日期（ask_time 前 10 位）聚合每日问题量。忽略 ask_time 为空的行。"""
         from sqlalchemy import func
         conds, q_ask_date = self._bu_row_query(bu, intent, start, end)
-        conds.append(EvalTaskRow.row_json["ask_time"].astext != "")
-        conds.append(EvalTaskRow.row_json["ask_time"].astext.isnot(None))
+        conds.append(EvalTaskRow.ask_time != "")
+        conds.append(EvalTaskRow.ask_time.isnot(None))
         rows = self.session.execute(
             select(q_ask_date.label("d"), func.count().label("cnt"))
             .select_from(EvalTaskRow).join(
@@ -444,8 +475,8 @@ class EvalRepository:
         limit_rows 控内存：大 BU 只取前 N 行做关键词提炼，够代表性且不 OOM。
         """
         conds, _ = self._bu_row_query(bu, intent)
-        q_text = EvalTaskRow.row_json["question"].astext
-        q_intent = EvalTaskRow.row_json["j_intent"].astext
+        q_text = EvalTaskRow.question
+        q_intent = EvalTaskRow.j_intent
         rows = self.session.execute(
             select(q_text, q_intent).select_from(EvalTaskRow).join(
                 EvalTask, EvalTaskRow.task_id == EvalTask.task_id).where(*conds)

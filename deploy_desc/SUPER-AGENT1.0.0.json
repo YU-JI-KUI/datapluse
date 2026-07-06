@@ -19,7 +19,8 @@
       "db/arkpg/20260701_arkpgdata_add_eval_rule.sql",
       "db/arkpg/20260704_arkpgdata_add_eval_started_at.sql",
       "db/arkpg/20260705_arkpgdata_rbac_roles.sql",
-      "db/arkpg/20260705_arkpgdata_eval_row_expr_index.sql"
+      "db/arkpg/20260705_arkpgdata_eval_row_expr_index.sql",
+      "db/arkpg/20260706_arkpgdata_eval_row_flatten.sql"
     ]
   }
 }
