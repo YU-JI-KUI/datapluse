@@ -846,3 +846,31 @@ def delete_rule(rule_id: int) -> bool:
     if deleted:
         _bump_rules()
     return deleted
+
+
+# ── 问题洞察 ───────────────────────────────────────────────────────────────────
+
+def question_insights(bu: str, intent: str = "", start: str = "", end: str = "") -> dict:
+    """高频问榜单（含占比）+ 每日提问频率。BU 跟随顶栏，intent/时间为页面内筛选。"""
+    top, total = eval_db.agg_top_questions(bu, intent=intent, start=start, end=end, limit=100)
+    for it in top:
+        it["ratio"] = round(it["count"] / total, 4) if total else 0.0
+    daily = eval_db.agg_daily_counts(bu, intent=intent, start=start, end=end)
+    return {
+        "bu": bu,
+        "total": total,
+        "distinct": len(top),
+        "top_questions": top,
+        "daily": daily,
+    }
+
+
+def keyword_insights(bu: str, intent: str = "", top_n: int = 15) -> dict:
+    """按业务分类提炼高区分关键词（jieba + TF-IDF，纯展示）。"""
+    from datapulse.modules.eval import keyword_extract
+
+    rows, truncated = eval_db.agg_keyword_source(bu, intent=intent, limit_rows=20000)
+    if truncated:
+        _log.info("keyword_insights sampled (truncated)", bu=bu, intent=intent, limit=20000)
+    groups = keyword_extract.extract_by_intent(rows, top_n=top_n)
+    return {"bu": bu, "sampled": truncated, "sample_size": len(rows), "groups": groups}

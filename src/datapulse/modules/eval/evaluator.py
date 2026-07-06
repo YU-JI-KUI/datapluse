@@ -108,6 +108,7 @@ def assemble_row(sample: dict, judge: dict, allowed_intents: set | None = None,
         "session": sample["session"],
         "turn": sample["turn"],
         "question": sample["question"],
+        "ask_time": sample.get("ask_time", ""),  # 客户提问时间原文，供问题洞察按日聚合
         "context": sample["context"],  # [{turn, user, ai}, ...] 含前文 AI 回答
         "next_user_turn": sample["next_user_turn"],
         "dispatched_intent": sample["dispatched_intent"],

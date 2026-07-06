@@ -20,6 +20,7 @@ _CTX_AI_MAX_LEN = 500
 # 逻辑键 -> 候选列名(按包含匹配,命中第一个)
 COLS: dict[str, list[str]] = {
     "question": ["客户问题"],
+    "question_time": ["时间"],   # 客户提问时间（可选）→ row_json.ask_time，供问题洞察按日聚合
     "turn": ["客户咨询轮次"],
     "session": ["应用会话ID"],
     "answer": ["答案"],
@@ -42,8 +43,10 @@ def resolve_columns(df: pd.DataFrame) -> dict[str, str]:
     """把逻辑键映射到 DataFrame 实际列名。缺关键列直接报错。
 
     匹配策略:先精确匹配(避免「答案」误命中「答案一级围栏标签」「标准问答案」
-    这类含子串的列),精确命中不到再退化到包含匹配。
+    这类含子串的列),精确命中不到再退化到包含匹配。question_time 候选是「时间」
+    这类短词,只允许精确匹配,否则会误命中「创建时间」「响应时间」等列。
     """
+    exact_only = {"question_time"}
     cols = [str(c) for c in df.columns]
     m: dict[str, str] = {}
     for key, cands in COLS.items():
@@ -52,7 +55,7 @@ def resolve_columns(df: pd.DataFrame) -> dict[str, str]:
             if cand in cols:
                 hit = cand
                 break
-        if hit is None:  # 第二优先级:包含匹配
+        if hit is None and key not in exact_only:  # 第二优先级:包含匹配
             for c in cols:
                 if any(cand in c for cand in cands):
                     hit = c
@@ -146,6 +149,7 @@ def _sample_from_group(group: list[dict], pos: int, m: dict[str, str], bu) -> di
     return {
         "row_index": row["row_index"],
         "question": row["question"],
+        "ask_time": row.get("ask_time", ""),
         "session": row["session"],
         "turn": turn,
         "context": context,                  # 已裁到最近 N 轮、AI 答已净化截断
@@ -175,6 +179,7 @@ def _extract_row(df: pd.DataFrame, i: int, m: dict[str, str]) -> dict:
         "session": row[m["session"]],
         "_turn_n": int(row["_turn_n"]),
         "question": row[m["question"]],
+        "ask_time": str(col("question_time") or "").strip(),
         "answer": row[m["answer"]],
         "sys_intent": col("sys_intent"),
         "dispatch_reason": col("dispatch_reason"),

@@ -399,3 +399,22 @@ def rule_upsert(bu: str, question: str, expected_answer: str, judge_json: dict,
 def rule_delete(rule_id: int) -> bool:
     with eval_session() as s:
         return _rule_repo(s).delete(rule_id)
+
+
+# ── 问题洞察聚合 ───────────────────────────────────────────────────────────────
+
+def agg_top_questions(bu: str, intent: str = "", start: str = "",
+                      end: str = "", limit: int = 100) -> tuple[list[dict], int]:
+    with eval_session() as s:
+        return _repo(s).agg_top_questions(bu, intent=intent, start=start, end=end, limit=limit)
+
+
+def agg_daily_counts(bu: str, intent: str = "", start: str = "", end: str = "") -> list[dict]:
+    with eval_session() as s:
+        return _repo(s).agg_daily_counts(bu, intent=intent, start=start, end=end)
+
+
+def agg_keyword_source(bu: str, intent: str = "",
+                       limit_rows: int = 20000) -> tuple[list[tuple[str, str]], bool]:
+    with eval_session() as s:
+        return _repo(s).agg_keyword_source(bu, intent=intent, limit_rows=limit_rows)

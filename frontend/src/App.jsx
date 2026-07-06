@@ -22,6 +22,7 @@ import EvalReport      from '@/pages/EvalReport'
 import EvalCategories  from '@/pages/EvalCategories'
 import EvalActivity    from '@/pages/EvalActivity'
 import EvalRules       from '@/pages/EvalRules'
+import EvalInsights    from '@/pages/EvalInsights'
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem('token')
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="eval/categories" element={<EvalCategories />} />
           <Route path="eval/activity"   element={<EvalActivity />} />
           <Route path="eval/rules"      element={<EvalRules />} />
+          <Route path="eval/insights"   element={<EvalInsights />} />
           <Route path="categories"    element={<Categories />} />
           <Route path="config"         element={<ConfigCenter />} />
           <Route path="export"         element={<Export />} />

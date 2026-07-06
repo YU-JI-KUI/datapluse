@@ -357,6 +357,24 @@ class CategoryBody(BaseModel):
     definition: str = ""
 
 
+@router.get("/insights/questions")
+async def insights_questions(
+    user: EvalRead,
+    bu: str = "securities",
+    intent: str = "",
+    start: str = "",
+    end: str = "",
+):
+    """问题洞察：高频问榜单（按原文聚合）+ 每日提问频率。intent/start/end 为可选筛选。"""
+    return success(eval_engine.question_insights(bu, intent=intent, start=start, end=end))
+
+
+@router.get("/insights/keywords")
+async def insights_keywords(user: EvalRead, bu: str = "securities", intent: str = ""):
+    """问题洞察：按业务分类提炼的高区分关键词（jieba + TF-IDF，纯展示）。"""
+    return success(eval_engine.keyword_insights(bu, intent=intent))
+
+
 @router.get("/categories")
 async def list_categories(user: EvalRead, bu: str = "securities"):
     """列出某 BU 的全部业务分类。"""

@@ -382,6 +382,79 @@ class EvalRepository:
             return None
         return dict(t["result_json"])
 
+    # ── 问题洞察聚合（跨任务，按 BU；全部走 PG 层 GROUP BY，避免 N+1）──────────────
+
+    def _bu_row_query(self, bu: str, intent: str = "", start: str = "", end: str = ""):
+        """构造 t_eval_task_row JOIN t_eval_task 按 bu 过滤的基础查询条件（供聚合复用）。
+
+        intent 非空按业务分类（row_json->>'j_intent'）过滤；start/end 非空按提问日期
+        （row_json->>'ask_time' 前 10 位）过滤。返回 (join_from, where_conds)。
+        """
+        from sqlalchemy import func
+        q_ask_date = func.substr(EvalTaskRow.row_json["ask_time"].astext, 1, 10)
+        conds = [EvalTask.bu == bu]
+        if intent:
+            conds.append(EvalTaskRow.row_json["j_intent"].astext == intent)
+        if start:
+            conds.append(q_ask_date >= start)
+        if end:
+            conds.append(q_ask_date <= end)
+        return conds, q_ask_date
+
+    def agg_top_questions(self, bu: str, intent: str = "", start: str = "",
+                          end: str = "", limit: int = 100) -> tuple[list[dict], int]:
+        """按问题原文聚合高频问榜单（不做相似归一）。返回 (榜单, 该 BU 匹配总条数)。"""
+        from sqlalchemy import func
+        conds, _ = self._bu_row_query(bu, intent, start, end)
+        q_text = EvalTaskRow.row_json["question"].astext
+        q_intent = EvalTaskRow.row_json["j_intent"].astext
+        base = select(q_text.label("question"), q_intent.label("intent"),
+                      func.count().label("cnt")).select_from(EvalTaskRow).join(
+            EvalTask, EvalTaskRow.task_id == EvalTask.task_id).where(*conds)
+        total = int(self.session.execute(
+            select(func.count()).select_from(EvalTaskRow).join(
+                EvalTask, EvalTaskRow.task_id == EvalTask.task_id).where(*conds)
+        ).scalar() or 0)
+        rows = self.session.execute(
+            base.group_by(q_text, q_intent).order_by(func.count().desc()).limit(limit)
+        ).all()
+        items = [{"question": r.question or "", "intent": r.intent or "",
+                  "count": int(r.cnt)} for r in rows]
+        return items, total
+
+    def agg_daily_counts(self, bu: str, intent: str = "", start: str = "",
+                         end: str = "") -> list[dict]:
+        """按提问日期（ask_time 前 10 位）聚合每日问题量。忽略 ask_time 为空的行。"""
+        from sqlalchemy import func
+        conds, q_ask_date = self._bu_row_query(bu, intent, start, end)
+        conds.append(EvalTaskRow.row_json["ask_time"].astext != "")
+        conds.append(EvalTaskRow.row_json["ask_time"].astext.isnot(None))
+        rows = self.session.execute(
+            select(q_ask_date.label("d"), func.count().label("cnt"))
+            .select_from(EvalTaskRow).join(
+                EvalTask, EvalTaskRow.task_id == EvalTask.task_id).where(*conds)
+            .group_by(q_ask_date).order_by(q_ask_date)
+        ).all()
+        return [{"date": r.d, "count": int(r.cnt)} for r in rows if r.d]
+
+    def agg_keyword_source(self, bu: str, intent: str = "",
+                           limit_rows: int = 20000) -> tuple[list[tuple[str, str]], bool]:
+        """取问题文本 + j_intent 两列供 engine 做分词提词。返回 (行列表, 是否被截断)。
+
+        limit_rows 控内存：大 BU 只取前 N 行做关键词提炼，够代表性且不 OOM。
+        """
+        conds, _ = self._bu_row_query(bu, intent)
+        q_text = EvalTaskRow.row_json["question"].astext
+        q_intent = EvalTaskRow.row_json["j_intent"].astext
+        rows = self.session.execute(
+            select(q_text, q_intent).select_from(EvalTaskRow).join(
+                EvalTask, EvalTaskRow.task_id == EvalTask.task_id).where(*conds)
+            .limit(limit_rows + 1)
+        ).all()
+        truncated = len(rows) > limit_rows
+        data = [(r[0] or "", r[1] or "") for r in rows[:limit_rows]]
+        return data, truncated
+
 
 def _prompt_to_dict(p: EvalPrompt) -> dict[str, Any]:
     return {

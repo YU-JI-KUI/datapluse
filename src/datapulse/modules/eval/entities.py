@@ -6,7 +6,7 @@ eval 三张表无外键到标注表，自成体系。挂独立 EvalBase（而非
 """
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Column, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Column, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.orm import declarative_base
 
@@ -68,6 +68,9 @@ class EvalTaskRow(EvalBase):
 
     __table_args__ = (
         UniqueConstraint("task_id", "row_index", name="uk_t_eval_task_row_task_idx"),
+        # 问题洞察按 question / j_intent GROUP BY，表达式索引加速聚合
+        Index("idx_t_eval_row_question", text("(row_json->>'question')")),
+        Index("idx_t_eval_row_j_intent", text("(row_json->>'j_intent')")),
     )
 
 

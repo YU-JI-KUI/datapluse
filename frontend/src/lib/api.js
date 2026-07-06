@@ -514,6 +514,12 @@ export const evalApi = {
     api.put(`/eval/prompts/${bu}/${encodeURIComponent(name)}`, { content }),
   resetPrompt: (bu, name) =>
     api.post(`/eval/prompts/${bu}/${encodeURIComponent(name)}/reset`),
+
+  // 问题洞察：高频问 + 每日频率（intent/start/end 可选筛选）；关键词提炼（纯展示）
+  insightsQuestions: (bu = getCurrentBu(), { intent = '', start = '', end = '' } = {}) =>
+    api.get('/eval/insights/questions', { params: { bu, intent, start, end } }),
+  insightsKeywords: (bu = getCurrentBu(), intent = '') =>
+    api.get('/eval/insights/keywords', { params: { bu, intent } }),
 }
 
 export default api

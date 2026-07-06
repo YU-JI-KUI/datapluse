@@ -7,7 +7,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Check,
   LayoutDashboard, Search, Database, Cpu, Tag, AlertTriangle,
   Tags, Download, Settings, Gauge, History, Filter, Zap, FileText,
-  FolderOpen, Users, Terminal, ShieldCheck,
+  FolderOpen, Users, Terminal, ShieldCheck, Lightbulb,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { datasetApi, authApi, evalApi, getCurrentDatasetId, setCurrentDatasetId, getCurrentBu, setCurrentBu } from '@/lib/api'
@@ -43,6 +43,7 @@ const subsystems = [
     items: [
       { to: '/eval',            label: '评测',       icon: Gauge, end: true },
       { to: '/eval/history',    label: '历史评测',   icon: History },
+      { to: '/eval/insights',   label: '问题洞察',   icon: Lightbulb },
       { to: '/eval/categories', label: '业务分类',   icon: Tags },
       { to: '/eval/activity',   label: '活动标问',   icon: Filter },
       { to: '/eval/rules',      label: '规则短路',   icon: Zap },
