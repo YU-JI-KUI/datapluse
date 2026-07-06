@@ -200,7 +200,7 @@ def build_all_samples(df: pd.DataFrame, m: dict[str, str], bu) -> tuple[list[dic
     bu(BUConfig)用于判断分发BU是否代表本BU、以及该行是否为活动标问。
     活动标问(前端写死按钮触发的写死回复)不生成评测样本——不喂模型、不计指标;
     但其行仍留在 group 里,作为后续轮的上下文保留(它确实发生过,是对话的一部分)。
-    返回 (samples 按 row_index 升序, 活动标问细分计数 {问题文本: 条数})。
+    返回 (samples 按 row_index 升序, 活动标问细分计数 {活动名: 条数})。
     续跑依赖 row_index 对齐。细分计数供来源分布柱状图,总数 = 各值之和。
     """
     from collections import Counter
@@ -215,7 +215,9 @@ def build_all_samples(df: pd.DataFrame, m: dict[str, str], bu) -> tuple[list[dic
         for pos in range(len(group)):
             q = group[pos]["question"]
             if bu.is_activity(q):
-                activity_breakdown[(q or "").strip()] += 1  # 按活动标问文本细分;跳过评测但留组内当前文
+                # 按活动名聚合（同活动多个问题累加成一条）；活动名空时兜底用 question
+                act = bu.activity_of(q) or (q or "").strip()
+                activity_breakdown[act] += 1  # 跳过评测但留组内当前文
                 continue
             samples.append(_sample_from_group(group, pos, m, bu))
     samples.sort(key=lambda s: s["row_index"])

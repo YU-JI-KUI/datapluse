@@ -153,10 +153,11 @@ class EvalActivityQuestion(EvalBase):
 
     __tablename__ = "t_eval_activity_question"
 
-    id          = Column(BigInteger, primary_key=True, autoincrement=True)
-    bu          = Column(String(64), nullable=False)     # 所属 BU code
-    question    = Column(Text, nullable=False)           # 活动标问全文（精确匹配）
-    note        = Column(String(255), nullable=False, default="")  # 备注（可选，说明用途）
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    bu            = Column(String(64), nullable=False)     # 所属 BU code
+    question      = Column(Text, nullable=False)           # 活动标问全文（精确匹配）
+    activity_name = Column(String(255))                    # 活动名称：多个 question 同名即同活动，报告按此聚合
+    note          = Column(String(255), nullable=False, default="")  # 备注（可选，说明用途）
     created_at  = Column(_TS, nullable=False)
     created_by  = Column(String(100), nullable=False, default="")
     updated_at  = Column(_TS, nullable=False)

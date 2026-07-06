@@ -809,8 +809,10 @@ def list_activity_questions(bu: str) -> list[dict]:
     return eval_db.activity_list(bu)
 
 
-def create_activity_question(bu: str, question: str, note: str = "", operator: str = "system") -> dict:
-    rec = eval_db.activity_create(bu, question, note=note, created_by=operator)
+def create_activity_question(bu: str, question: str, note: str = "", activity_name: str = "",
+                             operator: str = "system") -> dict:
+    rec = eval_db.activity_create(bu, question, note=note, activity_name=activity_name,
+                                  created_by=operator)
     _bump_activity()
     return rec
 

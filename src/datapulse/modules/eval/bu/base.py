@@ -62,7 +62,7 @@ def load_categories(code: str) -> dict[str, str]:
 
 # 活动标问缓存：以库为准，增删改时 bump_activity_version 失效。评测时 get_bu 把当前
 # 集合快照进 BUConfig，故页面改了不重启即生效。
-_activity_cache: dict[str, frozenset] = {}
+_activity_cache: dict[str, dict[str, str]] = {}
 
 
 def bump_activity_version() -> None:
@@ -70,23 +70,26 @@ def bump_activity_version() -> None:
     _activity_cache.clear()
 
 
-def load_activity_questions(code: str) -> frozenset:
-    """读某 BU 的活动标问集合（与客户问题精确相等即命中）。DB 不可用时返回空集。
+def load_activity_questions(code: str) -> dict[str, str]:
+    """读某 BU 的活动标问映射 {question(strip 后) → 活动名}。DB 不可用时返回空 dict。
 
-    返回 frozenset[str]，问题已 strip。无文件兜底——活动标问只在库里维护（区别于
-    业务分类有出厂 JSON），库里没有就视为「该 BU 暂无活动标问」，不过滤任何样本。
+    命中判断仍是「客户问题精确相等于某标问」（判 dict 的 key，等值不变）；命中后可查
+    出该问题所属活动名，供报告按活动聚合。活动名为空时兜底用 question 本身。
+    无文件兜底——活动标问只在库里维护，库里没有就视为该 BU 暂无活动标问，不过滤样本。
     """
     if code in _activity_cache:
         return _activity_cache[code]
-    qs: set[str] = set()
+    mapping: dict[str, str] = {}
     try:
         from datapulse.modules.eval import eval_db
-        qs = {q.strip() for q in eval_db.activity_list_questions(code) if q and q.strip()}
+        for q, act in eval_db.activity_list_questions(code):
+            qs = (q or "").strip()
+            if qs:
+                mapping[qs] = (act or "").strip() or qs
     except Exception:
-        qs = set()
-    fs = frozenset(qs)
-    _activity_cache[code] = fs
-    return fs
+        mapping = {}
+    _activity_cache[code] = mapping
+    return mapping
 
 
 # 规则短路缓存：以库为准，增删改时 bump_rules_version 失效。评测时 get_bu 把当前规则
@@ -152,9 +155,9 @@ class BUConfig:
     # 测试路径),此时 prompt(name) 实时回退 load_bu_prompt。
     prompts: dict | None = None
 
-    # 活动标问集合（前端写死按钮触发的写死回复，评测时整条跳过）。get_bu 时注入当前
-    # 库中该 BU 的集合，作为快照随任务固定。空集 = 不过滤任何样本。
-    activity_questions: frozenset = frozenset()
+    # 活动标问映射 {question(strip) → 活动名}（前端写死按钮触发的写死回复，评测时整条
+    # 跳过）。get_bu 时注入当前库中该 BU 的快照随任务固定。空 = 不过滤任何样本。
+    activity_questions: dict = field(default_factory=dict)
 
     # 短路规则 {归一化question: {expected_answer, judge}}。命中（问题精确+答案一致）即用
     # 写死 judge 结果免 LLM。get_bu 时注入快照。空 = 不短路。
@@ -171,10 +174,14 @@ class BUConfig:
         return load_bu_prompt(self.code, name)
 
     def is_activity(self, question: str) -> bool:
-        """客户问题是否为活动标问（与集合精确相等，去首尾空格）。集合空则恒 False。"""
+        """客户问题是否为活动标问（与标问精确相等，去首尾空格）。空则恒 False。"""
         if not self.activity_questions:
             return False
         return (question or "").strip() in self.activity_questions
+
+    def activity_of(self, question: str) -> str:
+        """命中的活动标问所属的活动名（未命中返回空）。供报告按活动聚合。"""
+        return self.activity_questions.get((question or "").strip(), "")
 
     def match_rule(self, question: str, answer: str) -> dict | None:
         """短路规则匹配：问题精确相等 + 答案一致 → 返回写死的 judge dict（免 LLM），

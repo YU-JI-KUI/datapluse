@@ -412,6 +412,7 @@ async def delete_category(cat_id: int, user: EvalWrite):
 
 class ActivityBody(BaseModel):
     question: str
+    activity_name: str = ""
     note: str = ""
 
 
@@ -423,11 +424,16 @@ async def list_activity_questions(user: EvalRead, bu: str = "securities"):
 
 @router.post("/activity-questions")
 async def create_activity_question(user: EvalWrite, body: ActivityBody, bu: str = "securities"):
-    """新增一条活动标问（与客户问题精确相等即命中、整条跳过评测）。已存在则更新备注。"""
+    """新增一条活动标问（与客户问题精确相等即命中、整条跳过评测）。
+
+    activity_name 指定所属活动（多个 question 同名即同活动，报告按活动聚合）；
+    空则默认用 question 本身。已存在（同 bu+question）则更新活动名/备注。
+    """
     if not body.question.strip():
         raise ParamError("活动标问不能为空")
     return success(eval_engine.create_activity_question(
-        bu, body.question.strip(), body.note, operator=user.username))
+        bu, body.question.strip(), note=body.note, activity_name=body.activity_name,
+        operator=user.username))
 
 
 @router.delete("/activity-questions/{act_id}")

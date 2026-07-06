@@ -52,7 +52,11 @@ export default function EvalActivity() {
     if (!editing?.question?.trim()) { toast.error('活动标问不能为空'); return }
     setSaving(true)
     try {
-      await evalApi.createActivityQuestion({ question: editing.question.trim(), note: editing.note || '' })
+      await evalApi.createActivityQuestion({
+        question: editing.question.trim(),
+        activity_name: (editing.activity_name || '').trim(),
+        note: editing.note || '',
+      })
       toast.success('已新增')
       setEditing(null)
       load()
@@ -85,7 +89,7 @@ export default function EvalActivity() {
             <span className="font-medium">精确相等</span>即整条跳过，不计入分发准确率与解决率。改后下次评测即生效。
           </p>
         </div>
-        <Button size="sm" onClick={() => setEditing({ question: '', note: '' })}>
+        <Button size="sm" onClick={() => setEditing({ question: '', activity_name: '', note: '' })}>
           <Plus className="w-4 h-4 mr-1.5" />新增活动标问
         </Button>
       </div>
@@ -95,6 +99,7 @@ export default function EvalActivity() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-44">活动</TableHead>
                 <TableHead>活动标问（与客户问题精确相等即跳过）</TableHead>
                 <TableHead className="w-56">备注</TableHead>
                 <TableHead className="w-28">修改人</TableHead>
@@ -105,18 +110,23 @@ export default function EvalActivity() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
                     <Loader2 className="w-5 h-5 animate-spin inline mr-2" />加载中…
                   </TableCell>
                 </TableRow>
               ) : list.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
                     当前 BU 暂无活动标问，点右上角「新增活动标问」开始维护。
                   </TableCell>
                 </TableRow>
               ) : pageList.map(q => (
                 <TableRow key={q.id}>
+                  <TableCell>
+                    <span className="inline-block px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-600">
+                      {q.activity_name || q.question}
+                    </span>
+                  </TableCell>
                   <TableCell className="font-medium">{q.question}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{q.note}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{q.updated_by || '—'}</TableCell>
@@ -150,6 +160,17 @@ export default function EvalActivity() {
           </DialogHeader>
           {editing && (
             <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">活动名称</label>
+                <Input
+                  value={editing.activity_name}
+                  onChange={e => setEditing({ ...editing, activity_name: e.target.value })}
+                  placeholder="如：双十一消费券（多个标问填同一活动名即归为一个活动）"
+                />
+                <p className="text-xs text-muted-foreground">
+                  同一活动的多个标问填相同活动名，评测报告按活动聚合成一根柱。留空则默认用标问全文。
+                </p>
+              </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">活动标问全文</label>
                 <textarea

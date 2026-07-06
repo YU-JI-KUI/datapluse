@@ -622,7 +622,8 @@ class EvalCategoryRepository:
 
 def _activity_to_dict(a: EvalActivityQuestion) -> dict[str, Any]:
     return {
-        "id": a.id, "bu": a.bu, "question": a.question, "note": a.note,
+        "id": a.id, "bu": a.bu, "question": a.question,
+        "activity_name": a.activity_name or "", "note": a.note,
         "updated_at": _iso(a.updated_at), "updated_by": a.updated_by,
     }
 
@@ -640,21 +641,24 @@ class EvalActivityRepository:
         ).scalars().all()
         return [_activity_to_dict(a) for a in rows]
 
-    def list_questions(self, bu: str) -> list[str]:
-        """只取 question 文本列表，供评测加载活动标问集合（避免拉全字段）。"""
+    def list_questions(self, bu: str) -> list[tuple[str, str]]:
+        """取 (question, activity_name) 列表，供评测加载活动标问映射（避免拉全字段）。"""
         rows = self.session.execute(
-            select(EvalActivityQuestion.question).where(EvalActivityQuestion.bu == bu)
-        ).scalars().all()
-        return list(rows)
+            select(EvalActivityQuestion.question, EvalActivityQuestion.activity_name)
+            .where(EvalActivityQuestion.bu == bu)
+        ).all()
+        return [(q, a) for q, a in rows]
 
-    def create(self, bu: str, question: str, note: str = "", created_by: str = "system") -> dict:
+    def create(self, bu: str, question: str, note: str = "", activity_name: str = "",
+               created_by: str = "system") -> dict:
         ts = _now()
+        act = (activity_name or "").strip() or question   # 活动名空时兜底用 question
         stmt = pg_insert(EvalActivityQuestion).values(
-            bu=bu, question=question, note=note,
+            bu=bu, question=question, activity_name=act, note=note,
             created_at=ts, created_by=created_by, updated_at=ts, updated_by=created_by,
         ).on_conflict_do_update(
             index_elements=["bu", "question"],
-            set_={"note": note, "updated_at": ts, "updated_by": created_by},
+            set_={"activity_name": act, "note": note, "updated_at": ts, "updated_by": created_by},
         )
         self.session.execute(stmt)
         a = self.session.execute(

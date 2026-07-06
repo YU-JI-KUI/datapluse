@@ -751,21 +751,23 @@ DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_category'; END $$;
 -- ---------------------------------------------------------------------------
 DO $$ BEGIN RAISE NOTICE '[DDL] 23/23 t_eval_activity_question ...'; END $$;
 CREATE TABLE IF NOT EXISTS t_eval_activity_question (
-    id          BIGSERIAL    NOT NULL,
-    bu          VARCHAR(64)  NOT NULL,
-    question    TEXT         NOT NULL,
-    note        VARCHAR(255) NOT NULL DEFAULT '',
+    id            BIGSERIAL    NOT NULL,
+    bu            VARCHAR(64)  NOT NULL,
+    question      TEXT         NOT NULL,
+    activity_name VARCHAR(255),
+    note          VARCHAR(255) NOT NULL DEFAULT '',
     created_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     created_by  VARCHAR(100) NOT NULL DEFAULT '',
     updated_at  TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_by  VARCHAR(100) NOT NULL DEFAULT '',
     CONSTRAINT pk_t_eval_activity_question PRIMARY KEY (id)
 );
-COMMENT ON TABLE  t_eval_activity_question            IS 'AI评测活动标问表（写死按钮触发的写死回复，评测时整条跳过，不计入指标）';
-COMMENT ON COLUMN t_eval_activity_question.id         IS '主键ID';
-COMMENT ON COLUMN t_eval_activity_question.bu         IS '所属业务单元：securities=证券 / life=寿险';
-COMMENT ON COLUMN t_eval_activity_question.question   IS '活动标问全文（与客户问题精确相等即命中，整条跳过评测）';
-COMMENT ON COLUMN t_eval_activity_question.note       IS '备注（说明该活动标问的用途，可选）';
+COMMENT ON TABLE  t_eval_activity_question               IS 'AI评测活动标问表（写死按钮触发的写死回复，评测时整条跳过，不计入指标）';
+COMMENT ON COLUMN t_eval_activity_question.id            IS '主键ID';
+COMMENT ON COLUMN t_eval_activity_question.bu            IS '所属业务单元：securities=证券 / life=寿险';
+COMMENT ON COLUMN t_eval_activity_question.question      IS '活动标问全文（与客户问题精确相等即命中，整条跳过评测）';
+COMMENT ON COLUMN t_eval_activity_question.activity_name IS '活动名称：多个 question 同名即同活动，评测报告按此聚合';
+COMMENT ON COLUMN t_eval_activity_question.note          IS '备注（说明该活动标问的用途，可选）';
 COMMENT ON COLUMN t_eval_activity_question.created_at IS '创建时间';
 COMMENT ON COLUMN t_eval_activity_question.created_by IS '创建人';
 COMMENT ON COLUMN t_eval_activity_question.updated_at IS '更新时间';

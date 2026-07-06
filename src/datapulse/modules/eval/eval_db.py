@@ -325,14 +325,16 @@ def activity_list(bu: str) -> list[dict]:
         return _act_repo(s).list_by_bu(bu)
 
 
-def activity_list_questions(bu: str) -> list[str]:
+def activity_list_questions(bu: str) -> list[tuple[str, str]]:
     with eval_session() as s:
         return _act_repo(s).list_questions(bu)
 
 
-def activity_create(bu: str, question: str, note: str = "", created_by: str = "system") -> dict:
+def activity_create(bu: str, question: str, note: str = "", activity_name: str = "",
+                    created_by: str = "system") -> dict:
     with eval_session() as s:
-        return _act_repo(s).create(bu, question, note=note, created_by=created_by)
+        return _act_repo(s).create(bu, question, note=note, activity_name=activity_name,
+                                   created_by=created_by)
 
 
 def activity_delete(act_id: int) -> bool:
