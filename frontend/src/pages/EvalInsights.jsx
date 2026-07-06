@@ -5,7 +5,7 @@
  */
 import { useEffect, useState, useCallback } from 'react'
 import { toast } from 'sonner'
-import { Loader2, TrendingUp, Lightbulb, BarChart3 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
@@ -19,9 +19,9 @@ import { cn } from '@/lib/utils'
 const RESP = (r) => r?.data?.data ?? {}
 
 const TABS = [
-  { key: 'top',      label: '高频问',    icon: BarChart3 },
-  { key: 'daily',    label: '每日频率',  icon: TrendingUp },
-  { key: 'keywords', label: '关键词提炼', icon: Lightbulb },
+  { key: 'top',      label: '高频问' },
+  { key: 'daily',    label: '每日频率' },
+  { key: 'keywords', label: '关键词提炼' },
 ]
 
 const RANGES = [
@@ -87,15 +87,16 @@ export default function EvalInsights() {
 
   return (
     <div className="p-6 max-w-5xl">
-      <div className="flex items-center gap-2 mb-1">
-        <BarChart3 className="w-5 h-5 text-blue-500" />
+      <div className="flex items-baseline gap-2 mb-1">
         <h1 className="text-xl font-semibold">问题洞察</h1>
-        <span className="text-xs text-muted-foreground">
-          当前 BU：{bu}{qData ? ` · 共 ${qData.total?.toLocaleString?.() ?? qData.total} 条客户问题` : ''}
-        </span>
+        {qData && (
+          <span className="text-xs text-muted-foreground">
+            共 {qData.total?.toLocaleString?.() ?? qData.total} 条评测明细
+          </span>
+        )}
       </div>
       <p className="text-sm text-muted-foreground mb-4">
-        基于评测明细跨任务聚合。业务单元请在左上角切换。
+        基于评测明细跨任务聚合，按当前业务单元统计。
       </p>
 
       {/* 页面内筛选：业务分类 + 时间 */}
@@ -120,19 +121,18 @@ export default function EvalInsights() {
       {/* tab 切换 */}
       <div className="flex gap-1 border-b mb-4">
         {TABS.map(t => {
-          const Icon = t.icon
           const on = tab === t.key
           return (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
               className={cn(
-                'flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 -mb-px transition-colors',
+                'px-4 py-2 text-sm border-b-2 -mb-px transition-colors',
                 on ? 'border-blue-500 text-blue-600 font-medium'
                    : 'border-transparent text-muted-foreground hover:text-foreground'
               )}
             >
-              <Icon className="w-4 h-4" />{t.label}
+              {t.label}
             </button>
           )
         })}
