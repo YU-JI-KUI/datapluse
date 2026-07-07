@@ -9,9 +9,8 @@ import logging
 
 from datapulse.modules.eval._settings import settings
 from datapulse.modules.eval.advisor import (
-    build_advice_prompt,
-    parse_advice,
-    rule_based_advice,
+    build_card_prompts,
+    rule_based_cards,
 )
 from datapulse.modules.eval.bu.base import BUConfig
 from datapulse.modules.eval.judge import build_messages, parse_judge_output
@@ -160,25 +159,55 @@ async def _guard(coro, tripped: asyncio.Event):
         raise
 
 
-async def generate_advice(insights: dict, bu: BUConfig, bu_dispatch: dict | None = None) -> dict:
-    """生成优化建议。走真实模型则让模型读聚合指标给建议,否则用规则兜底。
+async def _call_advice(messages: list) -> str:
+    """调一次模型生成一张建议卡（纯文本 markdown，不强制 JSON、输出上限更小）。"""
+    resp = await call_bigmodel_api(
+        query=messages,
+        scene_id=settings.llm_scene_id,
+        app_key=settings.llm_app_key,
+        app_secret=settings.llm_app_secret,
+        timeout=settings.llm_timeout,
+        max_retries=settings.llm_max_retries,
+        max_tokens=settings.advice_max_tokens,
+    )
+    if isinstance(resp, dict) and resp.get("rate_limited"):
+        raise RateLimitedError(resp.get("error", "rate limited"))
+    return extract_content(resp)
 
-    返回 {"source": "model"|"rule", "items": [...]}。模型失败自动降级到规则。
+
+async def generate_advice(facts: dict, insights: dict, bu: BUConfig,
+                          bu_dispatch: dict | None = None) -> dict:
+    """生成优化建议（多专项卡片）。每张卡各调一次模型出一段纯文本 markdown。
+
+    卡片体系：固定 3（分发/解决率/新分类）+ 动态 2N（每分类·分发/解决率）。
+    并发受 judge_concurrency 节流；单卡失败跳过、warning；全败或非 pingan 后端整体
+    降级到规则版卡片。返回 {"source": "model"|"rule", "cards": [...]}。
     """
-    if active_backend() == "pingan":
-        try:
-            messages = build_advice_prompt(insights, bu, bu_dispatch)
-            resp = await call_bigmodel_api(
-                query=messages,
-                scene_id=settings.llm_scene_id,
-                app_key=settings.llm_app_key,
-                app_secret=settings.llm_app_secret,
-                timeout=settings.llm_timeout,
-                max_retries=settings.llm_max_retries,
-            )
-            items = parse_advice(extract_content(resp))
-            if items:
-                return {"source": "model", "items": items}
-        except Exception as e:
-            logger.error("模型生成建议失败,降级到规则: %s", e)
-    return {"source": "rule", "items": rule_based_advice(insights, bu_dispatch)}
+    specs = build_card_prompts(facts, insights, bu, bu_dispatch)
+
+    # 非真实模型 / 无料 → 直接规则版（mock 也走这，保证离线端到端可验）
+    if active_backend() != "pingan" or not specs:
+        return {"source": "rule", "cards": rule_based_cards(facts, insights, bu, bu_dispatch)}
+
+    sem = asyncio.Semaphore(max(1, settings.judge_concurrency))
+
+    async def one(spec: dict) -> dict | None:
+        async with sem:
+            try:
+                text = await _call_advice(spec["messages"])
+            except Exception as e:  # 单卡失败跳过，不拖累其余卡
+                logger.warning("建议卡生成失败,跳过 id=%s: %s", spec["id"], e)
+                return None
+            if not (text or "").strip():
+                return None
+            return {"id": spec["id"], "title": spec["title"],
+                    "dimension": spec["dimension"], "category": spec["category"],
+                    "text": text.strip()}
+
+    results = await asyncio.gather(*(one(s) for s in specs))
+    cards = [c for c in results if c]
+    if cards:
+        return {"source": "model", "cards": cards}
+    # 全败：整体降级规则版
+    logger.error("全部建议卡生成失败,降级到规则版")
+    return {"source": "rule", "cards": rule_based_cards(facts, insights, bu, bu_dispatch)}

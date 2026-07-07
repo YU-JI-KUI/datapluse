@@ -105,7 +105,10 @@ def load_bu_prompt(bu_code: str, name: str) -> str:
 _SNAPSHOT_BU_SLOTS = (
     "judge_system.md", "task_dispatch.md", "task_business_type.md",
     "task_resolved.md", "task_review.md", "business_knowledge.md",
-    "advice_system.md", "advice_user.md",
+    # 多专项建议：1 个共享 system + 5 个 user（④⑤各一份模板，运行时填分类名）
+    "advice_card_system.md",
+    "advice_dispatch_global.md", "advice_resolved_global.md", "advice_new_business.md",
+    "advice_intent_dispatch.md", "advice_intent_resolved.md",
 )
 _SNAPSHOT_ROOT_SLOTS = ("judge_user.md",)
 

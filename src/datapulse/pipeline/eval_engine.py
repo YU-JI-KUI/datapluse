@@ -707,8 +707,12 @@ _PROMPT_DESC = {
     "task_resolved.md":     "任务·解决判定：答案是否解决客户问题",
     "task_review.md":       "任务·人工复核：是否需要人工二次确认",
     "business_knowledge.md": "业务补充规则：业务方自己写的判定规则/领域知识，追加进 Judge（安全地盘，不碰技术模板）",
-    "advice_system.md":     "优化建议·系统人设：给建议的专家身份",
-    "advice_user.md":       "优化建议·用户模板：喂入聚合指标的格式",
+    "advice_card_system.md":       "优化建议·系统人设：多专项建议共用的顾问身份",
+    "advice_dispatch_global.md":   "优化建议·分发诊断（全局）：漏收/误收归因",
+    "advice_resolved_global.md":   "优化建议·解决率诊断（全局）：四归因分布",
+    "advice_new_business.md":      "优化建议·新业务分类发现：非本 BU 问题聚类",
+    "advice_intent_dispatch.md":   "优化建议·分类分发提升（逐分类，占位 {intent_name}）",
+    "advice_intent_resolved.md":   "优化建议·分类解决率提升（逐分类，占位 {intent_name}）",
 }
 
 
@@ -720,7 +724,9 @@ def _prompt_desc(name: str) -> str:
 _BU_SLOTS = (
     "judge_system.md", "task_dispatch.md", "task_business_type.md",
     "task_resolved.md", "task_review.md", "business_knowledge.md",
-    "advice_system.md", "advice_user.md",
+    "advice_card_system.md",
+    "advice_dispatch_global.md", "advice_resolved_global.md", "advice_new_business.md",
+    "advice_intent_dispatch.md", "advice_intent_resolved.md",
 )
 # 根共享模板槽位（跨 BU 共用，作用域 _root）
 _ROOT_SLOTS = ("judge_user.md",)

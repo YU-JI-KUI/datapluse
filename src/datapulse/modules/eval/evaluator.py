@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from datapulse.modules.eval import _store as store
+from datapulse.modules.eval.advice_facts import build_facts
 from datapulse.modules.eval.bu.base import BUConfig
 from datapulse.modules.eval.llm.judge_runner import (
     EvalCancelled,
@@ -426,7 +427,10 @@ async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None
     bu_dispatch = agg.bu_dispatch()
     if on_progress:
         on_progress("advising", 0, 1)
-    advice = await generate_advice(insights, bu, bu_dispatch)  # 优化建议(模型或规则)
+    # 多专项建议：从已落盘 rows 重聚合归因料（persist=True 才有 task_id/落盘），
+    # 无落盘则传空 → generate_advice 走规则兜底。
+    facts = build_facts(task_id if persist else None, bu, bu_dispatch)
+    advice = await generate_advice(facts, insights, bu, bu_dispatch)  # 多专项卡片(模型或规则)
     if on_progress:
         on_progress("advising", 1, 1)
 

@@ -19,8 +19,12 @@ prompts/
     task_business_type.md   维度2:业务分类打标
     task_resolved.md        维度3:是否解决
     task_review.md          维度4:是否需人工复核
-    advice_system.md        优化建议·系统人设
-    advice_user.md          优化建议·任务与输出格式
+    advice_card_system.md      优化建议·多专项建议共用系统人设
+    advice_dispatch_global.md  优化建议·分发诊断(全局)
+    advice_resolved_global.md  优化建议·解决率诊断(全局)
+    advice_new_business.md     优化建议·新业务分类发现
+    advice_intent_dispatch.md  优化建议·分类分发提升(逐分类,占位 {intent_name})
+    advice_intent_resolved.md  优化建议·分类解决率提升(逐分类,占位 {intent_name})
   securities/             ← 证券专属(只放和通用不同的文件)
     judge_system.md         证券人设
     task_dispatch.md        证券承接 SOP
@@ -58,22 +62,25 @@ prompts/
 | `judge_system.md` | 系统人设 | 无占位符,纯文本 |
 | `task_*.md` | 四个评测维度的判定规则 | 无占位符,纯规则文本,被 `{tasks}` 按顺序拼接 |
 
-### 二、优化建议(整批评测后一次)
+### 二、优化建议(整批评测后,多专项各调一次)
 
-| 文件 | 作用 | 可用占位符 | 数据来源 |
-|------|------|-----------|---------|
-| `advice_system.md` | 优化顾问人设 | `{bu_name}` BU 展示名 | `bu.name` |
-| `advice_user.md` | 任务说明 + 输出格式 | `{payload}` 聚合指标 JSON | `compute_insights()` + BU 分发漏斗统计 |
+一个维度一张卡:固定 3(全局分发/全局解决率/新分类)+ 动态 2N(每业务分类·分发/解决率),
+各调一次 LLM、各出一段纯文本 markdown。料由 `advice_facts.build_facts` 从落盘 rows 重聚合,
+`advisor.build_card_prompts` 按 token 预算填模板组 prompt(尽量喂满上下文窗口)。
 
-`{payload}` 喂给模型的内容(`advisor.build_advice_prompt` 组装):
-- **BU分发**:准确率 + 两类错误(漏收 该分未分 / 误收 该拒未拒)
-- **整体端到端解决率**
-- **各业务分类切片**(仅样本量≥3):分类名、进漏斗样本量、端到端解决率、需复核率、未解决典型问题
+| 文件 | 作用 | 可用占位符 |
+|------|------|-----------|
+| `advice_card_system.md` | 多专项建议共用的顾问人设 | `{bu_name}` |
+| `advice_dispatch_global.md` | 全局分发诊断(漏收/误收) | `{payload}` |
+| `advice_resolved_global.md` | 全局解决率诊断(四归因分布) | `{payload}` |
+| `advice_new_business.md` | 新业务分类发现(非本 BU 问题) | `{payload}` |
+| `advice_intent_dispatch.md` | 逐分类·分发提升 | `{payload}`、`{intent_name}` |
+| `advice_intent_resolved.md` | 逐分类·解决率提升 | `{payload}`、`{intent_name}` |
 
-> 模型返回的建议数组结构:`scope / severity / problem / root_cause / suggestion / evidence`。
+> 模型输出为纯文本 markdown(非结构化)。返回结构 `{source, cards:[{id, title, dimension, category, text}]}`。
 
 ## 注意
 
 - 占位符用 `{xxx}`,代码用字符串替换填充(非 Python format),模板里写 JSON 花括号不冲突。
 - 改完文件需**重启后端**(内容做了 LRU 缓存)。
-- 模型提示词只有两套(Judge + 优化建议),没有第三处。无模型时的规则版兜底建议在 `advisor.rule_based_advice`,是代码阈值逻辑,不是提示词。
+- 无模型时的规则版兜底建议在 `advisor.rule_based_cards`,是代码逻辑渲染成同构文本卡,不是提示词。

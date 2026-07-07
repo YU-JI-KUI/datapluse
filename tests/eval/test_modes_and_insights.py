@@ -1,7 +1,6 @@
 """双模式判定 + 业务洞察 + 优化建议测试。"""
 import pandas as pd
 
-from datapulse.modules.eval.advisor import rule_based_advice
 from datapulse.modules.eval.evaluator import _bu_dispatch_stats, assemble_row, compute_insights
 from datapulse.modules.eval.pipeline import detect_gold, resolve_columns
 
@@ -117,14 +116,3 @@ def test_bu_dispatch_stats_two_error_types():
     assert st["miss_should_accept_but_rejected"] == 1
 
 
-def test_rule_advice_flags_low_bu_dispatch():
-    """BU 分发准确率低 → 规则建议给出 high 优先级『分发问题』。"""
-    ins = compute_insights(_rows("资产查询", 5, resolved="yes"))
-    bu_dispatch = {"scored": 10, "accuracy": 0.4,
-                   "miss_should_accept_but_rejected": 1,
-                   "over_should_reject_but_accepted": 5}
-    advice = rule_based_advice(ins, bu_dispatch)
-    assert advice, "应产出建议"
-    top = advice[0]
-    assert top["severity"] == "high"
-    assert top["root_cause"] == "分发问题"

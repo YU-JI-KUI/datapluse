@@ -1,177 +1,247 @@
-"""优化建议生成器。
+"""优化建议生成器（多专项卡片）。
 
-读「业务洞察聚合指标 + 典型失败样例」→ 让大模型给出针对性的优化建议。
-无模型时退化为规则版建议(基于阈值),保证任何环境都有可用输出。
-
-建议结构(每条):
-  scope        : 作用域(业务分类 / 全局)
-  severity     : high / medium / low
-  problem      : 一句话问题描述
-  root_cause   : 根因判断(分发问题 / 答案问题 / 数据问题 / 需人工)
-  suggestion   : 具体优化动作
-  evidence     : 支撑数字
+一个维度一张卡：固定 3（分发/解决率/新分类，全局）+ 动态 2N（每分类·分发/解决率）。
+每张卡各调一次 LLM、各出一段纯文本 markdown。料由 advice_facts.build_facts 预聚合，
+本模块按 token 预算填模板组 prompt（build_card_prompts），无模型时用规则版兜底
+（rule_based_cards）。
 """
 from __future__ import annotations
 
-import json
-
+from datapulse.modules.eval._settings import settings
 from datapulse.modules.eval.bu.base import BUConfig
 
-# 规则版阈值:解决率低于此判为需优化
-_LOW_RESOLVED = 0.6
-_LOW_DISPATCH = 0.7
-_HIGH_REVIEW = 0.4
-_MIN_SAMPLES = 3  # 样本太少不下结论
+# ══════════════════════════════════════════════════════════════════════════════
+# 多专项建议（新体系）：一个维度一张卡、各调一次 LLM、各出一段纯文本 markdown。
+# 卡片体系：固定 3（分发/解决率/新分类，全局）+ 动态 2N（每分类·分发/解决率）。
+# 料由 advice_facts.build_facts 预聚合，这里负责按 token 预算填模板、组 prompt。
+# ══════════════════════════════════════════════════════════════════════════════
+
+# 中文粗略 token 估算：Qwen 约 1.5~1.7 字/token，取保守 1.7（宁少喂不超窗）。
+_CHARS_PER_TOKEN = 1.7
 
 
-def build_advice_prompt(insights: dict, bu: BUConfig, bu_dispatch: dict | None = None) -> list[dict]:
-    """构造给大模型的消息:把聚合指标 + 失败样例填进外置模板。
+def _est_tokens(text: str) -> int:
+    return int(len(text) / _CHARS_PER_TOKEN) + 1
 
-    提示词在 prompts/_default/advice_system.md、advice_user.md(可被 prompts/<bu>/ 重写)。
-    数据准备(payload)在代码里,模板只负责措辞与输出格式。
-    占位符:advice_system 用 {bu_name};advice_user 用 {payload}(下方聚合指标 JSON)。
+
+def _sample_budget(system: str, user_skeleton: str) -> int:
+    """一张卡可用来塞样例的字符预算（换算回字符，填料时按字符累加更直观）。
+
+    = 上下文窗口 − 骨架(system+user已填统计) − 输出留白，再换算成字符。
     """
-    overall = insights["overall"]
-    # 只把信息量大的切片喂给模型(进漏斗样本量足够的),控制 token
-    slices = [s for s in insights["by_intent"] if s.get("in_bu_count", 0) >= _MIN_SAMPLES]
-    payload = {
-        "BU分发": bu_dispatch or {},   # 准确率 + 两类错误(漏收/误收)
-        "整体问题解决率": overall["resolved_rate"],
-        "各业务类型切片(问题解决率,分母=分发到本BU的子集)": [
-            {
-                "业务类型": s["name"],
-                "进漏斗样本量": s.get("in_bu_count", 0),
-                "问题解决率": s["resolved_rate"],
-                "需复核率": s["needs_review_rate"],
-                "未解决典型问题": s["unresolved_examples"],
-            }
-            for s in slices
-        ],
-    }
-    system = bu.prompt("advice_system.md").replace("{bu_name}", bu.name)
-    user = bu.prompt("advice_user.md").replace(
-        "{payload}", json.dumps(payload, ensure_ascii=False, indent=2)
-    )
+    budget_tokens = (settings.advice_ctx_budget
+                     - _est_tokens(system) - _est_tokens(user_skeleton)
+                     - settings.advice_max_tokens
+                     - 512)  # 额外安全余量
+    return max(0, int(budget_tokens * _CHARS_PER_TOKEN))
+
+
+def _fill_examples(examples: list[dict], render, char_budget: int) -> tuple[str, int]:
+    """按序把样例渲染进预算，返回 (拼好的文本, 未展示条数)。宁可多喂，逼近上限即止。"""
+    parts: list[str] = []
+    used = 0
+    shown = 0
+    for ex in examples:
+        block = render(ex)
+        if used + len(block) > char_budget and shown > 0:
+            break
+        parts.append(block)
+        used += len(block)
+        shown += 1
+    remaining = len(examples) - shown
+    return "\n".join(parts), remaining
+
+
+def _more_note(remaining: int) -> str:
+    return f"\n\n> 另有 {remaining} 条同类样例未展示（受长度限制），实际规模更大。" if remaining > 0 else ""
+
+
+def _render_dispatch_ex(ex: dict) -> str:
+    return (f"- 问题：{ex['question']}\n"
+            f"  判断依据：{ex.get('dispatch_reason', '') or '—'}")
+
+
+def _render_resolved_ex(ex: dict) -> str:
+    tag = ex.get("unresolved_cause") or "未归类"
+    intent = f"（{ex['intent']}）" if ex.get("intent") else ""
+    return (f"- 问题{intent}：{ex['question']}\n"
+            f"  AI 答案：{ex.get('answer_text', '') or '—'}\n"
+            f"  未解决原因：{tag}")
+
+
+def _card_messages(bu: BUConfig, user_tpl_name: str, payload_text: str,
+                   intent_name: str | None = None) -> list[dict]:
+    """组一张卡的 system+user 消息（system 共用 advice_card_system.md）。"""
+    system = bu.prompt("advice_card_system.md").replace("{bu_name}", bu.name)
+    user = bu.prompt(user_tpl_name).replace("{payload}", payload_text)
+    if intent_name is not None:
+        user = user.replace("{intent_name}", intent_name)
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-def parse_advice(text: str) -> list[dict]:
-    """解析模型返回的建议数组。
+def build_card_prompts(facts: dict, insights: dict, bu: BUConfig,
+                       bu_dispatch: dict | None = None) -> list[dict]:
+    """产出全部卡片的 prompt 规格：[{id, title, dimension, category, messages}]。
 
-    大模型(Qwen 等)经常不吐纯 JSON:带前言后语、未转义引号、中文逗号、尾逗号,
-    都会让整段 json.loads 直接炸。这里不假设模型语法完美,三层兜底:
-      1. 剥围栏 + 截取首个 [ 到末个 ] 之间的数组体,扔掉解释文字;
-      2. 整体解析一次(绝大多数走这条);
-      3. 整体失败,再括号配平逐个救 {...},坏的跳过,保住其余建议——
-         避免"一条坏全降级到规则"。
+    facts 由 build_facts 预聚合；样例按每卡 token 预算裁，尽量喂满上下文窗口。
+    facts 为空（未落盘 / 测试路径）→ 返回空列表，编排层走 rule 兜底。
     """
-    if not text:
+    if not facts or not facts.get("dispatch_global"):
         return []
-    fence = chr(96) * 3
-    t = text.strip().replace(fence + "json", "").replace(fence, "").strip()
+    system = bu.prompt("advice_card_system.md").replace("{bu_name}", bu.name)
+    cards: list[dict] = []
 
-    # 截取数组边界,丢掉模型可能掺的前后解释文字
-    start, end = t.find("["), t.rfind("]")
-    body = t[start : end + 1] if 0 <= start < end else t
+    # ① 全局分发诊断
+    dg = facts["dispatch_global"]
+    skel = bu.prompt("advice_dispatch_global.md")
+    budget = _sample_budget(system, skel)
+    miss_txt, miss_rest = _fill_examples(dg["miss_examples"], _render_dispatch_ex, budget // 2)
+    over_txt, over_rest = _fill_examples(dg["over_examples"], _render_dispatch_ex, budget // 2)
+    payload = (
+        f"分发准确率：{_pct(dg.get('accuracy'))}\n"
+        f"漏收（该分未分）总数：{dg.get('miss_count')}；误收（该拒未拒）总数：{dg.get('over_count')}\n\n"
+        f"## 高频被漏收问题（问题, 次数）\n{_fmt_top(dg['top_missed'])}\n\n"
+        f"## 高频被误收问题（问题, 次数）\n{_fmt_top(dg['top_over'])}\n\n"
+        f"## 漏收样例\n{miss_txt or '—'}{_more_note(miss_rest)}\n\n"
+        f"## 误收样例\n{over_txt or '—'}{_more_note(over_rest)}"
+    )
+    cards.append({
+        "id": "dispatch::global", "title": "分发问题诊断", "dimension": "分发",
+        "category": "全局",
+        "messages": _card_messages(bu, "advice_dispatch_global.md", payload),
+    })
 
-    try:
-        data = json.loads(body)
-        if isinstance(data, list):
-            return [x for x in data if isinstance(x, dict)]
-    except json.JSONDecodeError:
-        pass
+    # ② 全局解决率诊断
+    rg = facts["resolved_global"]
+    skel = bu.prompt("advice_resolved_global.md")
+    budget = _sample_budget(system, skel)
+    ex_txt, ex_rest = _fill_examples(rg["examples"], _render_resolved_ex, budget)
+    payload = (
+        f"整体问题解决率：{_pct(insights.get('overall', {}).get('resolved_rate'))}\n\n"
+        f"## 未解决四归因全局分布\n{_fmt_dist(rg['unresolved_dist'])}\n\n"
+        f"## 未解决样例（跨分类）\n{ex_txt or '—'}{_more_note(ex_rest)}"
+    )
+    cards.append({
+        "id": "resolved::global", "title": "全局解决率诊断", "dimension": "解决率",
+        "category": "全局",
+        "messages": _card_messages(bu, "advice_resolved_global.md", payload),
+    })
 
-    return _salvage_objects(body)
+    # ③ 新业务分类发现
+    nb = facts["new_business"]
+    skel = bu.prompt("advice_new_business.md")
+    budget = _sample_budget(system, skel)
+    q_txt, q_rest = _fill_examples(
+        [{"q": q, "n": n} for q, n in nb["questions"]],
+        lambda e: f"- {e['q']}（{e['n']} 次）", budget)
+    payload = (
+        f"被判「非本BU」的问题：共 {nb['count']} 条、去重 {nb['distinct']} 个\n\n"
+        f"## 问题清单（问题, 出现次数）\n{q_txt or '—'}{_more_note(q_rest)}"
+    )
+    cards.append({
+        "id": "new_business::global", "title": "新业务分类发现", "dimension": "新分类",
+        "category": "全局",
+        "messages": _card_messages(bu, "advice_new_business.md", payload),
+    })
+
+    # ④⑤ 逐分类·分发提升 / 解决率提升
+    for name, f in facts["by_intent"].items():
+        # ④ 分发
+        skel = bu.prompt("advice_intent_dispatch.md")
+        budget = _sample_budget(system, skel)
+        d_txt, d_rest = _fill_examples(f["dispatch_examples"], _render_dispatch_ex, budget)
+        payload = f"分类：{name}\n\n## 分发失败样例\n{d_txt or '—'}{_more_note(d_rest)}"
+        cards.append({
+            "id": f"intent::{name}::dispatch", "title": f"{name}·分发提升",
+            "dimension": "分发", "category": name,
+            "messages": _card_messages(bu, "advice_intent_dispatch.md", payload, intent_name=name),
+        })
+        # ⑤ 解决率
+        skel = bu.prompt("advice_intent_resolved.md")
+        budget = _sample_budget(system, skel)
+        u_txt, u_rest = _fill_examples(f["unresolved_examples"], _render_resolved_ex, budget)
+        payload = (
+            f"分类：{name}\n"
+            f"进漏斗 {f['in_bu']} 条，解决率 {_pct(f['resolved_rate'])}\n\n"
+            f"## 未解决四归因分布\n{_fmt_dist(f['unresolved_dist'])}\n\n"
+            f"## 未解决样例\n{u_txt or '—'}{_more_note(u_rest)}"
+        )
+        cards.append({
+            "id": f"intent::{name}::resolved", "title": f"{name}·解决率提升",
+            "dimension": "解决率", "category": name,
+            "messages": _card_messages(bu, "advice_intent_resolved.md", payload, intent_name=name),
+        })
+
+    return cards
 
 
-def _salvage_objects(body: str) -> list[dict]:
-    """括号配平扫描,把数组里每个 {...} 单独解析,坏的跳过。
+def _pct(v) -> str:
+    return "—" if v is None else f"{v:.0%}"
 
-    忽略字符串内的花括号(含转义),避免把 suggestion 文本里的 { 当成对象边界。
+
+def _fmt_top(pairs: list) -> str:
+    return "\n".join(f"- {q}（{n} 次）" for q, n in pairs) or "—"
+
+
+def _fmt_dist(dist: dict) -> str:
+    if not dist:
+        return "—"
+    return "\n".join(f"- {k}：{v} 条" for k, v in sorted(dist.items(), key=lambda x: -x[1]))
+
+
+def rule_based_cards(facts: dict, insights: dict, bu: BUConfig,
+                     bu_dispatch: dict | None = None) -> list[dict]:
+    """规则版卡片：无模型 / 全败时兜底，用 build_facts 的料渲染成同构 markdown 文本卡。
+
+    mock 后端也走这里，保证离线也能端到端验证卡片结构与前端渲染。
     """
-    items: list[dict] = []
-    depth = 0
-    in_str = False
-    escape = False
-    obj_start = -1
-    for i, ch in enumerate(body):
-        if in_str:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            if depth == 0:
-                obj_start = i
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0 and obj_start >= 0:
-                try:
-                    obj = json.loads(body[obj_start : i + 1])
-                    if isinstance(obj, dict):
-                        items.append(obj)
-                except json.JSONDecodeError:
-                    pass  # 单条坏掉跳过,保住其余
-                obj_start = -1
-    return items
+    cards: list[dict] = []
+    fd = facts.get("dispatch_global") if facts else None
 
+    # ① 分发
+    if fd:
+        lines = [f"**分发准确率**：{_pct(fd.get('accuracy'))}",
+                 f"漏收 {fd.get('miss_count')} 条 / 误收 {fd.get('over_count')} 条。", ""]
+        if fd["top_missed"]:
+            lines.append("**高频被漏收问题**：")
+            lines += [f"- {q}（{n} 次）" for q, n in fd["top_missed"][:10]]
+        if fd["top_over"]:
+            lines.append("\n**高频被误收问题**：")
+            lines += [f"- {q}（{n} 次）" for q, n in fd["top_over"][:10]]
+        lines.append("\n> 规则生成：漏收多→补意图覆盖/放宽分发；误收多→补拒识规则。")
+        cards.append({"id": "dispatch::global", "title": "分发问题诊断",
+                      "dimension": "分发", "category": "全局", "text": "\n".join(lines)})
 
-def rule_based_advice(insights: dict, bu_dispatch: dict | None = None) -> list[dict]:
-    """规则版兜底建议:无模型时基于阈值生成,保证总有可用输出。
+    # ② 全局解决率
+    rg = facts.get("resolved_global") if facts else None
+    if rg:
+        lines = [f"**整体解决率**：{_pct(insights.get('overall', {}).get('resolved_rate'))}", "",
+                 "**未解决四归因分布**：", _fmt_dist(rg["unresolved_dist"]),
+                 "\n> 规则生成：占比最高的一类即当前最该攻克的方向。"]
+        cards.append({"id": "resolved::global", "title": "全局解决率诊断",
+                      "dimension": "解决率", "category": "全局", "text": "\n".join(lines)})
 
-    bu_dispatch:BU 分发漏斗统计(两类错误),用于给"如何提升 BU 分发准确率"建议。
-    """
-    advice: list[dict] = []
+    # ③ 新业务分类
+    nb = facts.get("new_business") if facts else None
+    if nb and nb["count"]:
+        lines = [f"被判「非本BU」共 {nb['count']} 条、去重 {nb['distinct']} 个。", "",
+                 "**高频非本BU问题**："]
+        lines += [f"- {q}（{n} 次）" for q, n in nb["questions"][:15]]
+        lines.append("\n> 规则生成：反复出现的问题簇可考虑提炼为新业务分类。")
+        cards.append({"id": "new_business::global", "title": "新业务分类发现",
+                      "dimension": "新分类", "category": "全局", "text": "\n".join(lines)})
 
-    # —— BU 分发层建议(全局,基于两类错误)——
-    if bu_dispatch and bu_dispatch.get("scored"):
-        acc = bu_dispatch["accuracy"]
-        miss = bu_dispatch.get("miss_should_accept_but_rejected", 0)
-        over = bu_dispatch.get("over_should_reject_but_accepted", 0)
-        if acc < _LOW_DISPATCH:
-            cause = "误收(他业务问题被本BU收下)" if over >= miss else "漏收(本应承接却被拒识)"
-            fix = ("补拒识规则,把无关问题挡在外面" if over >= miss
-                   else "放宽分发/补本BU意图覆盖,别把该接的拒了")
-            advice.append({
-                "scope": "BU 分发(全局)",
-                "severity": "high",
-                "problem": f"BU 分发准确率仅 {acc:.0%},主要错误是{cause}",
-                "root_cause": "分发问题",
-                "suggestion": fix,
-                "evidence": f"漏收 {miss} 条 / 误收 {over} 条",
-            })
+    # ④⑤ 逐分类
+    for name, f in (facts.get("by_intent") if facts else {}).items():
+        if f["dispatch_examples"]:
+            lines = [f"分类 **{name}** 分发失败样例（漏收/误收）："]
+            lines += [f"- {ex['question']}（{ex.get('scene', '')}）" for ex in f["dispatch_examples"][:10]]
+            cards.append({"id": f"intent::{name}::dispatch", "title": f"{name}·分发提升",
+                          "dimension": "分发", "category": name, "text": "\n".join(lines)})
+        if f["in_bu"]:
+            lines = [f"分类 **{name}**：进漏斗 {f['in_bu']} 条，解决率 {_pct(f['resolved_rate'])}", "",
+                     "**未解决四归因**：", _fmt_dist(f["unresolved_dist"])]
+            cards.append({"id": f"intent::{name}::resolved", "title": f"{name}·解决率提升",
+                          "dimension": "解决率", "category": name, "text": "\n".join(lines)})
 
-    # —— 解决度层建议(按业务类型切片)——
-    for s in insights["by_intent"]:
-        if s.get("in_bu_count", 0) < _MIN_SAMPLES or s["name"] == "(未分类)":
-            continue
-        if s["resolved_rate"] < _LOW_RESOLVED:
-            advice.append({
-                "scope": s["name"],
-                "severity": "medium",
-                "problem": f"『{s['name']}』问题解决率仅 {s['resolved_rate']:.0%}",
-                "root_cause": "答案问题",
-                "suggestion": "分发到本BU但没解决,排查答案质量:补该业务类型的知识库/标问答案,"
-                              "或检查答案卡渲染是否完整。",
-                "evidence": f"漏斗内 {s['in_bu_count']} 条,解决率 {s['resolved_rate']:.0%},"
-                            f"典型未解决:{'、'.join(s['unresolved_examples'][:2]) or '—'}",
-            })
-        if s["needs_review_rate"] >= _HIGH_REVIEW:
-            advice.append({
-                "scope": s["name"],
-                "severity": "low",
-                "problem": f"『{s['name']}』需人工复核率高达 {s['needs_review_rate']:.0%}",
-                "root_cause": "需人工",
-                "suggestion": "该意图 Judge 置信普遍偏低,建议补充意图定义/示例,或纳入人工复核队列。",
-                "evidence": f"需复核率 {s['needs_review_rate']:.0%}",
-            })
-    # 按严重度排序
-    order = {"high": 0, "medium": 1, "low": 2}
-    advice.sort(key=lambda a: order.get(a["severity"], 9))
-    return advice[:6]
+    return cards
