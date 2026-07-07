@@ -1,60 +1,36 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 19388818
+# 基于 origin/main @ dec11f72
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   19388818 评测明细：分发BU 改下拉 + 搜索条件覆盖三个 tab
-#   5e268219 数据管理：来源文件支持先筛选再删除
-#   7b54956e 问题洞察页去装饰图标与冗余文案
-#   4ed2ad7a AI 评测活动标问抽出活动名称层（活动 1 → 标问 N）
-#   6ac0ea71 路由目录统一：api/ 全部并入 router/
-#   e875ae84 评测明细表拆列：查询字段平铺 + AI 结果留 JSON
-#   c7dd5f1f sync: changed_files for 12 commit(s)
-#   6e9a9098 修复问题洞察索引：question 超 B-tree 上限建不了
-frontend/src/components/eval/EvalResult.jsx
-frontend/src/components/eval/RowsTable.jsx
+#   dec11f72 AI 评测优化建议：单次结构化改多专项文本卡片
+#   bc084654 活动标问：支持批量录入与编辑，备注改多行
+#   01bd276d 导出不一致case：Excel 补分发BU列
+#   14be2f7e 评测 worker：修删除运行中任务卡死 + 单任务暂停/恢复
+frontend/package-lock.json
+frontend/package.json
+frontend/src/components/eval/AdvicePanel.jsx
+src/datapulse/config/settings.py
+src/datapulse/modules/eval/advice_facts.py
+src/datapulse/modules/eval/advisor.py
 src/datapulse/modules/eval/evaluator.py
-frontend/src/pages/DataExplorer.jsx
-src/datapulse/repository/base.py
-src/datapulse/repository/data_repository.py
-src/datapulse/router/data_item.py
-frontend/src/pages/EvalInsights.jsx
-db/arkpg/20260428_arkpgdata_init.sql
-db/arkpg/20260706_arkpgdata_eval_activity_name.sql
-deploy_desc/SUPER-AGENT1.0.0.json
-frontend/src/pages/EvalActivity.jsx
-src/datapulse/modules/eval/bu/base.py
-src/datapulse/modules/eval/entities.py
-src/datapulse/modules/eval/eval_db.py
-src/datapulse/modules/eval/pipeline.py
-src/datapulse/modules/eval/repository.py
+src/datapulse/modules/eval/llm/judge_runner.py
+src/datapulse/modules/eval/prompt_loader.py
+src/datapulse/modules/eval/prompts/README.md
+src/datapulse/modules/eval/prompts/_default/advice_card_system.md
+src/datapulse/modules/eval/prompts/_default/advice_dispatch_global.md
+src/datapulse/modules/eval/prompts/_default/advice_intent_dispatch.md
+src/datapulse/modules/eval/prompts/_default/advice_intent_resolved.md
+src/datapulse/modules/eval/prompts/_default/advice_new_business.md
+src/datapulse/modules/eval/prompts/_default/advice_resolved_global.md
 src/datapulse/pipeline/eval_engine.py
+tests/eval/test_advice_facts.py
+tests/eval/test_modes_and_insights.py
+frontend/src/lib/api.js
+frontend/src/pages/EvalActivity.jsx
+src/datapulse/modules/eval/eval_db.py
+src/datapulse/modules/eval/repository.py
 src/datapulse/router/eval.py
-src/datapulse/main.py
-src/datapulse/router/admin.py
-src/datapulse/router/annotation.py
-src/datapulse/router/auth.py
-src/datapulse/router/category.py
-src/datapulse/router/comment.py
-src/datapulse/router/config.py
-src/datapulse/router/conflict.py
-src/datapulse/router/dashboard.py
-src/datapulse/router/data_state.py
-src/datapulse/router/datasets.py
-src/datapulse/router/export.py
-src/datapulse/router/pipeline.py
-src/datapulse/router/pre_annotation.py
-src/datapulse/router/role.py
-src/datapulse/router/templates.py
-src/datapulse/router/users.py
-db/arkpg/20260706_arkpgdata_eval_row_flatten.sql
-db/arkpg/20260705_arkpgdata_eval_row_expr_index.sql
-[DEL] src/datapulse/api/__init__.py
-[DEL] src/datapulse/api/annotation.py
-[DEL] src/datapulse/api/auth.py
-[DEL] src/datapulse/api/config.py
-[DEL] src/datapulse/api/data.py
-[DEL] src/datapulse/api/datasets.py
-[DEL] src/datapulse/api/export.py
-[DEL] src/datapulse/api/pipeline.py
-[DEL] src/datapulse/api/templates.py
-[DEL] src/datapulse/api/users.py
+frontend/src/pages/EvalHistory.jsx
+[DEL] src/datapulse/modules/eval/prompts/_default/advice_system.md
+[DEL] src/datapulse/modules/eval/prompts/_default/advice_user.md
+[DEL] tests/eval/test_parse_advice.py
