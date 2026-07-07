@@ -856,6 +856,31 @@ def create_activity_question(bu: str, question: str, note: str = "", activity_na
     return rec
 
 
+def create_activity_questions(bu: str, questions: list[str], note: str = "",
+                              activity_name: str = "", operator: str = "system") -> list[dict]:
+    """批量新增：同一活动名下一次录入多条标问。去空、去重（保序），空列表直接返回。"""
+    seen, items = set(), []
+    for q in questions:
+        q = (q or "").strip()
+        if q and q not in seen:
+            seen.add(q)
+            items.append({"question": q, "activity_name": activity_name, "note": note})
+    if not items:
+        return []
+    recs = eval_db.activity_create_many(bu, items, created_by=operator)
+    _bump_activity()
+    return recs
+
+
+def update_activity_question(act_id: int, question: str, note: str = "", activity_name: str = "",
+                             operator: str = "system") -> dict | None:
+    rec = eval_db.activity_update(act_id, question, activity_name=activity_name,
+                                  note=note, updated_by=operator)
+    if rec:
+        _bump_activity()
+    return rec
+
+
 def delete_activity_question(act_id: int) -> bool:
     deleted = eval_db.activity_delete(act_id)
     if deleted:

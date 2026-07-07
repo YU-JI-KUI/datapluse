@@ -675,6 +675,57 @@ class EvalActivityRepository:
         ).scalars().first()
         return _activity_to_dict(a)
 
+    def create_many(self, bu: str, items: list[dict], created_by: str = "system") -> list[dict]:
+        """批量新增（同一活动多条标问一次录入）。逐条 upsert，(bu, question) 冲突则更新。
+
+        items 每项 {question, activity_name?, note?}；question 已去空、调用方保证非空且去重。
+        """
+        ts = _now()
+        for it in items:
+            q = it["question"]
+            act = (it.get("activity_name") or "").strip() or q
+            self.session.execute(
+                pg_insert(EvalActivityQuestion).values(
+                    bu=bu, question=q, activity_name=act, note=it.get("note", ""),
+                    created_at=ts, created_by=created_by, updated_at=ts, updated_by=created_by,
+                ).on_conflict_do_update(
+                    index_elements=["bu", "question"],
+                    set_={"activity_name": act, "note": it.get("note", ""),
+                          "updated_at": ts, "updated_by": created_by},
+                )
+            )
+        questions = [it["question"] for it in items]
+        rows = self.session.execute(
+            select(EvalActivityQuestion).where(
+                EvalActivityQuestion.bu == bu, EvalActivityQuestion.question.in_(questions)
+            )
+        ).scalars().all()
+        return [_activity_to_dict(a) for a in rows]
+
+    def update(self, act_id: int, question: str, activity_name: str = "",
+               note: str = "", updated_by: str = "system") -> dict | None:
+        """按 id 更新单条。question 可改，改后若与同 BU 其它行重名则视为冲突返回 None。"""
+        a = self.session.get(EvalActivityQuestion, act_id)
+        if a is None:
+            return None
+        if question != a.question:
+            dup = self.session.execute(
+                select(EvalActivityQuestion.id).where(
+                    EvalActivityQuestion.bu == a.bu,
+                    EvalActivityQuestion.question == question,
+                    EvalActivityQuestion.id != act_id,
+                )
+            ).scalars().first()
+            if dup:
+                return None
+        a.question = question
+        a.activity_name = (activity_name or "").strip() or question
+        a.note = note
+        a.updated_at = _now()
+        a.updated_by = updated_by
+        self.session.flush()
+        return _activity_to_dict(a)
+
     def delete(self, act_id: int) -> bool:
         n = self.session.query(EvalActivityQuestion).filter(
             EvalActivityQuestion.id == act_id

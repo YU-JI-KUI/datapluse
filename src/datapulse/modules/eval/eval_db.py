@@ -343,6 +343,18 @@ def activity_create(bu: str, question: str, note: str = "", activity_name: str =
                                    created_by=created_by)
 
 
+def activity_create_many(bu: str, items: list[dict], created_by: str = "system") -> list[dict]:
+    with eval_session() as s:
+        return _act_repo(s).create_many(bu, items, created_by=created_by)
+
+
+def activity_update(act_id: int, question: str, activity_name: str = "", note: str = "",
+                    updated_by: str = "system") -> dict | None:
+    with eval_session() as s:
+        return _act_repo(s).update(act_id, question, activity_name=activity_name,
+                                   note=note, updated_by=updated_by)
+
+
 def activity_delete(act_id: int) -> bool:
     with eval_session() as s:
         return _act_repo(s).delete(act_id)

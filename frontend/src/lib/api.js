@@ -452,9 +452,10 @@ export const evalApi = {
   updateCategory:  (id, data) => api.put(`/eval/categories/${id}`, data),
   deleteCategory:  (id) => api.delete(`/eval/categories/${id}`),
 
-  // 活动标问管理（写死按钮触发的写死回复，评测时整条跳过、不计指标）。按 BU 增删查
+  // 活动标问管理（写死按钮触发的写死回复，评测时整条跳过、不计指标）。按 BU 增删改查
   listActivityQuestions:  (bu = getCurrentBu()) => api.get('/eval/activity-questions', { params: { bu } }),
-  createActivityQuestion: (data, bu = getCurrentBu()) => api.post('/eval/activity-questions', data, { params: { bu } }),
+  createActivityQuestion: (data, bu = getCurrentBu()) => api.post('/eval/activity-questions', data, { params: { bu } }),  // data.questions 传数组即批量
+  updateActivityQuestion: (id, data) => api.put(`/eval/activity-questions/${id}`, data),
   deleteActivityQuestion: (id) => api.delete(`/eval/activity-questions/${id}`),
 
   // 规则短路管理（命中写死结果、免 LLM 调用，计入指标）。按 BU 增删查

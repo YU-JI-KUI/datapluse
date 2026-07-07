@@ -3,10 +3,13 @@
  * 活动标问是前端写死按钮触发的写死回复（如「帮我解锁消费权益」），不经 AI。
  * 评测时客户问题与清单精确相等即整条跳过——不喂模型、不计入分发准确率/解决率，
  * 仅作后续轮上下文保留。改后下次评测即生效。当前 BU 由左侧全局选择器决定。
+ *
+ * 新增：一个活动名 + 多行 textarea（一行一条标问）批量录入。
+ * 编辑：单条回显活动名/标问全文/备注，改后按 id 更新（改全文会做重名冲突校验）。
  */
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Trash2, Pencil } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,7 +28,8 @@ export default function EvalActivity() {
   const [bu, setBu]           = useState(getCurrentBu())
   const [list, setList]       = useState([])
   const [loading, setLoading] = useState(false)
-  const [editing, setEditing] = useState(null)   // { question, note } 新增中的对象
+  const [creating, setCreating] = useState(null)  // 批量新增对象 { activity_name, questions(多行文本), note }
+  const [editing, setEditing]   = useState(null)  // 单条编辑对象 { id, activity_name, question, note }
   const [delTarget, setDelTarget] = useState(null)
   const [saving, setSaving]   = useState(false)
   const [page, setPage]         = useState(1)    // 前端本地分页：全量加载后内存切片
@@ -48,16 +52,39 @@ export default function EvalActivity() {
     return () => window.removeEventListener('buChanged', onBuChange)
   }, [])
 
-  async function handleSave() {
+  // 批量新增：textarea 按换行拆多条，去空去重后一次提交
+  async function handleCreate() {
+    const questions = (creating?.questions || '')
+      .split('\n').map(s => s.trim()).filter(Boolean)
+    if (questions.length === 0) { toast.error('请至少填写一条活动标问'); return }
+    setSaving(true)
+    try {
+      const res = await evalApi.createActivityQuestion({
+        questions,
+        activity_name: (creating.activity_name || '').trim(),
+        note: creating.note || '',
+      })
+      toast.success(`已新增 ${RESP(res).created ?? questions.length} 条`)
+      setCreating(null)
+      load()
+    } catch (e) {
+      toast.error(e.response?.data?.message || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 单条编辑：按 id 更新
+  async function handleUpdate() {
     if (!editing?.question?.trim()) { toast.error('活动标问不能为空'); return }
     setSaving(true)
     try {
-      await evalApi.createActivityQuestion({
+      await evalApi.updateActivityQuestion(editing.id, {
         question: editing.question.trim(),
         activity_name: (editing.activity_name || '').trim(),
         note: editing.note || '',
       })
-      toast.success('已新增')
+      toast.success('已更新')
       setEditing(null)
       load()
     } catch (e) {
@@ -89,7 +116,7 @@ export default function EvalActivity() {
             <span className="font-medium">精确相等</span>即整条跳过，不计入分发准确率与解决率。改后下次评测即生效。
           </p>
         </div>
-        <Button size="sm" onClick={() => setEditing({ question: '', activity_name: '', note: '' })}>
+        <Button size="sm" onClick={() => setCreating({ activity_name: '', questions: '', note: '' })}>
           <Plus className="w-4 h-4 mr-1.5" />新增活动标问
         </Button>
       </div>
@@ -104,7 +131,7 @@ export default function EvalActivity() {
                 <TableHead className="w-56">备注</TableHead>
                 <TableHead className="w-28">修改人</TableHead>
                 <TableHead className="w-40 whitespace-nowrap">更新时间</TableHead>
-                <TableHead className="w-20 text-center">操作</TableHead>
+                <TableHead className="w-24 text-center">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -132,7 +159,12 @@ export default function EvalActivity() {
                   <TableCell className="text-sm text-muted-foreground">{q.updated_by || '—'}</TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(q.updated_at)}</TableCell>
                   <TableCell>
-                    <div className="flex items-center justify-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <button title="编辑"
+                        onClick={() => setEditing({ id: q.id, activity_name: q.activity_name || '', question: q.question, note: q.note || '' })}
+                        className="p-1.5 rounded hover:bg-blue-50 text-blue-500">
+                        <Pencil className="w-4 h-4" />
+                      </button>
                       <button title="删除" onClick={() => setDelTarget(q)} className="p-1.5 rounded hover:bg-red-50 text-red-500">
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -152,11 +184,64 @@ export default function EvalActivity() {
         </CardContent>
       </Card>
 
-      {/* 新增对话框 */}
-      <Dialog open={!!editing} onOpenChange={v => { if (!v) setEditing(null) }}>
+      {/* 批量新增对话框：一个活动名 + 多行标问（一行一条） */}
+      <Dialog open={!!creating} onOpenChange={v => { if (!v) setCreating(null) }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>新增活动标问</DialogTitle>
+          </DialogHeader>
+          {creating && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">活动名称</label>
+                <Input
+                  value={creating.activity_name}
+                  onChange={e => setCreating({ ...creating, activity_name: e.target.value })}
+                  placeholder="如：双十一消费券（下方多条标问都归到这个活动）"
+                />
+                <p className="text-xs text-muted-foreground">
+                  下方每一条标问都归属该活动名，评测报告按活动聚合成一根柱。留空则每条各自用标问全文。
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">活动标问（一行一条，可填多条）</label>
+                <textarea
+                  value={creating.questions}
+                  onChange={e => setCreating({ ...creating, questions: e.target.value })}
+                  rows={6}
+                  placeholder={'一行一条，例如：\n帮我解锁消费权益\n我要领取消费券\n消费券怎么用'}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <p className="text-xs text-muted-foreground">
+                  每行一条标问，采用精确相等匹配（去首尾空格）。请与日志「客户问题」列完全一致，避免误伤真实问题；空行自动忽略，重复自动去重。
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">备注（可选）</label>
+                <textarea
+                  value={creating.note}
+                  onChange={e => setCreating({ ...creating, note: e.target.value })}
+                  rows={3}
+                  placeholder="如：双十一活动，2026-11-01 ~ 11-11，会员中心解锁权益按钮"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="secondary" size="sm" onClick={() => setCreating(null)}>取消</Button>
+            <Button size="sm" onClick={handleCreate} disabled={saving}>
+              {saving && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 单条编辑对话框 */}
+      <Dialog open={!!editing} onOpenChange={v => { if (!v) setEditing(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑活动标问</DialogTitle>
           </DialogHeader>
           {editing && (
             <div className="space-y-4">
@@ -181,22 +266,24 @@ export default function EvalActivity() {
                   className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-ring"
                 />
                 <p className="text-xs text-muted-foreground">
-                  采用精确相等匹配（去首尾空格）。请填写与日志「客户问题」列完全一致的整句，避免误伤真实问题。
+                  采用精确相等匹配（去首尾空格）。改后的标问全文若与已有标问重复，会保存失败提示冲突。
                 </p>
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">备注（可选）</label>
-                <Input
+                <textarea
                   value={editing.note}
                   onChange={e => setEditing({ ...editing, note: e.target.value })}
-                  placeholder="如：会员中心解锁权益按钮"
+                  rows={3}
+                  placeholder="如：双十一活动，2026-11-01 ~ 11-11，会员中心解锁权益按钮"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
             </div>
           )}
           <DialogFooter>
             <Button variant="secondary" size="sm" onClick={() => setEditing(null)}>取消</Button>
-            <Button size="sm" onClick={handleSave} disabled={saving}>
+            <Button size="sm" onClick={handleUpdate} disabled={saving}>
               {saving && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}保存
             </Button>
           </DialogFooter>

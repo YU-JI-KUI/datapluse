@@ -427,6 +427,14 @@ async def delete_category(cat_id: int, user: EvalWrite):
 # ── 活动标问管理（写死按钮触发的写死回复，评测时整条跳过，不计入指标）────────────
 
 class ActivityBody(BaseModel):
+    """新增 body。传 questions（一行一条）即批量录入到同一活动名下；否则用单条 question。"""
+    question: str = ""
+    questions: list[str] = []
+    activity_name: str = ""
+    note: str = ""
+
+
+class ActivityUpdateBody(BaseModel):
     question: str
     activity_name: str = ""
     note: str = ""
@@ -440,16 +448,30 @@ async def list_activity_questions(user: EvalRead, bu: str = "securities"):
 
 @router.post("/activity-questions")
 async def create_activity_question(user: EvalWrite, body: ActivityBody, bu: str = "securities"):
-    """新增一条活动标问（与客户问题精确相等即命中、整条跳过评测）。
+    """新增活动标问（与客户问题精确相等即命中、整条跳过评测）。
 
-    activity_name 指定所属活动（多个 question 同名即同活动，报告按活动聚合）；
-    空则默认用 question 本身。已存在（同 bu+question）则更新活动名/备注。
+    传 questions（一行一条）则批量新增，同归到 activity_name 下；否则按单条 question 新增。
+    activity_name 空则默认用 question 本身；已存在（同 bu+question）则更新活动名/备注。
     """
+    raw = body.questions if body.questions else ([body.question] if body.question else [])
+    if not any((q or "").strip() for q in raw):
+        raise ParamError("活动标问不能为空")
+    recs = eval_engine.create_activity_questions(
+        bu, raw, note=body.note, activity_name=body.activity_name, operator=user.username)
+    return success({"created": len(recs), "questions": recs})
+
+
+@router.put("/activity-questions/{act_id}")
+async def update_activity_question(act_id: int, user: EvalWrite, body: ActivityUpdateBody):
+    """编辑活动标问。改后的标问全文若与同 BU 其它行重复，返回冲突提示。"""
     if not body.question.strip():
         raise ParamError("活动标问不能为空")
-    return success(eval_engine.create_activity_question(
-        bu, body.question.strip(), note=body.note, activity_name=body.activity_name,
-        operator=user.username))
+    rec = eval_engine.update_activity_question(
+        act_id, body.question.strip(), note=body.note,
+        activity_name=body.activity_name, operator=user.username)
+    if rec is None:
+        raise ParamError("该活动标问不存在，或改后的标问全文与已有标问重复")
+    return success(rec)
 
 
 @router.delete("/activity-questions/{act_id}")
