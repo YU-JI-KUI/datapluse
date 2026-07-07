@@ -549,6 +549,7 @@ def _disagreement_record(r: dict) -> dict:
         "会话ID": r["session"],
         "轮次": r["turn"],
         "客户问题": r["question"],
+        "分发BU": r.get("dispatched_bu", ""),
         "Judge意图": r["j_intent"],
         "Judge分发判定": r["j_dispatch"],
         "打标-分发是否正确": r["gold"].get("dispatch", ""),
@@ -561,7 +562,7 @@ def _disagreement_record(r: dict) -> dict:
 
 
 _DISAGREEMENT_COLUMNS = [
-    "会话ID", "轮次", "客户问题", "Judge意图", "Judge分发判定",
+    "会话ID", "轮次", "客户问题", "分发BU", "Judge意图", "Judge分发判定",
     "打标-分发是否正确", "Judge解决度", "打标-答案是否解决", "Judge理由",
     "答案文本", "需人工复核",
 ]
