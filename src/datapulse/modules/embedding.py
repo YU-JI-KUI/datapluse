@@ -50,13 +50,6 @@ def _get_model():
 # ── 公共接口 ───────────────────────────────────────────────────────────────
 
 
-def embed_text(text: str, cfg: dict[str, Any] | None = None) -> np.ndarray:
-    """对单条文本生成 embedding 向量。"""
-    model = _get_model()
-    vec = model.encode(text, normalize_embeddings=True)
-    return vec.astype(np.float32)
-
-
 def embed_batch(texts: list[str], cfg: dict[str, Any] | None = None) -> np.ndarray:
     """批量 embedding，返回 shape=(N, dim) 的 ndarray。
     batch_size 从 cfg["embedding"]["batch_size"] 读取，默认 64。
@@ -70,15 +63,6 @@ def embed_batch(texts: list[str], cfg: dict[str, Any] | None = None) -> np.ndarr
         show_progress_bar=False,
     )
     return vecs.astype(np.float32)
-
-
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    """两个向量的 cosine 相似度（已归一化时即为点积）"""
-    norm_a = np.linalg.norm(a)
-    norm_b = np.linalg.norm(b)
-    if norm_a < 1e-8 or norm_b < 1e-8:
-        return 0.0
-    return float(np.dot(a, b) / (norm_a * norm_b))
 
 
 def reload_model() -> None:

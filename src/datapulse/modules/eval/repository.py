@@ -790,11 +790,6 @@ class EvalReviewRepository:
         ).delete()
         return bool(n)
 
-    def delete_all(self, task_id: str) -> None:
-        """删任务时清理其复核（连带删除）。"""
-        self.session.query(EvalReview).filter(EvalReview.task_id == task_id).delete()
-
-
 def _rule_to_dict(r: EvalRule) -> dict[str, Any]:
     return {
         "id": r.id, "bu": r.bu, "question": r.question,

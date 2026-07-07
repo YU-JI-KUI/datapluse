@@ -18,14 +18,6 @@ export function formatDate(iso) {
 const SCOPE_LABEL = { _root: '通用（根）', _default: '通用兜底', securities: '证券', life: '寿险' }
 export const scopeName = (bu) => SCOPE_LABEL[bu] || bu
 
-export function formatBytes(bytes) {
-  if (!bytes) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
-}
-
 // v2 status names: raw → cleaned → pre_annotated → annotated → checked
 export function getStatusColor(status) {
   const map = {

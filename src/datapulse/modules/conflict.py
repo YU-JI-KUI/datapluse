@@ -366,11 +366,6 @@ async def run_conflict_detection(
     }
 
 
-def get_conflict_items(dataset_id: int) -> list[dict[str, Any]]:
-    db = get_db()
-    return db.list_conflicts_by_dataset(dataset_id, status="open")
-
-
 # ── 高质量数据自检（checked 内部互检）─────────────────────────────────────────
 
 

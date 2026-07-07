@@ -201,23 +201,6 @@ class CyberArkClient:
             f"object={object_name}，最后错误: {last_err}"
         ) from last_err
 
-    # ── 工厂方法 ──────────────────────────────────────────────────────────────────
-
-    @classmethod
-    def from_settings(cls) -> "CyberArkClient":
-        """从全局 Settings 自动构建客户端实例（推荐在启动时调用一次）。"""
-        from datapulse.config.settings import get_settings
-        s = get_settings()
-        _validate_cyberark_settings(s)
-        return cls(
-            url     = s.cyberark_url,
-            appid   = s.cyberark_appid,
-            key     = s.cyberark_key,
-            safe    = s.cyberark_safe,
-            folder  = s.cyberark_folder,
-            version = s.cyberark_version,
-        )
-
 
 # ── 模块级便捷函数（进程内缓存）────────────────────────────────────────────────
 

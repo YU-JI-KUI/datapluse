@@ -377,11 +377,6 @@ def review_upsert(task_id: str, row_index: int, *, reviewed_dispatch: str = "",
             comment=comment, reviewer=reviewer)
 
 
-def review_get(task_id: str, row_index: int) -> dict | None:
-    with eval_session() as s:
-        return _review_repo(s).get(task_id, row_index)
-
-
 def review_list(task_id: str) -> list[dict]:
     with eval_session() as s:
         return _review_repo(s).list_by_task(task_id)

@@ -168,10 +168,6 @@ class Settings(BaseSettings):
         """日志目录：LOG_DIR 显式设置时优先，否则自动落到 {storage_base_path}/logs。"""
         return self.log_dir.strip() or f"{self.storage_base_path}/logs"
 
-    @property
-    def is_prod(self) -> bool:
-        return self.app_env.lower() == "prod"
-
     # ── AI 评测相关 ───────────────────────────────────────────────────────────────
 
     @property
