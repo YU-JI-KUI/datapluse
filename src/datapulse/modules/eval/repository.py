@@ -103,6 +103,13 @@ class EvalRepository:
         t = self.session.query(EvalTask).filter(EvalTask.task_id == task_id).first()
         return _task_to_dict(t, full=True) if t else None
 
+    def get_task_status(self, task_id: str) -> str | None:
+        """只取 status 一列（供评测循环的中断检查点每批轻量回查）。记录不存在返回 None。"""
+        row = self.session.execute(
+            select(EvalTask.status).where(EvalTask.task_id == task_id)
+        ).first()
+        return row[0] if row else None
+
     def list_tasks_paged(self, page: int, page_size: int, bu: str = "",
                          keyword: str = "", mode: str = "") -> tuple[list[dict], int]:
         """分页查任务列表(SQL 层 ORDER BY + LIMIT/OFFSET + COUNT)。

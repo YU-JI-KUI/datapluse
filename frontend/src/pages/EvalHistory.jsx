@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Loader2, User, Eye, RotateCcw, Trash2, Search, X } from 'lucide-react'
+import { Loader2, User, Eye, RotateCcw, Trash2, Search, X, Pause, Play } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
@@ -24,7 +24,7 @@ const RESP = (r) => r?.data?.data ?? {}
 const STATUS = {
   pending:     { label: '待执行',   tone: 'slate' },
   running:     { label: '评测中',   tone: 'info' },
-  paused:      { label: '限流暂停', tone: 'warn' },
+  paused:      { label: '已暂停', tone: 'warn' },
   interrupted: { label: '恢复中',   tone: 'warn' },
   done:        { label: '已完成',   tone: 'good' },
   failed:      { label: '失败',     tone: 'bad' },
@@ -94,6 +94,26 @@ export default function EvalHistory() {
       load()
     } catch (e) {
       toast.error(e.response?.data?.message || '重测失败')
+    }
+  }
+
+  async function handlePause(task) {
+    try {
+      await evalApi.pause(task.task_id)
+      toast.success('已暂停，算力已腾出，可随时恢复')
+      load()
+    } catch (e) {
+      toast.error(e.response?.data?.message || '暂停失败')
+    }
+  }
+
+  async function handleResume(task) {
+    try {
+      await evalApi.resume(task.task_id)
+      toast.success('已恢复，将从断点继续')
+      load()
+    } catch (e) {
+      toast.error(e.response?.data?.message || '恢复失败')
     }
   }
 
@@ -222,6 +242,24 @@ export default function EvalHistory() {
                         >
                           <Eye className="w-4 h-4" />
                         </button>
+                        {['running', 'pending'].includes(t.status) && (
+                          <button
+                            title="暂停（腾出算力，可随时恢复）"
+                            onClick={() => handlePause(t)}
+                            className="p-1.5 rounded hover:bg-amber-50 text-amber-600"
+                          >
+                            <Pause className="w-4 h-4" />
+                          </button>
+                        )}
+                        {['paused', 'interrupted'].includes(t.status) && (
+                          <button
+                            title="恢复（从断点继续）"
+                            onClick={() => handleResume(t)}
+                            className="p-1.5 rounded hover:bg-green-50 text-green-600"
+                          >
+                            <Play className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           title="重新评测"
                           onClick={() => setRerunTarget(t)}

@@ -235,14 +235,30 @@ async def rerun_rows(task_id: str, body: RerunRowsBody, user: EvalWrite):
         eval_engine.rerun_rows_async(task_id, body.row_indices, operator=user.username)))
 
 
+@router.post("/tasks/{task_id}/pause")
+async def pause_task(task_id: str, user: EvalWrite):
+    """暂停任务（running/pending → paused），腾出算力给别的任务，可随时恢复。"""
+    task = eval_engine.get_task(task_id)
+    if not task:
+        raise NotFoundError("任务不存在")
+    if not eval_engine.pause_task(task_id):
+        raise ParamError("该任务当前状态无法暂停（仅运行中/待执行可暂停）")
+    return success(eval_engine.get_task(task_id))
+
+
 @router.post("/tasks/{task_id}/resume")
 async def resume_task(task_id: str, user: EvalWrite):
-    """断点续跑：对中断的任务，跳过已完成行继续。"""
+    """断点续跑：对中断的任务（暂停/失败等），跳过已完成行继续。
+
+    先把 paused/interrupted 显式置 pending（worker 只抢 pending），再唤起 worker。
+    failed 类走 submit(resume=True) 的原有语义。
+    """
     task = eval_engine.get_task(task_id)
     if not task:
         raise NotFoundError("任务不存在")
     if not eval_engine.can_resume(task_id):
         raise ParamError("该任务无需或无法续跑")
+    eval_engine.resume_task(task_id)   # paused/interrupted → pending（幂等，非该态则无操作）
     eval_worker.submit(task_id, resume=True, operator=user.username)
     return success(eval_engine.get_task(task_id))
 

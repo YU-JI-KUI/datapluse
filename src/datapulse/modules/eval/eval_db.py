@@ -91,6 +91,12 @@ def get_task(task_id: str) -> dict | None:
         return _repo(s).get_task(task_id)
 
 
+def get_task_status(task_id: str) -> str | None:
+    """只取 status 一列，供评测循环的中断检查点每批轻量回查。记录不存在返回 None。"""
+    with eval_session() as s:
+        return _repo(s).get_task_status(task_id)
+
+
 def list_tasks_paged(page: int, page_size: int, bu: str = "",
                      keyword: str = "", mode: str = "") -> tuple[list[dict], int]:
     with eval_session() as s:

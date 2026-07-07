@@ -23,7 +23,7 @@ from datapulse.config.settings import get_settings
 from datapulse.modules.eval import eval_db
 from datapulse.modules.eval.bu.registry import get_bu
 from datapulse.modules.eval.evaluator import run_evaluation
-from datapulse.modules.eval.llm.judge_runner import RateLimitedError
+from datapulse.modules.eval.llm.judge_runner import EvalCancelled, EvalPaused, RateLimitedError
 
 _log = structlog.get_logger(__name__)
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -381,6 +381,13 @@ async def run_eval(task_id: str, resume: bool = False, operator: str = "eval") -
                             status="paused", stage="paused", error=f"大模型限流，已暂停自动重试：{e}")
         from datapulse.modules.eval import eval_worker
         eval_worker.schedule_resume(task_id, delay=_RATE_LIMIT_RESUME_DELAY, operator=operator)
+    except EvalCancelled:
+        # 任务被删（DB 记录已没）：什么都不写，finally 释放锁，worker 立即抢下一个
+        _log.info("eval.cancelled", task_id=task_id)
+    except EvalPaused:
+        # 任务被手动暂停：状态已是 paused（暂停接口置的），这里不覆盖、不自动续跑，
+        # 释放锁腾出算力，等用户手动恢复
+        _log.info("eval.paused.manual", task_id=task_id)
     except Exception as e:
         _log.exception("eval.failed", task_id=task_id)
         eval_db.update_task(task_id, updated_by=operator,
@@ -416,8 +423,39 @@ def recover_tasks() -> int:
 
 
 def delete_task(task_id: str) -> bool:
-    """删除评测任务（连逐条结果一起硬删）。返回是否删到了记录。"""
+    """删除评测任务（连逐条结果一起硬删）。返回是否删到了记录。
+
+    若任务正在跑，worker 的中断检查点下一批回查 get_task_status 得 None 即中止、
+    释放串行锁，新任务立即可抢——不再卡在已删任务上。
+    """
     return eval_db.delete_task(task_id)
+
+
+def pause_task(task_id: str) -> bool:
+    """暂停任务：running/pending → paused。返回任务是否可暂停。
+
+    running：worker 中断检查点下一批感知 paused 后中止、释放锁，腾出算力；已落盘行不丢。
+    pending：直接置 paused，worker 只抢 pending，天然不会抢它。
+    非这两态（done/failed 等）不可暂停。
+    """
+    t = eval_db.get_task(task_id)
+    if not t or t["status"] not in ("running", "pending"):
+        return False
+    eval_db.update_task(task_id, status="paused", stage="paused",
+                        error="已手动暂停，可随时恢复")
+    return True
+
+
+def resume_task(task_id: str) -> bool:
+    """恢复任务：paused/interrupted → pending，worker 重抢后断点续跑（已落盘行跳过）。
+
+    显式置 pending 是必须的——worker 只抢 pending，光起 worker 抢不到 paused 任务。
+    """
+    t = eval_db.get_task(task_id)
+    if not t or t["status"] not in ("paused", "interrupted"):
+        return False
+    eval_db.update_task(task_id, status="pending", stage="", error=None)
+    return True
 
 
 def rerun_task(task_id: str) -> bool:

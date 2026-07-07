@@ -476,6 +476,7 @@ export const evalApi = {
       j_dispatch: extra.j_dispatch || '',
       j_resolved: extra.j_resolved || '',
     } }),
+  pause:     (taskId) => api.post(`/eval/tasks/${taskId}/pause`),
   resume:    (taskId) => api.post(`/eval/tasks/${taskId}/resume`),
   rerun:     (taskId) => api.post(`/eval/tasks/${taskId}/rerun`),
   remove:    (taskId) => api.delete(`/eval/tasks/${taskId}`),

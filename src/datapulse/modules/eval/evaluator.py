@@ -14,6 +14,8 @@ from collections import Counter, defaultdict
 from datapulse.modules.eval import _store as store
 from datapulse.modules.eval.bu.base import BUConfig
 from datapulse.modules.eval.llm.judge_runner import (
+    EvalCancelled,
+    EvalPaused,
     RateLimitedError,
     active_backend,
     generate_advice,
@@ -351,6 +353,15 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
     # 落盘(5万条约 1000 次)代价远小于省下的重复 LLM 调用。
     batch_size = 50
     for start in range(0, len(pending), batch_size):
+        # 中断检查点：每批回查任务状态。任务被删（None）→ 取消；被手动暂停 → 暂停。
+        # 抛异常由 run_eval 捕获后释放串行锁，避免 worker 卡在已删/已暂停任务上。
+        if persist and task_id:
+            from datapulse.modules.eval import eval_db
+            _st = eval_db.get_task_status(task_id)
+            if _st is None:
+                raise EvalCancelled(task_id)
+            if _st == "paused":
+                raise EvalPaused(task_id)
         batch = pending[start:start + batch_size]
         try:
             judges = await judge_batch(batch, bu)

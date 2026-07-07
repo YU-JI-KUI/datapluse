@@ -40,6 +40,16 @@ class RateLimitedError(Exception):
         self.partial = partial or []
 
 
+class EvalCancelled(Exception):
+    """评测中途发现任务已被删除（DB 记录不存在）。上层据此干净中止、释放串行锁，
+    什么都不写（记录已没了）。让删除运行中任务后新任务能立即接管。"""
+
+
+class EvalPaused(Exception):
+    """评测中途发现任务被手动暂停（status=paused）。上层据此中止、释放锁、保留已落盘
+    进度，不覆盖状态、不自动续跑，等用户手动恢复。"""
+
+
 # 输出是 11 字段 JSON，每个结论前还带一句依据，复杂 case 偏长；3072 留足空间不被
 # 截断（截断会导致 JSON 不闭合、解析失败）。
 _JUDGE_MAX_TOKENS = 3072
