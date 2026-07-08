@@ -235,14 +235,32 @@ async def rerun_rows(task_id: str, body: RerunRowsBody, user: EvalWrite):
         eval_engine.rerun_rows_async(task_id, body.row_indices, operator=user.username)))
 
 
+class RerunAdviceBody(BaseModel):
+    card_ids: list[str] | None = None   # 空/None=全量重生；非空=只重生这些卡
+
+
 @router.post("/tasks/{task_id}/rerun-advice")
-async def rerun_advice(task_id: str, user: EvalWrite):
+async def rerun_advice(task_id: str, user: EvalWrite, body: RerunAdviceBody | None = None):
     """只重算优化建议：复用已落盘 rows，不重 judge、不改指标。用库中最新 advice 提示词。
+    body.card_ids 非空时只重生这些卡（按卡单独重生），否则全量。
     立即返回，前端轮询任务状态看进度。方便调优提示词后快速看新建议。"""
     if not eval_engine.get_task(task_id):
         raise NotFoundError("任务不存在")
+    card_ids = body.card_ids if body else None
     return success(_rerun_result_or_raise(
-        eval_engine.rerun_advice_async(task_id, operator=user.username)))
+        eval_engine.rerun_advice_async(task_id, operator=user.username, only_ids=card_ids)))
+
+
+@router.get("/tasks/{task_id}/advice-prompt")
+async def advice_prompt(task_id: str, user: EvalRead, card_id: str = Query(...)):
+    """查看某张建议卡真实喂给模型的完整 prompt（system+user，含填满的 payload）。
+    实时用库中最新提示词组装，不落库、不调 LLM。方便调提示词时对照真实内容。"""
+    if not eval_engine.get_task(task_id):
+        raise NotFoundError("任务不存在")
+    res = eval_engine.preview_advice_prompt(task_id, card_id)
+    if res is None:
+        raise NotFoundError("未找到该建议卡（可能业务分类无数据或 id 不匹配）")
+    return success(res)
 
 
 @router.post("/tasks/{task_id}/pause")

@@ -1,51 +1,17 @@
 /** 优化建议：多专项卡片（每维度一段文本，可折叠）；兼容旧任务的结构化 items。 */
 import { useState, useRef, useEffect } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { AlertOctagon, AlertTriangle, Info, Lightbulb, Cpu, FileText, ChevronRight,
          ChevronsDownUp, ChevronsUpDown, RefreshCw, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { EvalBadge, SectionTitle } from './EvalPrimitives'
+import AdviceMarkdown from './AdviceMarkdown'
+import AdviceCardActions from './AdviceCardActions'
 import { evalApi } from '@/lib/api'
-
-// markdown 渲染样式（与 EvalPrompts 保持一致）
-const MD = {
-  h1: (p) => <h1 className="text-base font-bold mt-3 mb-2" {...p} />,
-  h2: (p) => <h2 className="text-sm font-bold mt-3 mb-1.5" {...p} />,
-  h3: (p) => <h3 className="text-sm font-semibold mt-2 mb-1" {...p} />,
-  p:  (p) => <p className="my-1.5 leading-relaxed text-sm text-gray-700" {...p} />,
-  ul: (p) => <ul className="list-disc pl-5 my-1.5 space-y-0.5 text-sm text-gray-700" {...p} />,
-  ol: (p) => <ol className="list-decimal pl-5 my-1.5 space-y-0.5 text-sm text-gray-700" {...p} />,
-  li: (p) => <li className="leading-relaxed" {...p} />,
-  code: (p) => <code className="rounded bg-gray-200 px-1 py-0.5 text-[0.85em] font-mono" {...p} />,
-  pre: (p) => <pre className="rounded bg-gray-100 p-2 my-2 overflow-x-auto text-xs" {...p} />,
-  blockquote: (p) => <blockquote className="border-l-2 border-gray-300 pl-3 italic text-muted-foreground my-2 text-sm" {...p} />,
-  table: (p) => <table className="border-collapse my-2 text-xs" {...p} />,
-  th: (p) => <th className="border border-gray-300 px-2 py-1 bg-gray-100 text-left" {...p} />,
-  td: (p) => <td className="border border-gray-300 px-2 py-1" {...p} />,
-  a:  (p) => <a className="text-blue-600 underline" {...p} />,
-}
 
 // 维度徽章色
 const DIM_TONE = { 分发: 'bad', 解决率: 'warn', 新分类: 'brand' }
-
-/**
- * 清洗模型输出的噪声，保证 markdown 干净可渲染：
- * 模型偶尔吐图片/HTML 徽章（react-markdown 不渲染 → 坏图/原文）、连续感叹号星号等噪声。
- * 提示词已约束，这里是前端兜底。只动新 cards 分支。
- */
-function sanitizeAdviceText(text) {
-  if (!text) return ''
-  return text
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')        // 去图片 ![alt](url)（含 shields.io 徽章）
-    .replace(/<\/?[a-zA-Z][^>]*>/g, '')          // 去裸 HTML 标签 <span> </div> 等
-    .replace(/[!！]{2,}/g, '')                    // 连续感叹号噪声
-    .replace(/\*{3,}/g, '**')                     // 3+ 连星折成加粗
-    .replace(/\n{3,}/g, '\n\n')                   // 多余空行收敛
-    .trim()
-}
 
 // ── 旧任务用：结构化 items ──────────────────────────────────────────────────
 const SEVERITY = {
@@ -68,7 +34,7 @@ function SourceBadge({ source }) {
 }
 
 /** 单张可折叠建议卡（受控）：open 由父的 openIds 决定。 */
-function AdviceCard({ card, open, onToggle }) {
+function AdviceCard({ card, open, onToggle, taskId, onRefetch }) {
   return (
     <details open={open} className="group rounded-lg border">
       <summary
@@ -81,11 +47,12 @@ function AdviceCard({ card, open, onToggle }) {
         {card.category && card.category !== '全局' && (
           <EvalBadge tone="slate">{card.category}</EvalBadge>
         )}
+        <span className="ml-auto">
+          <AdviceCardActions card={card} taskId={taskId} onRefetch={onRefetch} />
+        </span>
       </summary>
       <div className="border-t px-4 py-3">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>
-          {sanitizeAdviceText(card.text) || '_（无内容）_'}
-        </ReactMarkdown>
+        <AdviceMarkdown text={card.text} />
       </div>
     </details>
   )
@@ -107,7 +74,7 @@ export default function AdvicePanel({ advice, taskId, onRefetch }) {
         </div>
       </CardHeader>
       <CardContent>
-        {cards ? <CardsView cards={cards} /> : <LegacyView advice={advice} />}
+        {cards ? <CardsView cards={cards} taskId={taskId} onRefetch={onRefetch} /> : <LegacyView advice={advice} />}
       </CardContent>
     </Card>
   )
@@ -155,13 +122,14 @@ function RegenerateButton({ taskId, onRefetch }) {
   )
 }
 
-/** 新结构：一行一卡、可折叠（受控）+ 全部展开/折叠。 */
-function CardsView({ cards }) {
-  // 默认：全局卡展开、逐分类折叠
-  const [openIds, setOpenIds] = useState(() =>
-    new Set(cards.filter((c) => c.category === '全局').map((c) => c.id)))
+/** 新结构：只展示 3 张全局卡（分类卡移到「业务洞察」对应分类下）。可折叠 + 全部展开/折叠。 */
+function CardsView({ cards, taskId, onRefetch }) {
+  // 只保留全局卡（分发诊断/解决率诊断/新分类发现）；分类卡在业务洞察里展示
+  const globalCards = cards.filter((c) => c.category === '全局')
+  // 全局卡默认全展开
+  const [openIds, setOpenIds] = useState(() => new Set(globalCards.map((c) => c.id)))
 
-  if (!cards.length) {
+  if (!globalCards.length) {
     return (
       <div className="text-sm text-muted-foreground py-4 text-center">
         暂无明显需优化的点（指标良好或样本不足）。
@@ -169,7 +137,7 @@ function CardsView({ cards }) {
     )
   }
 
-  const allOpen = openIds.size === cards.length
+  const allOpen = openIds.size === globalCards.length
   const toggle = (id) => setOpenIds((prev) => {
     const next = new Set(prev)
     next.has(id) ? next.delete(id) : next.add(id)
@@ -178,16 +146,18 @@ function CardsView({ cards }) {
 
   return (
     <div className="space-y-2">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">各业务分类的分发/解决率优化建议已移至「业务洞察」，点开对应分类查看。</span>
         <Button variant="ghost" size="sm" className="text-xs text-muted-foreground"
-          onClick={() => setOpenIds(allOpen ? new Set() : new Set(cards.map((c) => c.id)))}>
+          onClick={() => setOpenIds(allOpen ? new Set() : new Set(globalCards.map((c) => c.id)))}>
           {allOpen
             ? <><ChevronsDownUp className="w-3.5 h-3.5 mr-1" />全部折叠</>
             : <><ChevronsUpDown className="w-3.5 h-3.5 mr-1" />全部展开</>}
         </Button>
       </div>
-      {cards.map((c) => (
-        <AdviceCard key={c.id} card={c} open={openIds.has(c.id)} onToggle={toggle} />
+      {globalCards.map((c) => (
+        <AdviceCard key={c.id} card={c} open={openIds.has(c.id)} onToggle={toggle}
+          taskId={taskId} onRefetch={onRefetch} />
       ))}
     </div>
   )

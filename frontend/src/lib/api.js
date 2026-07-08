@@ -499,8 +499,12 @@ export const evalApi = {
   rerunRows: (taskId, rowIndices) =>
     api.post(`/eval/tasks/${taskId}/rerun-rows`, { row_indices: rowIndices }),
   // 只重算优化建议:不重 judge、复用已落盘 rows,用最新提示词秒级出新建议
-  rerunAdvice: (taskId) =>
-    api.post(`/eval/tasks/${taskId}/rerun-advice`),
+  // cardIds 非空 = 只重生这些卡（按卡单独重生）；空 = 全量
+  rerunAdvice: (taskId, cardIds) =>
+    api.post(`/eval/tasks/${taskId}/rerun-advice`, cardIds ? { card_ids: cardIds } : {}),
+  // 查看某张建议卡真实喂给模型的完整 prompt（system+user，含填满的 payload）
+  getAdvicePrompt: (taskId, cardId) =>
+    api.get(`/eval/tasks/${taskId}/advice-prompt`, { params: { card_id: cardId } }),
 
   // 三种导出（统一 blob 下载）
   // 文件名以后端 Content-Disposition 为准（含原始上传文件名前缀）；下方 fallback 仅在

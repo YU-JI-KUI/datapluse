@@ -144,7 +144,8 @@ export default function EvalResult({ taskId, result, onRefetch }) {
 
       {/* 业务洞察 */}
       <div id="eval-insights" className="scroll-mt-16" />
-      <InsightsPanel insights={result.insights} />
+      <InsightsPanel insights={result.insights} adviceCards={result.advice?.cards}
+        taskId={taskId} onRefetch={onRefetch} />
 
       {/* 分布图 */}
       <div id="eval-charts" className="scroll-mt-16" />

@@ -277,11 +277,24 @@ def rerun_subset(task_id: str, flag: str = "review", operator: str = "system") -
     return rerun_rows_async(task_id, indices, operator=operator)
 
 
-async def _rerun_advice_core(task_id: str, operator: str) -> None:
+def _merge_cards(old_cards: list, new_cards: list) -> list:
+    """按 id 用 new_cards 覆盖 old_cards 里的同 id 卡，其余原样保留、顺序不变。
+
+    单卡重生时只替换目标卡：old 里没有的新卡追加到末尾。
+    """
+    by_id = {c["id"]: c for c in new_cards if c.get("id")}
+    merged = [by_id.pop(c["id"], c) if c.get("id") in by_id else c for c in old_cards]
+    merged += list(by_id.values())   # old 里没有的新卡（一般不会有）
+    return merged
+
+
+async def _rerun_advice_core(task_id: str, operator: str,
+                             only_ids: list[str] | None = None) -> None:
     """只重算优化建议:复用已落盘 rows,不碰 judge/指标。用库中最新 advice 提示词。
 
     调优提示词后无需重跑整个评测:读回 rows 重聚合归因料 + 从 result_json 读回
     insights(judge 未变,口径不变),重新生成 advice,只覆盖 result_json 的 advice 字段。
+    only_ids 非空时只重生这些卡,合并回旧 advice(其余卡保留)。
     """
     from datapulse.modules.eval.advice_facts import build_facts
     from datapulse.modules.eval.llm.judge_runner import generate_advice
@@ -292,16 +305,29 @@ async def _rerun_advice_core(task_id: str, operator: str) -> None:
     bu_dispatch = (old.get("summary", {}) or {}).get("bu_dispatch") or old.get("bu_dispatch")
     insights = old.get("insights", {})           # judge 未重跑,直接复用,不重聚合
     facts = build_facts(task_id, bu, bu_dispatch)
-    advice = await generate_advice(facts, insights, bu, bu_dispatch)
-    old["advice"] = advice                       # 只替换 advice,其余字段原样写回
+    advice = await generate_advice(facts, insights, bu, bu_dispatch, only_ids=only_ids)
+
+    if only_ids:
+        # 单卡重生：合并回旧 advice，只替换目标卡，其余保留
+        old_advice = old.get("advice") or {}
+        old_cards = old_advice.get("cards") or []
+        merged = _merge_cards(old_cards, advice.get("cards") or [])
+        # source：有任一 model 卡则整体算 model（否则维持旧值/rule）
+        src = "model" if any(c.get("id") for c in advice.get("cards", [])) and advice.get("source") == "model" \
+            else old_advice.get("source") or advice.get("source")
+        old["advice"] = {"source": src, "cards": merged}
+    else:
+        old["advice"] = advice                   # 全量：整体替换
     eval_db.save_result(task_id, old, updated_by=operator)
 
 
-def rerun_advice_async(task_id: str, operator: str = "system") -> dict:
+def rerun_advice_async(task_id: str, operator: str = "system",
+                       only_ids: list[str] | None = None) -> dict:
     """异步单独重算优化建议(后台线程)。立即返回,前端轮询任务状态看进度。
 
-    拿全局 advisory 锁与评测/重跑串行(advice 也并发调 LLM,不与大评测抢内网网关);
-    不重 judge、不改 insights/metrics/summary。status 置 rerunning,完成恢复 done。
+    only_ids 非空时只重生这些卡(按卡单独重生)。拿全局 advisory 锁与评测/重跑串行
+    (advice 也调 LLM,不与大评测抢内网网关);不重 judge、不改 insights/metrics/summary。
+    status 置 rerunning,完成恢复 done。
     """
     import threading
 
@@ -321,9 +347,9 @@ def rerun_advice_async(task_id: str, operator: str = "system") -> dict:
                     return
                 eval_db.update_task(task_id, updated_by=operator, status="rerunning",
                                     stage="advising", error=None)
-                asyncio.run(_rerun_advice_core(task_id, operator))
+                asyncio.run(_rerun_advice_core(task_id, operator, only_ids=only_ids))
                 eval_db.update_task(task_id, updated_by=operator, status="done", stage="done")
-                _log.info("eval.rerun_advice.done", task_id=task_id)
+                _log.info("eval.rerun_advice.done", task_id=task_id, only_ids=only_ids)
         except Exception as e:
             _log.exception("eval.rerun_advice.failed", task_id=task_id)
             eval_db.update_task(task_id, updated_by=operator, status="done",
@@ -331,6 +357,30 @@ def rerun_advice_async(task_id: str, operator: str = "system") -> dict:
 
     threading.Thread(target=_worker, name=f"eval-advice-{task_id}", daemon=True).start()
     return {"accepted": True}
+
+
+def preview_advice_prompt(task_id: str, card_id: str) -> dict | None:
+    """组出某张建议卡真实喂给模型的完整 prompt（system+user，含填满的 payload）。
+
+    实时用库中最新 advice 提示词 + 已落盘 rows 组装，不落库、不调 LLM。
+    找不到该卡（分类无数据 / id 不匹配）返回 None。供「查看提示词」用。
+    """
+    from datapulse.modules.eval.advice_facts import build_facts
+    from datapulse.modules.eval.advisor import build_card_prompts
+
+    t = eval_db.get_task(task_id)
+    if not t:
+        return None
+    bu = get_bu(t.get("bu"))                      # 最新提示词
+    old = eval_db.load_result(task_id) or {}
+    bu_dispatch = (old.get("summary", {}) or {}).get("bu_dispatch") or old.get("bu_dispatch")
+    insights = old.get("insights", {})
+    facts = build_facts(task_id, bu, bu_dispatch)
+    specs = build_card_prompts(facts, insights, bu, bu_dispatch)
+    spec = next((s for s in specs if s["id"] == card_id), None)
+    if not spec:
+        return None
+    return {"id": spec["id"], "title": spec["title"], "messages": spec["messages"]}
 
 
 async def dryrun_row(task_id: str, row_index: int,

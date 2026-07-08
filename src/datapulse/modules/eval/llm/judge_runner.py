@@ -176,18 +176,26 @@ async def _call_advice(messages: list) -> str:
 
 
 async def generate_advice(facts: dict, insights: dict, bu: BUConfig,
-                          bu_dispatch: dict | None = None) -> dict:
+                          bu_dispatch: dict | None = None,
+                          only_ids: list[str] | None = None) -> dict:
     """生成优化建议（多专项卡片）。每张卡各调一次模型出一段纯文本 markdown。
 
     卡片体系：固定 3（分发/解决率/新分类）+ 动态 2N（每分类·分发/解决率）。
+    only_ids 非空时只生成这些卡 id（按卡单独重生），返回也只含这些卡。
     并发受 judge_concurrency 节流；单卡失败跳过、warning；全败或非 pingan 后端整体
     降级到规则版卡片。返回 {"source": "model"|"rule", "cards": [...]}。
     """
     specs = build_card_prompts(facts, insights, bu, bu_dispatch)
+    if only_ids:
+        want = set(only_ids)
+        specs = [s for s in specs if s["id"] in want]
 
     # 非真实模型 / 无料 → 直接规则版（mock 也走这，保证离线端到端可验）
     if active_backend() != "pingan" or not specs:
-        return {"source": "rule", "cards": rule_based_cards(facts, insights, bu, bu_dispatch)}
+        cards = rule_based_cards(facts, insights, bu, bu_dispatch)
+        if only_ids:
+            cards = [c for c in cards if c["id"] in set(only_ids)]
+        return {"source": "rule", "cards": cards}
 
     sem = asyncio.Semaphore(max(1, settings.judge_concurrency))
 
@@ -208,6 +216,9 @@ async def generate_advice(facts: dict, insights: dict, bu: BUConfig,
     cards = [c for c in results if c]
     if cards:
         return {"source": "model", "cards": cards}
-    # 全败：整体降级规则版
+    # 全败：整体降级规则版（单卡重跑时只取目标卡的规则版，避免 merge 误替换其余）
     logger.error("全部建议卡生成失败,降级到规则版")
-    return {"source": "rule", "cards": rule_based_cards(facts, insights, bu, bu_dispatch)}
+    rule_cards = rule_based_cards(facts, insights, bu, bu_dispatch)
+    if only_ids:
+        rule_cards = [c for c in rule_cards if c["id"] in set(only_ids)]
+    return {"source": "rule", "cards": rule_cards}
