@@ -1,19 +1,12 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 794f4287
+# 基于 origin/main @ ad5c05d0
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   794f4287 优化建议：分类卡移入业务洞察 + 按卡重生 + 查看提示词
-frontend/src/components/eval/AdviceCardActions.jsx
-frontend/src/components/eval/AdviceMarkdown.jsx
-frontend/src/components/eval/AdvicePanel.jsx
-frontend/src/components/eval/EvalResult.jsx
-frontend/src/components/eval/InsightsPanel.jsx
-frontend/src/lib/api.js
-src/datapulse/modules/eval/llm/judge_runner.py
+#   ad5c05d0 优化建议提示词：XML 包裹数据 + Qwen 最佳实践
+frontend/src/pages/EvalPrompts.jsx
+src/datapulse/modules/eval/prompts/_default/advice_card_system.md
 src/datapulse/modules/eval/prompts/_default/advice_dispatch_global.md
 src/datapulse/modules/eval/prompts/_default/advice_intent_dispatch.md
 src/datapulse/modules/eval/prompts/_default/advice_intent_resolved.md
 src/datapulse/modules/eval/prompts/_default/advice_new_business.md
 src/datapulse/modules/eval/prompts/_default/advice_resolved_global.md
-src/datapulse/pipeline/eval_engine.py
-src/datapulse/router/eval.py
