@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Loader2, Save, RotateCcw, FileText, CheckCircle2, Pencil, Columns2, Eye } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -255,7 +256,7 @@ export default function EvalPrompts() {
                       'h-[560px] overflow-y-auto rounded-md bg-muted/30 px-4 py-3 text-sm',
                       viewMode === 'split' ? 'border border-input' : '',
                     ].join(' ')}>
-                      <ReactMarkdown components={MD}>{draft || '_（空）_'}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>{draft || '_（空）_'}</ReactMarkdown>
                     </div>
                   )}
                 </div>
