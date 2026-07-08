@@ -1,36 +1,24 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ dec11f72
+# 基于 origin/main @ eac69229
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   dec11f72 AI 评测优化建议：单次结构化改多专项文本卡片
-#   bc084654 活动标问：支持批量录入与编辑，备注改多行
-#   01bd276d 导出不一致case：Excel 补分发BU列
-#   14be2f7e 评测 worker：修删除运行中任务卡死 + 单任务暂停/恢复
-frontend/package-lock.json
-frontend/package.json
+#   eac69229 优化建议：清理输出 + 全展开折叠 + 单独重跑
+#   cd09b8e1 清理死代码：删未引用函数与孤儿页，卸未用依赖
 frontend/src/components/eval/AdvicePanel.jsx
+frontend/src/components/eval/EvalResult.jsx
+frontend/src/lib/api.js
+frontend/src/pages/EvalReport.jsx
 src/datapulse/config/settings.py
 src/datapulse/modules/eval/advice_facts.py
-src/datapulse/modules/eval/advisor.py
-src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/llm/judge_runner.py
-src/datapulse/modules/eval/prompt_loader.py
-src/datapulse/modules/eval/prompts/README.md
 src/datapulse/modules/eval/prompts/_default/advice_card_system.md
-src/datapulse/modules/eval/prompts/_default/advice_dispatch_global.md
-src/datapulse/modules/eval/prompts/_default/advice_intent_dispatch.md
-src/datapulse/modules/eval/prompts/_default/advice_intent_resolved.md
-src/datapulse/modules/eval/prompts/_default/advice_new_business.md
-src/datapulse/modules/eval/prompts/_default/advice_resolved_global.md
 src/datapulse/pipeline/eval_engine.py
-tests/eval/test_advice_facts.py
-tests/eval/test_modes_and_insights.py
-frontend/src/lib/api.js
-frontend/src/pages/EvalActivity.jsx
+src/datapulse/router/eval.py
+frontend/package-lock.json
+frontend/package.json
+frontend/src/lib/utils.js
+src/datapulse/config/cyberark.py
+src/datapulse/modules/conflict.py
+src/datapulse/modules/embedding.py
 src/datapulse/modules/eval/eval_db.py
 src/datapulse/modules/eval/repository.py
-src/datapulse/router/eval.py
-frontend/src/pages/EvalHistory.jsx
-[DEL] src/datapulse/modules/eval/prompts/_default/advice_system.md
-[DEL] src/datapulse/modules/eval/prompts/_default/advice_user.md
-[DEL] tests/eval/test_parse_advice.py
+[DEL] frontend/src/pages/DataManagement.jsx
