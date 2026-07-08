@@ -498,6 +498,9 @@ export const evalApi = {
   // 异步重跑用户勾选的明细行(任意视图),立即返回,轮询任务状态看进度
   rerunRows: (taskId, rowIndices) =>
     api.post(`/eval/tasks/${taskId}/rerun-rows`, { row_indices: rowIndices }),
+  // 只重算优化建议:不重 judge、复用已落盘 rows,用最新提示词秒级出新建议
+  rerunAdvice: (taskId) =>
+    api.post(`/eval/tasks/${taskId}/rerun-advice`),
 
   // 三种导出（统一 blob 下载）
   // 文件名以后端 Content-Disposition 为准（含原始上传文件名前缀）；下方 fallback 仅在

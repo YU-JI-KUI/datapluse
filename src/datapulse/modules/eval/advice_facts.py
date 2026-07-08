@@ -29,8 +29,19 @@ _NON_BU = "非本BU"
 
 
 def _clip(s: str, n: int = _MAX_ANSWER_CHARS) -> str:
+    """超长答案在句子边界截断，避免把喂给模型的样例切成半句话。
+
+    先硬切到 n，再在末尾一段窗口内回退到最近的句末标点（。！？!?换行），
+    找不到就退化为硬切。让样例保持自洽，模型归因不被半句话误导。
+    """
     s = (s or "").strip()
-    return s if len(s) <= n else s[:n] + "…"
+    if len(s) <= n:
+        return s
+    head = s[:n]
+    cut = max(head.rfind(c) for c in "。！？!?\n")
+    if cut >= n - 120:            # 边界离末尾不太远才用，避免砍掉太多
+        head = head[: cut + 1]
+    return head.rstrip() + "…"
 
 
 def _example(r: dict) -> dict:

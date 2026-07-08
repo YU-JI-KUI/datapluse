@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     llm_max_retries:   int = 5    # 限流/网络抖动多试几次，配合指数退避
     # 优化建议：多专项提示词各调一次，尽量把原始问题/样例喂满上下文窗口做错误归因。
     advice_ctx_budget: int = 128000  # Qwen3.5-122B 上下文窗口(token)，扣骨架+输出后余量塞样例
-    advice_max_tokens: int = 1536    # 每条建议输出上限：简洁 markdown，不需要 judge 的 3072
+    advice_max_tokens: int = 3072    # 每条建议输出上限：给足空间保证自洽收尾，不被截断写一半
 
     # ── 计算属性 ──────────────────────────────────────────────────────────────────
 

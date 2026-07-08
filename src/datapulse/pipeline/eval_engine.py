@@ -277,6 +277,62 @@ def rerun_subset(task_id: str, flag: str = "review", operator: str = "system") -
     return rerun_rows_async(task_id, indices, operator=operator)
 
 
+async def _rerun_advice_core(task_id: str, operator: str) -> None:
+    """只重算优化建议:复用已落盘 rows,不碰 judge/指标。用库中最新 advice 提示词。
+
+    调优提示词后无需重跑整个评测:读回 rows 重聚合归因料 + 从 result_json 读回
+    insights(judge 未变,口径不变),重新生成 advice,只覆盖 result_json 的 advice 字段。
+    """
+    from datapulse.modules.eval.advice_facts import build_facts
+    from datapulse.modules.eval.llm.judge_runner import generate_advice
+
+    t = eval_db.get_task(task_id)
+    bu = get_bu(t.get("bu"))                     # get_bu 已注入库中最新 prompt/分类/业务知识
+    old = eval_db.load_result(task_id) or {}
+    bu_dispatch = (old.get("summary", {}) or {}).get("bu_dispatch") or old.get("bu_dispatch")
+    insights = old.get("insights", {})           # judge 未重跑,直接复用,不重聚合
+    facts = build_facts(task_id, bu, bu_dispatch)
+    advice = await generate_advice(facts, insights, bu, bu_dispatch)
+    old["advice"] = advice                       # 只替换 advice,其余字段原样写回
+    eval_db.save_result(task_id, old, updated_by=operator)
+
+
+def rerun_advice_async(task_id: str, operator: str = "system") -> dict:
+    """异步单独重算优化建议(后台线程)。立即返回,前端轮询任务状态看进度。
+
+    拿全局 advisory 锁与评测/重跑串行(advice 也并发调 LLM,不与大评测抢内网网关);
+    不重 judge、不改 insights/metrics/summary。status 置 rerunning,完成恢复 done。
+    """
+    import threading
+
+    t = eval_db.get_task(task_id)
+    if not t:
+        return {"error": "任务不存在"}
+    if not eval_db.load_result(task_id):
+        return {"accepted": False, "reason": "任务尚无评测结果,无法重算建议"}
+
+    def _worker():
+        from datapulse.modules.eval import eval_db as _db
+        try:
+            with _db.advisory_lock() as got:
+                if not got:
+                    eval_db.update_task(task_id, updated_by=operator,
+                                        error="有评测任务正在运行，重算建议未开始，请稍后再试")
+                    return
+                eval_db.update_task(task_id, updated_by=operator, status="rerunning",
+                                    stage="advising", error=None)
+                asyncio.run(_rerun_advice_core(task_id, operator))
+                eval_db.update_task(task_id, updated_by=operator, status="done", stage="done")
+                _log.info("eval.rerun_advice.done", task_id=task_id)
+        except Exception as e:
+            _log.exception("eval.rerun_advice.failed", task_id=task_id)
+            eval_db.update_task(task_id, updated_by=operator, status="done",
+                                error=f"重算建议失败：{e}")
+
+    threading.Thread(target=_worker, name=f"eval-advice-{task_id}", daemon=True).start()
+    return {"accepted": True}
+
+
 async def dryrun_row(task_id: str, row_index: int,
                      business_knowledge: str | None = None) -> dict | None:
     """用当前 prompt 对某一条重新跑 Judge,返回新旧对比,不落库。

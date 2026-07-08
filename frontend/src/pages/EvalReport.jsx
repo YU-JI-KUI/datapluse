@@ -34,6 +34,11 @@ export default function EvalReport() {
     return () => { cancelled = true }
   }, [taskId])
 
+  // 供子组件在「重新生成建议」后静默刷新 result（不整页 loading）
+  async function refetchResult() {
+    try { setResult(RESP(await evalApi.getResult(taskId))) } catch { /* 忽略,下次进入再拉 */ }
+  }
+
   return (
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
@@ -62,7 +67,7 @@ export default function EvalReport() {
           <Button variant="outline" size="sm" onClick={() => navigate('/eval/history')}>返回历史</Button>
         </div>
       ) : (
-        <EvalResult taskId={taskId} result={result} />
+        <EvalResult taskId={taskId} result={result} onRefetch={refetchResult} />
       )}
     </div>
   )

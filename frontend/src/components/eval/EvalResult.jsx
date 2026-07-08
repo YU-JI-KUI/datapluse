@@ -14,7 +14,7 @@ import MetricsPanel from './MetricsPanel'
 import RowsTable from './RowsTable'
 import { evalApi } from '@/lib/api'
 
-export default function EvalResult({ taskId, result }) {
+export default function EvalResult({ taskId, result, onRefetch }) {
   if (!result) return null
   const s = result.summary || {}
   const f = result.filter_stats || {}
@@ -140,7 +140,7 @@ export default function EvalResult({ taskId, result }) {
 
       {/* 优化建议 */}
       <div id="eval-advice" className="scroll-mt-16" />
-      <AdvicePanel advice={result.advice} />
+      <AdvicePanel advice={result.advice} taskId={taskId} onRefetch={onRefetch} />
 
       {/* 业务洞察 */}
       <div id="eval-insights" className="scroll-mt-16" />

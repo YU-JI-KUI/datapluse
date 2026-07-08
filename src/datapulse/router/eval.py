@@ -235,6 +235,16 @@ async def rerun_rows(task_id: str, body: RerunRowsBody, user: EvalWrite):
         eval_engine.rerun_rows_async(task_id, body.row_indices, operator=user.username)))
 
 
+@router.post("/tasks/{task_id}/rerun-advice")
+async def rerun_advice(task_id: str, user: EvalWrite):
+    """只重算优化建议：复用已落盘 rows，不重 judge、不改指标。用库中最新 advice 提示词。
+    立即返回，前端轮询任务状态看进度。方便调优提示词后快速看新建议。"""
+    if not eval_engine.get_task(task_id):
+        raise NotFoundError("任务不存在")
+    return success(_rerun_result_or_raise(
+        eval_engine.rerun_advice_async(task_id, operator=user.username)))
+
+
 @router.post("/tasks/{task_id}/pause")
 async def pause_task(task_id: str, user: EvalWrite):
     """暂停任务（running/pending → paused），腾出算力给别的任务，可随时恢复。"""
