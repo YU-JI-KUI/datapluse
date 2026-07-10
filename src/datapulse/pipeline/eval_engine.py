@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -968,15 +969,28 @@ def create_activity_question(bu: str, question: str, note: str = "", activity_na
     return rec
 
 
+def _norm_activity_q(q: str) -> str:
+    """规范化单条活动标问：内部空白（含换行/制表）折叠成单个空格并去首尾。
+
+    活动标问是「与客户问题精确相等即跳过」，绝不能含换行——否则匹配永远失败。
+    """
+    return re.sub(r"\s+", " ", (q or "")).strip()
+
+
 def create_activity_questions(bu: str, questions: list[str], note: str = "",
                               activity_name: str = "", operator: str = "system") -> list[dict]:
-    """批量新增：同一活动名下一次录入多条标问。去空、去重（保序），空列表直接返回。"""
+    """批量新增：同一活动名下一次录入多条标问。去空、去重（保序），空列表直接返回。
+
+    兜底：每条按换行再拆一层并展平——即使前端漏拆、或直连 API 传入多行整串，
+    也拆成多条单行标问，绝不把多标问存成一条含换行的 question。
+    """
     seen, items = set(), []
-    for q in questions:
-        q = (q or "").strip()
-        if q and q not in seen:
-            seen.add(q)
-            items.append({"question": q, "activity_name": activity_name, "note": note})
+    for raw in questions:
+        for line in re.split(r"\r\n|\r|\n", raw or ""):   # 兜底拆行，兼容 CR/CRLF/LF
+            q = _norm_activity_q(line)
+            if q and q not in seen:
+                seen.add(q)
+                items.append({"question": q, "activity_name": activity_name, "note": note})
     if not items:
         return []
     recs = eval_db.activity_create_many(bu, items, created_by=operator)
@@ -986,6 +1000,7 @@ def create_activity_questions(bu: str, questions: list[str], note: str = "",
 
 def update_activity_question(act_id: int, question: str, note: str = "", activity_name: str = "",
                              operator: str = "system") -> dict | None:
+    question = _norm_activity_q(question)   # 单条编辑同样去内部换行，防存成多行整串
     rec = eval_db.activity_update(act_id, question, activity_name=activity_name,
                                   note=note, updated_by=operator)
     if rec:
