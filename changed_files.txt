@@ -1,12 +1,7 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ ad5c05d0
+# 基于 origin/main @ 73e72ffb
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   ad5c05d0 优化建议提示词：XML 包裹数据 + Qwen 最佳实践
-frontend/src/pages/EvalPrompts.jsx
-src/datapulse/modules/eval/prompts/_default/advice_card_system.md
-src/datapulse/modules/eval/prompts/_default/advice_dispatch_global.md
-src/datapulse/modules/eval/prompts/_default/advice_intent_dispatch.md
-src/datapulse/modules/eval/prompts/_default/advice_intent_resolved.md
-src/datapulse/modules/eval/prompts/_default/advice_new_business.md
-src/datapulse/modules/eval/prompts/_default/advice_resolved_global.md
+#   73e72ffb 活动标问：修多标问换行拆分 + 同活动聚合成一行
+frontend/src/pages/EvalActivity.jsx
+src/datapulse/pipeline/eval_engine.py
