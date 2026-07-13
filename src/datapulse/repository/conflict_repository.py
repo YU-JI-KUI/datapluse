@@ -162,16 +162,22 @@ class ConflictRepository:
         return {r.id: (r.data_id, r.dataset_id) for r in rows}
 
     def batch_clear(self, data_ids: list[int]) -> int:
-        """批量删除一批 data_id 的 open 冲突（1 次 DELETE IN），返回删除行数。
+        """批量删除一批 data_id 的 open 冲突（DELETE IN），返回删除行数。
         用于冲突检测重跑前的清理，替代逐条 clear_conflicts。
+        id 超多时按 IN_CHUNK_SIZE 分批，避免单条 SQL 塞 6 万个参数。
         """
         if not data_ids:
             return 0
-        return (
-            self.session.query(Conflict)
-            .filter(Conflict.data_id.in_(data_ids), Conflict.status == "open")
-            .delete(synchronize_session=False)
-        )
+        from datapulse.repository.data_repository import iter_chunks
+
+        deleted = 0
+        for chunk in iter_chunks(data_ids):
+            deleted += (
+                self.session.query(Conflict)
+                .filter(Conflict.data_id.in_(chunk), Conflict.status == "open")
+                .delete(synchronize_session=False)
+            )
+        return deleted
 
     def batch_create(self, records: list[dict]) -> None:
         """批量插入冲突记录（1 次 INSERT），调用方须先执行 batch_clear。"""

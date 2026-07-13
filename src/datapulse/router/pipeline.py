@@ -38,8 +38,8 @@ async def run_pipeline(
 ):
     """触发全量 Pipeline（后台异步执行）"""
     db = get_db()
-    current = db.get_pipeline_status(dataset_id)
-    if current.get("status") == "running":
+    # 原子抢占（行锁），替代"先查后写"：并发触发只有一个能成功
+    if not db.try_acquire_pipeline(dataset_id, "process", operator=user.username):
         raise HTTPException(409, "Pipeline 正在运行，请勿重复触发")
     # run_all_sync 是 sync 函数，BackgroundTasks 会自动放到线程池执行，
     # 不会阻塞主 asyncio 事件循环（async 函数会直接在事件循环内 await，会卡住）
@@ -81,10 +81,9 @@ async def run_embed(
     embedding 推理 + FAISS 索引重建是 CPU/GPU 密集型操作，已从主流程解耦。
     任务状态通过 GET /pipeline/status 的 embed_job 字段查询。
     """
-    db      = get_db()
-    current = db.get_pipeline_status(dataset_id) or {}
-    embed   = current.get("embed_job", {})
-    if embed.get("status") == "running":
+    db = get_db()
+    # 原子抢占（行锁）：并发触发只有一个能成功，避免双份推理互抢 CPU、索引互相覆盖
+    if not db.try_acquire_embed_job(dataset_id, operator=user.username):
         raise HTTPException(409, "Embed Job 正在运行，请勿重复触发")
     background_tasks.add_task(run_embed_job_sync, dataset_id, user.username)
     return {"success": True, "message": "Embed Job 已启动，在后台运行"}

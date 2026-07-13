@@ -185,8 +185,10 @@ class DBManager:
             connect_args=_ca,
             pool_pre_ping=True,   # 连接前 ping，自动剔除失效连接（故障切换后连接池自愈）
             pool_recycle=1800,    # 连接存活超 30min 主动回收，避免用到被内网中间层悄悄超时切断的连接
-            pool_size=5,
-            max_overflow=10,
+            # 后台批量任务（pipeline/embed/自检）与前端并发查询共享连接池，
+            # 5+10 在 6 万条规模的长任务期间易被抽干导致 QueuePool limit reached
+            pool_size=10,
+            max_overflow=20,
             echo=False,
         )
         Base.metadata.create_all(self._engine)
@@ -810,6 +812,29 @@ class DBManager:
         from datapulse.repository.pipeline_repository import PipelineRepository
         with self._session() as s:
             PipelineRepository(s).set_status(dataset_id, data)
+
+    def try_acquire_pipeline(self, dataset_id: int, step: str, operator: str = "") -> bool:
+        """原子抢占主流程运行权，抢占失败（已在运行）返回 False。"""
+        from sqlalchemy.exc import IntegrityError
+
+        from datapulse.repository.pipeline_repository import PipelineRepository
+        try:
+            with self._session() as s:
+                return PipelineRepository(s).try_acquire(dataset_id, step, operator=operator)
+        except IntegrityError:
+            # 并发首建撞主键：另一个请求已抢先创建并置 running
+            return False
+
+    def try_acquire_embed_job(self, dataset_id: int, operator: str = "") -> bool:
+        """原子抢占 embed job 运行权，抢占失败（已在运行）返回 False。"""
+        from sqlalchemy.exc import IntegrityError
+
+        from datapulse.repository.pipeline_repository import PipelineRepository
+        try:
+            with self._session() as s:
+                return PipelineRepository(s).try_acquire_embed(dataset_id, operator=operator)
+        except IntegrityError:
+            return False
 
     # ── Config ────────────────────────────────────────────────────────────────
 

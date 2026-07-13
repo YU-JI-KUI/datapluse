@@ -31,12 +31,9 @@ async def run_pre_annotation(
     针对所有 cleaned 状态的数据，批量调用 LLM 预测并写入 t_pre_annotation
     """
     db = get_db()
-    ps = db.get_pipeline_status(dataset_id)
-    if ps.get("status") == "running":
+    # 原子抢占（行锁）替代"先查后写"，抢占成功即置 running
+    if not db.try_acquire_pipeline(dataset_id, "pre_annotate", operator=user.username):
         raise PipelineRunningError()
-
-    from datapulse.pipeline.engine import _set_status, _now
-    _set_status(dataset_id, "running", "pre_annotate", 0, started_at=_now())
     background_tasks.add_task(_run_pre_annotate, dataset_id, user.username)
 
     return success({
@@ -46,15 +43,18 @@ async def run_pre_annotation(
     })
 
 
-async def _run_pre_annotate(dataset_id: int, operator: str) -> None:
+def _run_pre_annotate(dataset_id: int, operator: str) -> None:
+    """sync 包装：BackgroundTasks 对 sync 函数走线程池执行，不占用主事件循环。"""
+    import asyncio
+
     from datapulse.pipeline.engine import step_pre_annotate, _set_status, _now
     try:
-        result = await step_pre_annotate(dataset_id)
+        result = asyncio.run(step_pre_annotate(dataset_id, operator=operator))
         _set_status(dataset_id, "completed", "pre_annotate", 100,
-                    finished_at=_now(), results=result)
+                    finished_at=_now(), results=result, operator=operator)
     except Exception as e:
         _set_status(dataset_id, "error", "pre_annotate", 0,
-                    error=str(e), finished_at=_now())
+                    error=str(e), finished_at=_now(), operator=operator)
 
 
 @router.get("")

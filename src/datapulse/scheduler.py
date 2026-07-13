@@ -31,8 +31,11 @@ async def _embed_all_datasets() -> None:
 
     每个数据集串行执行：避免并发 embedding 推理把 GPU/CPU 打满。
     失败时记录日志并继续下一个，不影响其他数据集。
+
+    注意：embedding 推理是 CPU 密集型同步代码，必须放到线程执行
+    （asyncio.to_thread），否则会长时间阻塞主事件循环导致全站请求卡死。
     """
-    from datapulse.pipeline.engine import run_embed_job
+    from datapulse.pipeline.engine import run_embed_job_sync
     from datapulse.repository.base import get_db
 
     db = get_db()
@@ -50,8 +53,13 @@ async def _embed_all_datasets() -> None:
         if not dataset_id:
             continue
         try:
+            # 原子抢占：已有手动触发的 embed job 在跑时跳过，避免双份推理
+            if not db.try_acquire_embed_job(dataset_id, operator="scheduler"):
+                _log.info("scheduler.embed_all: skip (embed job already running)",
+                          dataset_id=dataset_id)
+                continue
             _log.info("scheduler.embed_all: embedding dataset", dataset_id=dataset_id)
-            await run_embed_job(dataset_id, operator="scheduler")
+            await asyncio.to_thread(run_embed_job_sync, dataset_id, "scheduler")
             _log.info("scheduler.embed_all: done", dataset_id=dataset_id)
         except Exception:
             _log.exception("scheduler.embed_all: error embedding dataset", dataset_id=dataset_id)

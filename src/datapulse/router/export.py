@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -104,7 +105,14 @@ async def prepare_export(body: ExportRequest, user: ExportCreate):
     """生成导出文件，写入服务端临时目录，返回一次性下载 token。
     前端拿到 token 后用 window.location.href 导航到 /api/export/download/{token}
     由浏览器原生触发下载，绕过 Chrome "不安全下载" 拦截。
+
+    全量查询 + 文件生成是同步重活（6 万条 Excel 需数十秒），
+    放到线程执行，避免阻塞事件循环拖垮全站请求。
     """
+    return await asyncio.to_thread(_do_prepare_export, body)
+
+
+def _do_prepare_export(body: ExportRequest) -> dict:
     db = get_db()
 
     items = db.list_data_for_export(body.dataset_id, body.status_filter)
@@ -153,7 +161,12 @@ async def prepare_conflict_export(body: ConflictExportRequest, user: ExportCreat
     """生成冲突列表导出文件（全量，不分页），返回一次性下载 token。
 
     与 prepare_export 共用 token 机制与 /download/{token} 端点。
+    同样将同步重活放到线程执行，不阻塞事件循环。
     """
+    return await asyncio.to_thread(_do_prepare_conflict_export, body)
+
+
+def _do_prepare_conflict_export(body: ConflictExportRequest) -> dict:
     db = get_db()
 
     records = db.list_conflicts_for_export(

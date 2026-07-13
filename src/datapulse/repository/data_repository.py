@@ -19,6 +19,16 @@ from datapulse.model.entities import (
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _STAGES = ["raw", "cleaned", "pre_annotated", "annotated", "checked"]
 
+# 单条 SQL 中 IN (...) 的最大 id 数：6 万个 id 塞进一条 IN 会产生
+# 超长 SQL / 超多绑定参数，拖慢解析并可能触碰 PG 参数上限，按此分批
+IN_CHUNK_SIZE = 5000
+
+
+def iter_chunks(ids: list, size: int = IN_CHUNK_SIZE):
+    """把 id 列表按 size 切片迭代，供超大 IN 查询分批执行。"""
+    for i in range(0, len(ids), size):
+        yield ids[i : i + size]
+
 
 def _now() -> datetime:
     return datetime.now(_SHANGHAI)
@@ -603,22 +613,24 @@ class DataRepository:
         stage: str,
         updated_by: str = "",
     ) -> None:
-        """批量更新 stage（一次 UPDATE 代替 N 次逐行 update_stage）。
+        """批量更新 stage（批量 UPDATE 代替 N 次逐行 update_stage）。
         用于 pipeline 各步骤结束后统一变更数据状态。
+        id 超多时按 IN_CHUNK_SIZE 分批，避免单条 SQL 塞 6 万个参数。
         """
         if not ids:
             return
         ts = _now()
-        # 更新 t_data_item.status（支持快速过滤）
-        self.session.query(DataItem).filter(DataItem.id.in_(ids)).update(
-            {"status": stage, "updated_at": ts, "updated_by": updated_by},
-            synchronize_session=False,
-        )
-        # 更新 t_data_state.stage（控制流）
-        self.session.query(DataState).filter(DataState.data_id.in_(ids)).update(
-            {"stage": stage, "updated_at": ts, "updated_by": updated_by},
-            synchronize_session=False,
-        )
+        for chunk in iter_chunks(ids):
+            # 更新 t_data_item.status（支持快速过滤）
+            self.session.query(DataItem).filter(DataItem.id.in_(chunk)).update(
+                {"status": stage, "updated_at": ts, "updated_by": updated_by},
+                synchronize_session=False,
+            )
+            # 更新 t_data_state.stage（控制流）
+            self.session.query(DataState).filter(DataState.data_id.in_(chunk)).update(
+                {"stage": stage, "updated_at": ts, "updated_by": updated_by},
+                synchronize_session=False,
+            )
 
     def get_next_pre_annotated(self, dataset_id: int) -> dict[str, Any] | None:
         """取创建时间最早的 pre_annotated 条目并完整 enrich（1+4 次查询，不扫描全表）。"""
@@ -648,28 +660,31 @@ class DataRepository:
             return
         ids = [item["id"] for item in items]
 
-        # 批量加载有效标注（annotations 字段）
-        ann_rows = (
-            self.session.query(Annotation)
-            .filter(Annotation.data_id.in_(ids), Annotation.is_active.is_(True))
-            .all()
-        )
+        # 批量加载有效标注（annotations 字段），超大 IN 分批
         anns_map: dict[int, list[dict[str, Any]]] = {}
-        for a in ann_rows:
-            anns_map.setdefault(a.data_id, []).append({
-                "id":       a.id,
-                "username": a.username,
-                "label":    a.label,
-                "is_active": True,
-            })
+        for chunk in iter_chunks(ids):
+            ann_rows = (
+                self.session.query(Annotation)
+                .filter(Annotation.data_id.in_(chunk), Annotation.is_active.is_(True))
+                .all()
+            )
+            for a in ann_rows:
+                anns_map.setdefault(a.data_id, []).append({
+                    "id":       a.id,
+                    "username": a.username,
+                    "label":    a.label,
+                    "is_active": True,
+                })
 
-        # 批量加载最终标注结果（label / label_source 字段）
-        result_rows = (
-            self.session.query(AnnotationResult)
-            .filter(AnnotationResult.data_id.in_(ids))
-            .all()
-        )
-        result_map = {r.data_id: r for r in result_rows}
+        # 批量加载最终标注结果（label / label_source 字段），超大 IN 分批
+        result_map: dict[int, Any] = {}
+        for chunk in iter_chunks(ids):
+            result_rows = (
+                self.session.query(AnnotationResult)
+                .filter(AnnotationResult.data_id.in_(chunk))
+                .all()
+            )
+            result_map.update({r.data_id: r for r in result_rows})
 
         for item in items:
             data_id    = item["id"]

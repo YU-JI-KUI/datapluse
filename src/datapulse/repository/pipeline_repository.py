@@ -39,6 +39,59 @@ class PipelineRepository:
             "updated_at":   row.updated_at.isoformat() if row.updated_at else None,
         }
 
+    def try_acquire(self, dataset_id: int, step: str, operator: str = "") -> bool:
+        """原子抢占主流程运行权：仅当当前状态不是 running 时置为 running。
+
+        用 SELECT ... FOR UPDATE 行锁替代"先查后写"（check-then-act），
+        并发触发时只有一个请求能抢到，其余返回 False。
+        行不存在时新建；并发首建撞主键由调用方（DBManager）捕获 IntegrityError 处理。
+        """
+        row = (
+            self.session.query(PipelineStatus)
+            .filter(PipelineStatus.dataset_id == dataset_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if row is None:
+            row = PipelineStatus(dataset_id=dataset_id)
+            self.session.add(row)
+        elif row.status == "running":
+            return False
+        row.status       = "running"
+        row.current_step = step
+        row.progress     = 0
+        row.detail       = {}
+        row.started_at   = _now()
+        row.finished_at  = None
+        row.error        = None
+        row.updated_at   = _now()
+        row.updated_by   = operator
+        return True
+
+    def try_acquire_embed(self, dataset_id: int, operator: str = "") -> bool:
+        """原子抢占 embed job 运行权（embed_job 字段与主流程状态互不干扰）。"""
+        row = (
+            self.session.query(PipelineStatus)
+            .filter(PipelineStatus.dataset_id == dataset_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if row is None:
+            row = PipelineStatus(dataset_id=dataset_id)
+            row.updated_at = _now()
+            row.updated_by = operator
+            self.session.add(row)
+        elif (row.embed_job or {}).get("status") == "running":
+            return False
+        row.embed_job = {
+            "status":     "running",
+            "progress":   0,
+            "detail":     {},
+            "updated_at": str(_now()),
+            "updated_by": operator,
+        }
+        return True
+
     def set_status(self, dataset_id: int, data: dict[str, Any]) -> None:
         row = self.session.get(PipelineStatus, dataset_id)
         if row is None:

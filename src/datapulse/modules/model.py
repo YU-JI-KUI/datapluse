@@ -9,10 +9,23 @@ use_mock=False → 发 HTTP 请求到内部平台（生产用）
 
 from __future__ import annotations
 
+import asyncio
 import random
 from typing import Any
 
 import httpx
+
+# 真实 LLM 调用失败后的最大重试次数与退避基数
+_MAX_RETRIES     = 3
+_RETRY_BACKOFF_S = 1.0
+
+
+class PreAnnotateError(Exception):
+    """真实 LLM 预标注在重试耗尽后仍失败。
+
+    调用方（step_pre_annotate）捕获后跳过该条数据，保持其 cleaned 状态，
+    重跑 pipeline 时会自动重试，避免静默写入默认标签污染数据。
+    """
 
 # Mock COT 模板：根据 label/score 生成不同风格的推理描述
 _MOCK_COT_TEMPLATES = [
@@ -57,8 +70,18 @@ def _build_prompt(text: str, labels: list[str]) -> str:
     )
 
 
-async def _call_real_llm(text: str, labels: list[str], cfg: dict[str, Any]) -> tuple[str, float, str]:
-    """调用真实 LLM，返回 (label, score, cot)"""
+async def _call_real_llm(
+    text: str,
+    labels: list[str],
+    cfg: dict[str, Any],
+    client: httpx.AsyncClient | None = None,
+) -> tuple[str, float, str]:
+    """调用真实 LLM，返回 (label, score, cot)。
+
+    client 由调用方（step_pre_annotate）创建并在整个 pipeline 运行期间复用，
+    避免每条数据一次 TCP+TLS 握手（6 万条 = 6 万次握手）。
+    失败自动重试 _MAX_RETRIES 次（线性退避），耗尽后抛 PreAnnotateError。
+    """
     llm_cfg    = cfg.get("llm", {})
     api_url    = llm_cfg.get("api_url", "")
     model_name = llm_cfg.get("model_name", "")
@@ -70,11 +93,28 @@ async def _call_real_llm(text: str, labels: list[str], cfg: dict[str, Any]) -> t
         "temperature": 0.1,
         "max_tokens": 256,
     }
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(api_url, json=payload,
-                                 headers={"Content-Type": "application/json"})
-        resp.raise_for_status()
-        result = resp.json()
+    headers = {"Content-Type": "application/json"}
+
+    last_err: Exception | None = None
+    result = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            if client is not None:
+                resp = await client.post(api_url, json=payload, headers=headers)
+            else:
+                async with httpx.AsyncClient(timeout=timeout) as own_client:
+                    resp = await own_client.post(api_url, json=payload, headers=headers)
+            resp.raise_for_status()
+            result = resp.json()
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < _MAX_RETRIES - 1:
+                await asyncio.sleep(_RETRY_BACKOFF_S * (attempt + 1))
+    if result is None:
+        raise PreAnnotateError(
+            f"LLM 调用失败（已重试 {_MAX_RETRIES} 次）: {last_err}"
+        ) from last_err
 
     content   = result["choices"][0]["message"]["content"].strip()
     lines     = [ln.strip() for ln in content.splitlines() if ln.strip()]
@@ -86,28 +126,21 @@ async def _call_real_llm(text: str, labels: list[str], cfg: dict[str, Any]) -> t
     return label, score, cot
 
 
-async def pre_annotate(item: dict[str, Any], cfg: dict[str, Any]) -> tuple[str, float, str]:
-    """对单条数据预标注，返回 (label, score, cot)"""
+async def pre_annotate(
+    item: dict[str, Any],
+    cfg: dict[str, Any],
+    client: httpx.AsyncClient | None = None,
+) -> tuple[str, float, str]:
+    """对单条数据预标注，返回 (label, score, cot)。
+
+    真实 LLM 失败重试耗尽后抛 PreAnnotateError（不再静默返回默认标签），
+    由调用方决定跳过该条并保持 cleaned 状态待重跑。
+    """
     llm_cfg  = cfg.get("llm", {})
     use_mock = llm_cfg.get("use_mock", True)
     labels   = cfg.get("labels", ["意图A", "意图B"])
     text     = item.get("content", "")
 
-    try:
-        if use_mock:
-            return _mock_predict(text, labels)
-        return await _call_real_llm(text, labels, cfg)
-    except Exception:
-        return labels[0], 0.0, ""
-
-
-async def pre_annotate_batch(
-    items: list[dict[str, Any]],
-    cfg: dict[str, Any],
-) -> list[tuple[dict[str, Any], str, float, str]]:
-    """批量预标注，返回 [(item, label, score, cot), ...]"""
-    results = []
-    for item in items:
-        label, score, cot = await pre_annotate(item, cfg)
-        results.append((item, label, score, cot))
-    return results
+    if use_mock:
+        return _mock_predict(text, labels)
+    return await _call_real_llm(text, labels, cfg, client=client)

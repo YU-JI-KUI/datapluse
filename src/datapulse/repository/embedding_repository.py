@@ -128,18 +128,24 @@ class EmbeddingRepository:
         """按 item_id 列表批量加载向量，返回 {item_id: vector}。
 
         供冲突检测一次性取出所有候选向量，消除 N 次逐条 DB 查询。
+        id 超多时按 IN_CHUNK_SIZE 分批，避免单条 SQL 塞 6 万个参数。
         """
         if not item_ids:
             return {}
-        rows = (
-            self.session.query(Embedding)
-            .filter(
-                Embedding.dataset_id == dataset_id,
-                Embedding.data_id.in_(item_ids),
+        from datapulse.repository.data_repository import iter_chunks
+
+        result: dict[int, np.ndarray] = {}
+        for chunk in iter_chunks(item_ids):
+            rows = (
+                self.session.query(Embedding)
+                .filter(
+                    Embedding.dataset_id == dataset_id,
+                    Embedding.data_id.in_(chunk),
+                )
+                .all()
             )
-            .all()
-        )
-        return {
-            int(r.data_id): _bytes_to_vec(r.vector, r.dim)
-            for r in rows
-        }
+            result.update({
+                int(r.data_id): _bytes_to_vec(r.vector, r.dim)
+                for r in rows
+            })
+        return result

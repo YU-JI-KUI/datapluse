@@ -18,7 +18,7 @@ import structlog
 
 from datapulse.modules.conflict import run_conflict_detection
 from datapulse.modules.embedding import embed_batch
-from datapulse.modules.model import pre_annotate
+from datapulse.modules.model import PreAnnotateError, pre_annotate
 from datapulse.modules.processing import process_item
 from datapulse.modules.vector import rebuild_index
 from datapulse.repository.base import get_db
@@ -128,8 +128,14 @@ async def step_pre_annotate(dataset_id: int, operator: str = "pipeline") -> dict
          相比逐条串行 await，吞吐量提升与 concurrency 倍数正相关。
       2. 按 chunk_size 分块提交，控制单次 gather 的内存占用。
       3. 每 chunk 批量写 DB（一次 INSERT + 一次 UPDATE）。
+      4. 真实 LLM 时全程共享一个 httpx.AsyncClient（连接复用，避免逐条握手）。
+
+    失败处理：单条 LLM 重试耗尽后跳过该条（保持 cleaned 状态），
+    不写默认标签污染数据；重跑 pipeline 会自动重试这些条目。
     """
     import asyncio
+
+    import httpx
 
     db         = get_db()
     cfg        = db.get_dataset_config(dataset_id)
@@ -153,44 +159,67 @@ async def step_pre_annotate(dataset_id: int, operator: str = "pipeline") -> dict
 
     sem        = asyncio.Semaphore(concurrency)
     annotated  = 0
+    failed     = 0
     start_time = time.time()
 
-    async def _annotate_one(item: dict[str, Any]) -> tuple[dict[str, Any], str, float, str]:
+    # 真实 LLM 时创建一个全程复用的 client（连接池复用，避免 6 万次握手）；
+    # mock 模式不发 HTTP，无需创建。
+    client: httpx.AsyncClient | None = None
+    if not use_mock:
+        client = httpx.AsyncClient(timeout=llm_cfg.get("timeout", 30))
+
+    async def _annotate_one(item: dict[str, Any]) -> tuple[dict[str, Any], str, float, str] | None:
         async with sem:
-            label, score, cot = await pre_annotate(item, cfg)
-            return item, label, score, cot
+            try:
+                label, score, cot = await pre_annotate(item, cfg, client=client)
+                return item, label, score, cot
+            except PreAnnotateError as e:
+                # 重试耗尽：跳过该条，保持 cleaned 状态，重跑时自动重试
+                _log.warning("pre_annotate item failed, kept as cleaned",
+                             dataset_id=dataset_id, data_id=item["id"], error=str(e))
+                return None
 
-    for chunk_start in range(0, total, chunk_size):
-        chunk   = items[chunk_start : chunk_start + chunk_size]
-        results = await asyncio.gather(*[_annotate_one(item) for item in chunk])
+    try:
+        for chunk_start in range(0, total, chunk_size):
+            chunk   = items[chunk_start : chunk_start + chunk_size]
+            results = await asyncio.gather(*[_annotate_one(item) for item in chunk])
 
-        pre_records: list[dict] = []
-        batch_ids:   list[int]  = []
-        for item, label, score, cot in results:
-            data_id = item["id"]
-            pre_records.append({
-                "data_id":    data_id,
-                "model_name": model_name,
-                "label":      label,
-                "score":      score,
-                "cot":        cot or None,
-                "created_by": operator,
-            })
-            batch_ids.append(data_id)
-            annotated += 1
+            pre_records: list[dict] = []
+            batch_ids:   list[int]  = []
+            for r in results:
+                if r is None:
+                    failed += 1
+                    continue
+                item, label, score, cot = r
+                data_id = item["id"]
+                pre_records.append({
+                    "data_id":    data_id,
+                    "model_name": model_name,
+                    "label":      label,
+                    "score":      score,
+                    "cot":        cot or None,
+                    "created_by": operator,
+                })
+                batch_ids.append(data_id)
+                annotated += 1
 
-        db.bulk_create_pre_annotations(pre_records)
-        db.bulk_update_stage(batch_ids, "pre_annotated", updated_by=operator)
+            db.bulk_create_pre_annotations(pre_records)
+            db.bulk_update_stage(batch_ids, "pre_annotated", updated_by=operator)
 
-        _set_status(
-            dataset_id, "running", "pre_annotate",
-            int(annotated / total * 100),
-            detail=_make_detail(annotated, total, 0, start_time),
-            operator=operator,
-        )
+            detail = _make_detail(annotated + failed, total, 0, start_time)
+            detail["failed"] = failed
+            _set_status(
+                dataset_id, "running", "pre_annotate",
+                int((annotated + failed) / total * 100),
+                detail=detail,
+                operator=operator,
+            )
+    finally:
+        if client is not None:
+            await client.aclose()
 
     elapsed = round(time.time() - start_time, 1)
-    result  = {"step": "pre_annotate", "annotated": annotated, "skipped": 0}
+    result  = {"step": "pre_annotate", "annotated": annotated, "failed": failed, "skipped": 0}
     _log.info("step=pre_annotate done", dataset_id=dataset_id, elapsed_s=elapsed, **result)
     return result
 

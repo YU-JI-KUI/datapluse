@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from datapulse.router.auth import UserInfo, require_perm
 from datapulse.core.exceptions import NotFoundError, PipelineRunningError
 from datapulse.core.response import page_data, success
-from datapulse.modules.conflict import run_conflict_detection, run_quality_self_check
+from datapulse.modules.conflict import run_quality_self_check
 from datapulse.repository.base import get_db
 
 router      = APIRouter()
@@ -91,12 +91,9 @@ async def trigger_conflict_detection(
 ):
     """触发冲突检测（异步执行）"""
     db = get_db()
-    ps = db.get_pipeline_status(dataset_id)
-    if ps.get("status") == "running":
+    # 原子抢占（行锁）替代"先查后写"，并发触发只有一个能成功；抢占成功即置 running
+    if not db.try_acquire_pipeline(dataset_id, "check", operator=user.username):
         raise PipelineRunningError()
-
-    from datapulse.pipeline.engine import _now, _set_status
-    _set_status(dataset_id, "running", "check", 0, started_at=_now(), operator=user.username)
     background_tasks.add_task(_run_check, dataset_id, user.username)
 
     return success({
@@ -106,10 +103,17 @@ async def trigger_conflict_detection(
     })
 
 
-async def _run_check(dataset_id: int, operator: str) -> None:
+def _run_check(dataset_id: int, operator: str) -> None:
+    """sync 包装：BackgroundTasks 对 sync 函数走线程池执行。
+
+    冲突检测是 CPU 密集型（FAISS 全库相似度扫描），若以 async 函数直接
+    在事件循环内 await，检测期间整个进程的所有请求都会被阻塞。
+    """
+    import asyncio
+
     from datapulse.pipeline.engine import _now, _set_status, step_check
     try:
-        await step_check(dataset_id, operator=operator)
+        asyncio.run(step_check(dataset_id, operator=operator))
         _set_status(dataset_id, "completed", "check", 100, finished_at=_now(), operator=operator)
     except Exception as e:
         _set_status(dataset_id, "error", "check", 0, error=str(e), finished_at=_now(), operator=operator)
@@ -123,12 +127,9 @@ async def trigger_quality_self_check(
 ):
     """高质量数据自检（异步执行）"""
     db = get_db()
-    ps = db.get_pipeline_status(dataset_id)
-    if ps.get("status") == "running":
+    # 原子抢占（行锁）替代"先查后写"，抢占成功即置 running
+    if not db.try_acquire_pipeline(dataset_id, "self_check", operator=user.username):
         raise PipelineRunningError()
-
-    from datapulse.pipeline.engine import _now, _set_status
-    _set_status(dataset_id, "running", "self_check", 0, started_at=_now(), operator=user.username)
     background_tasks.add_task(_run_self_check, dataset_id, user.username)
 
     return success({
@@ -138,10 +139,13 @@ async def trigger_quality_self_check(
     })
 
 
-async def _run_self_check(dataset_id: int, operator: str) -> None:
+def _run_self_check(dataset_id: int, operator: str) -> None:
+    """sync 包装：BackgroundTasks 对 sync 函数走线程池执行，见 _run_check 说明。"""
+    import asyncio
+
     from datapulse.pipeline.engine import _now, _set_status
     try:
-        result = await run_quality_self_check(dataset_id, operator=operator)
+        result = asyncio.run(run_quality_self_check(dataset_id, operator=operator))
         _set_status(dataset_id, "completed", "self_check", 100,
                     detail=result, finished_at=_now(), operator=operator)
     except Exception as e:
