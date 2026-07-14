@@ -81,6 +81,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         _log.info("datapulse shutting down")
         stop_scheduler()
+        from datapulse.modules.vector_search import shutdown_executor
+        shutdown_executor()   # 关闭 FAISS 检索子进程池
         shutdown_logging()   # 优雅关闭：确保队列内所有日志写入磁盘后再退出
 
 

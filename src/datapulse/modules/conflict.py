@@ -83,23 +83,20 @@ def _find_conflicting_neighbor(
 
 def _process_semantic_candidate(
     item: dict[str, Any],
-    vec_map: dict[int, Any],
-    index: Any,
-    topk: int,
+    neighbors: list[tuple[int, float]],
     threshold: float,
     id_to_item: dict[int, dict[str, Any]],
     conflict_pairs: set[tuple[int, int]],
     conflicts: dict[int, dict[str, Any]],
     dataset_id: int,
 ) -> None:
-    """处理单条候选数据，就地更新 conflict_pairs 和 conflicts。"""
+    """处理单条候选数据，就地更新 conflict_pairs 和 conflicts。
+
+    neighbors 是该条预先批量检索得到的近邻 [(id, sim), ...]。
+    """
     item_id    = int(item["id"])
     item_label = item["label"]
-    vec = vec_map.get(item_id)
-    if vec is None:
-        _log.debug("no precomputed vector, skipping", dataset_id=dataset_id, item_id=item_id)
-        return
-    for neighbor_id, sim in index.search(vec, topk=topk + 1):
+    for neighbor_id, sim in neighbors:
         result = _find_conflicting_neighbor(
             item_id, item_label, neighbor_id, sim, threshold, id_to_item, conflict_pairs
         )
@@ -128,23 +125,20 @@ def _process_semantic_candidate(
 
 def _process_self_check_candidate(
     item: dict[str, Any],
-    vec_map: dict[int, Any],
-    index: Any,
-    topk: int,
+    neighbors: list[tuple[int, float]],
     threshold: float,
     checked_id_to_item: dict[int, dict[str, Any]],
     conflict_pairs: set[tuple[int, int]],
     conflict_map: dict[int, dict[str, Any]],
     dataset_id: int,
 ) -> None:
-    """处理单条自检数据，双向写入 conflict_map。"""
+    """处理单条自检数据，双向写入 conflict_map。
+
+    neighbors 是该条预先批量检索得到的近邻 [(id, sim), ...]。
+    """
     item_id    = int(item["id"])
     item_label = item["label"]
-    vec = vec_map.get(item_id)
-    if vec is None:
-        _log.debug("no precomputed vector, skipping in self-check", item_id=item_id)
-        return
-    for neighbor_id, sim in index.search(vec, topk=topk + 1):
+    for neighbor_id, sim in neighbors:
         result = _find_conflicting_neighbor(
             item_id, item_label, neighbor_id, sim, threshold, checked_id_to_item, conflict_pairs
         )
@@ -236,12 +230,22 @@ def detect_semantic_conflicts(
     candidate_ids = [int(i["id"]) for i in labeled_annotated]
     vec_map       = get_emb().load_batch(dataset_id, candidate_ids)
 
+    # 批量检索：一次性把所有候选向量交给子进程多线程检索（不可用则降级单线程）。
+    # topk+1 因为近邻里会含候选自身，需多取一个再过滤。
+    id_vec_pairs = [
+        (cid, vec_map[cid]) for cid in candidate_ids if vec_map.get(cid) is not None
+    ]
+    neighbors_map = index.batch_search(id_vec_pairs, topk=topk + 1)
+
     conflict_pairs: set[tuple[int, int]] = set()
     conflicts: dict[int, dict[str, Any]] = {}
 
     for item in labeled_annotated:
+        neighbors = neighbors_map.get(int(item["id"]))
+        if neighbors is None:
+            continue
         _process_semantic_candidate(
-            item, vec_map, index, topk, threshold,
+            item, neighbors, threshold,
             id_to_item, conflict_pairs, conflicts, dataset_id,
         )
 
@@ -429,12 +433,21 @@ async def run_quality_self_check(dataset_id: int, operator: str = "pipeline") ->
     all_checked_ids = [int(i["id"]) for i in labeled_checked]
     vec_map         = get_emb().load_batch(dataset_id, all_checked_ids)
 
+    # 批量检索：一次性交给子进程多线程检索（不可用则降级单线程）
+    id_vec_pairs = [
+        (cid, vec_map[cid]) for cid in all_checked_ids if vec_map.get(cid) is not None
+    ]
+    neighbors_map = index.batch_search(id_vec_pairs, topk=topk + 1)
+
     conflict_pairs: set[tuple[int, int]] = set()  # 去重
     conflict_map:   dict[int, dict[str, Any]] = {}  # data_id → conflict_detail
 
     for item in labeled_checked:
+        neighbors = neighbors_map.get(int(item["id"]))
+        if neighbors is None:
+            continue
         _process_self_check_candidate(
-            item, vec_map, index, topk, threshold,
+            item, neighbors, threshold,
             checked_id_to_item, conflict_pairs, conflict_map, dataset_id,
         )
 

@@ -87,6 +87,46 @@ class VectorIndex:
             top_idx = np.argsort(-sims_np)[:k]
             return [(self._np_ids[i], float(sims_np[i])) for i in top_idx]
 
+    def batch_search(
+        self,
+        id_vec_pairs: list[tuple[int, np.ndarray]],
+        topk: int = 5,
+    ) -> dict[int, list[tuple[int, float]]]:
+        """对一批候选向量批量检索，返回 {候选 data_id: [(近邻 id, sim), ...]}。
+
+        优先走子进程多线程精确检索（vector_search.batch_search）；
+        子进程不可用时降级为逐条 in-process search（当前单线程路径），
+        结果完全一致，只是慢。检索精度不变（都是 IndexFlatIP 精确内积）。
+        """
+        if not id_vec_pairs:
+            return {}
+
+        # 优先：子进程多线程批量检索（仅当 faiss 索引已落盘时可用）
+        if _FAISS_AVAILABLE and self._faiss_index is not None:
+            from datapulse.modules.vector_search import (
+                SearchUnavailable,
+                batch_search as _subproc_search,
+            )
+            from datapulse.repository.embeddings import get_emb
+
+            index_path = get_emb().vector_index_path(self._dataset_id)
+            try:
+                query_ids = [p[0] for p in id_vec_pairs]
+                query_mat = np.stack([p[1] for p in id_vec_pairs]).astype(np.float32)
+                rows = _subproc_search(str(index_path), query_mat, topk)
+                return dict(zip(query_ids, rows))
+            except SearchUnavailable as e:
+                _log.warning(
+                    "subprocess search unavailable, falling back to in-process",
+                    dataset_id=self._dataset_id, error=str(e),
+                )
+
+        # 降级：逐条 in-process 检索（单线程，结果一致）
+        return {
+            data_id: self.search(vec, topk=topk)
+            for data_id, vec in id_vec_pairs
+        }
+
     # ── 持久化 ────────────────────────────────────────────────────────────────
 
     def save(self) -> None:
