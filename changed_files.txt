@@ -1,17 +1,9 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 5277cc94
+# 基于 origin/main @ f9845ab1
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   5277cc94 优化大批量数据操作性能与可靠性
-src/datapulse/modules/model.py
-src/datapulse/pipeline/engine.py
-src/datapulse/repository/base.py
-src/datapulse/repository/conflict_repository.py
-src/datapulse/repository/data_repository.py
-src/datapulse/repository/embedding_repository.py
-src/datapulse/repository/pipeline_repository.py
-src/datapulse/router/conflict.py
-src/datapulse/router/export.py
-src/datapulse/router/pipeline.py
-src/datapulse/router/pre_annotation.py
-src/datapulse/scheduler.py
+#   f9845ab1 FAISS 检索移入子进程实现多线程加速
+src/datapulse/main.py
+src/datapulse/modules/conflict.py
+src/datapulse/modules/vector.py
+src/datapulse/modules/vector_search.py
