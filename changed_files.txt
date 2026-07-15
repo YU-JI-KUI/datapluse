@@ -1,17 +1,16 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 0b237189
+# 基于 origin/main @ 21231b0e
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   0b237189 规则短路：一问一答升级为规则集
+#   21231b0e 用户：加 nickname + 修分配看不到新用户 + 列表按登录排序
 db/arkpg/20260428_arkpgdata_init.sql
-db/arkpg/20260710_arkpgdata_eval_rule_ruleset.sql
+db/arkpg/20260715_arkpgdata_add_user_nickname.sql
 deploy_desc/SUPER-AGENT1.0.0.json
-frontend/src/pages/EvalRules.jsx
-src/datapulse/modules/eval/bu/base.py
-src/datapulse/modules/eval/entities.py
-src/datapulse/modules/eval/eval_db.py
-src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/repository.py
-src/datapulse/pipeline/eval_engine.py
-src/datapulse/router/eval.py
-tests/eval/test_rule_bypass.py
+frontend/src/lib/api.js
+frontend/src/pages/DatasetManagement.jsx
+frontend/src/pages/Users.jsx
+src/datapulse/model/entities.py
+src/datapulse/repository/base.py
+src/datapulse/repository/user_repository.py
+src/datapulse/router/users.py
+src/datapulse/service/user_service.py
