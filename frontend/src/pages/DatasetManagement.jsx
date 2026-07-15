@@ -152,8 +152,10 @@ function AssignUsersDialog({ open, onClose, dataset, allUsers }) {
                 className="w-4 h-4 rounded"
               />
               <div>
-                <div className="text-sm font-medium">{u.username}</div>
-                <div className="text-xs text-gray-400">{u.roles?.join(', ')}</div>
+                <div className="text-sm font-medium">{u.nickname || u.username}</div>
+                <div className="text-xs text-gray-400">
+                  {u.nickname ? `${u.username} · ` : ''}{u.roles?.join(', ')}
+                </div>
               </div>
             </label>
           ))}
@@ -203,10 +205,10 @@ export default function DatasetManagement() {
   const total      = filtered.length
   const paginated  = filtered.slice((page - 1) * pageSize, page * pageSize)
 
-  // 获取全部用户（用于分配弹窗）
+  // 获取全部用户（用于分配弹窗）——用不分页的 listAll，避免新用户被分页截断
   const { data: usersData } = useQuery({
     queryKey: ['all-users'],
-    queryFn: () => userApi.list(),
+    queryFn: () => userApi.listAll(),
   })
   const allUsers = usersData?.data?.data?.list || []
 

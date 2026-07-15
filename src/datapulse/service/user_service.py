@@ -28,10 +28,12 @@ class UserService:
         return self.repo.get_by_username(username)
 
     def create(
-        self, username: str, password: str, email: str = "", role_names: list[str] | None = None
+        self, username: str, password: str, email: str = "", nickname: str = "",
+        role_names: list[str] | None = None
     ) -> dict[str, Any]:
         """Create a new user."""
-        return self.repo.create(username, password, email, role_names)
+        return self.repo.create(username, password, email=email, nickname=nickname,
+                                 role_names=role_names)
 
     def update(self, user_id: int, data: dict[str, Any], updated_by: str = "system") -> dict[str, Any] | None:
         """Update a user."""

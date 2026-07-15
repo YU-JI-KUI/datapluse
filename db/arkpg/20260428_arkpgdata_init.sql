@@ -87,6 +87,7 @@ DO $$ BEGIN RAISE NOTICE '[DDL] 4/16  t_user ...'; END $$;
 CREATE TABLE IF NOT EXISTS t_user (
     id            BIGSERIAL    NOT NULL,
     username      VARCHAR(100) NOT NULL,
+    nickname      VARCHAR(100) NOT NULL DEFAULT '',
     email         VARCHAR(200) NOT NULL DEFAULT '',
     password_hash VARCHAR(200) NOT NULL,
     is_active     BOOLEAN      NOT NULL DEFAULT TRUE,
@@ -98,9 +99,12 @@ CREATE TABLE IF NOT EXISTS t_user (
     CONSTRAINT pk_t_user          PRIMARY KEY (id),
     CONSTRAINT uq_t_user_username UNIQUE (username)
 );
+-- 老库兼容：旧版本已建表则补 nickname（幂等，见 20260715 迁移脚本）
+ALTER TABLE t_user ADD COLUMN IF NOT EXISTS nickname VARCHAR(100) NOT NULL DEFAULT '';
 COMMENT ON TABLE  t_user               IS '用户账号表';
 COMMENT ON COLUMN t_user.id            IS '主键ID';
 COMMENT ON COLUMN t_user.username      IS '登录用户名，全局唯一，大小写敏感';
+COMMENT ON COLUMN t_user.nickname      IS '用户昵称（展示用，便于辨认；空则页面兜底用username）';
 COMMENT ON COLUMN t_user.email         IS '邮箱，可选';
 COMMENT ON COLUMN t_user.password_hash IS 'bcrypt 哈希密码，不存明文';
 COMMENT ON COLUMN t_user.is_active     IS '账号是否可登录：TRUE=正常，FALSE=已停用';
@@ -850,6 +854,14 @@ COMMENT ON COLUMN t_eval_rule.created_at      IS '创建时间';
 COMMENT ON COLUMN t_eval_rule.created_by      IS '创建人';
 COMMENT ON COLUMN t_eval_rule.updated_at      IS '更新时间';
 COMMENT ON COLUMN t_eval_rule.updated_by      IS '更新人';
+-- 老库回填：旧行经上面 ALTER 补出的 name 默认是空串，多行空 name 会撞 (bu,name) 唯一索引。
+-- 必须先按 question 回填 name/questions/answers，再建唯一索引（与 20260710 迁移脚本一致）。
+UPDATE t_eval_rule
+   SET name      = question,
+       questions = to_jsonb(ARRAY[question]),
+       answers   = to_jsonb(ARRAY[expected_answer])
+ WHERE (name IS NULL OR name = '')
+   AND question IS NOT NULL AND question <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_rule_bu_name ON t_eval_rule(bu, name);
 DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_rule'; END $$;
 

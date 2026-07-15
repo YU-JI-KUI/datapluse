@@ -38,6 +38,7 @@ function UserFormDialog({ open, onClose, onSave, user, roles }) {
   const isEdit = !!user
   const [form, setForm] = useState({
     username:   '',
+    nickname:   '',
     password:   '',
     role_names: ['annotator'],
     is_active:  true,
@@ -48,12 +49,13 @@ function UserFormDialog({ open, onClose, onSave, user, roles }) {
     if (user) {
       setForm({
         username:   user.username,
+        nickname:   user.nickname || '',
         password:   '',
         role_names: user.roles?.length ? [...user.roles] : ['annotator'],
         is_active:  user.is_active !== false,
       })
     } else {
-      setForm({ username: '', password: '', role_names: ['annotator'], is_active: true })
+      setForm({ username: '', nickname: '', password: '', role_names: ['annotator'], is_active: true })
     }
     setShowPwd(false)
   }, [user, open])
@@ -86,6 +88,14 @@ function UserFormDialog({ open, onClose, onSave, user, roles }) {
               onChange={e => set('username', e.target.value.toUpperCase())}
               disabled={isEdit}
               placeholder="仅字母、数字、下划线（自动大写）"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">昵称</label>
+            <Input
+              value={form.nickname}
+              onChange={e => set('nickname', e.target.value)}
+              placeholder="展示用，便于辨认（如：余继奎）"
             />
           </div>
           <div>
@@ -340,6 +350,7 @@ export default function Users() {
               <TableHeader>
                 <TableRow>
                   <TableHead>用户名</TableHead>
+                  <TableHead>昵称</TableHead>
                   <TableHead>角色</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead className="w-40 whitespace-nowrap">最后登录</TableHead>
@@ -351,6 +362,7 @@ export default function Users() {
                 {users.map(u => (
                   <TableRow key={u.id}>
                     <TableCell className="font-medium">{u.username}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{u.nickname || '—'}</TableCell>
                     <TableCell>
                       <div className="flex gap-1 flex-wrap">
                         {(u.roles || []).map(r => <RoleBadge key={r} role={r} />)}

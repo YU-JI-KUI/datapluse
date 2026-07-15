@@ -23,11 +23,13 @@ class UserCreate(BaseModel):
     username: str
     password: str
     email: str | None = ""
+    nickname: str | None = ""
     role_names: list[str] = ["annotator"]
 
 
 class UserUpdate(BaseModel):
     email: str | None = None
+    nickname: str | None = None
     is_active: bool | None = None
     password: str | None = None  # 空则不修改密码
     role_names: list[str] | None = None
@@ -63,6 +65,13 @@ async def list_roles(user: CurrentUser):
     return {"success": True, "data": get_db().list_roles()}
 
 
+@router.get("/all")
+async def list_all_users(user: AdminUser):
+    """全量用户（不分页）——供「分配用户」下拉，避免分页截断新用户。含 nickname。
+    须放在 /{user_id} 之前，否则 'all' 会被当成 user_id。"""
+    return {"success": True, "data": {"list": get_db().list_all_users()}}
+
+
 @router.post("")
 async def create_user(body: UserCreate, user: AdminUser):
     """创建新用户（管理员）"""
@@ -78,6 +87,7 @@ async def create_user(body: UserCreate, user: AdminUser):
         username=username,
         password=body.password,
         email=body.email or "",
+        nickname=body.nickname or "",
         role_names=body.role_names,
         created_by=user.username,
     )
@@ -101,6 +111,8 @@ async def update_user(user_id: int, body: UserUpdate, user: AdminUser):
     patch: dict = {}
     if body.email is not None:
         patch["email"] = body.email
+    if body.nickname is not None:
+        patch["nickname"] = body.nickname
     if body.is_active is not None:
         patch["is_active"] = body.is_active
     if body.password:

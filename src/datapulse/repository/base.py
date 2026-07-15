@@ -267,6 +267,11 @@ class DBManager:
                 page=page, page_size=page_size,
             )
 
+    def list_all_users(self) -> list[dict]:
+        from datapulse.repository.user_repository import UserRepository
+        with self._session() as s:
+            return UserRepository(s).list_all()
+
     def get_user(self, user_id: int) -> dict | None:
         from datapulse.repository.user_repository import UserRepository
         with self._session() as s:
@@ -277,11 +282,14 @@ class DBManager:
         with self._session() as s:
             return UserRepository(s).get_by_username(username)
 
-    def create_user(self, username: str, password: str, email: str = "",
+    def create_user(self, username: str, password: str, email: str = "", nickname: str = "",
                     role_names: list[str] | None = None, created_by: str = "system") -> dict:
         from datapulse.repository.user_repository import UserRepository
         with self._session() as s:
-            return UserRepository(s).create(username, password, email, role_names, created_by)
+            # 关键字转发，避免 nickname 插入后位置参数漂移
+            return UserRepository(s).create(
+                username, password, email=email, nickname=nickname,
+                role_names=role_names, created_by=created_by)
 
     def update_user(self, user_id: int, data: dict, updated_by: str = "system") -> dict | None:
         from datapulse.repository.user_repository import UserRepository

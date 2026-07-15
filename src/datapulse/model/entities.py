@@ -66,6 +66,7 @@ class User(Base):
 
     id            = Column(BigInteger, primary_key=True, autoincrement=True)
     username      = Column(String(100), nullable=False, unique=True)
+    nickname      = Column(String(100), nullable=False, default="")   # 展示用，便于辨认
     email         = Column(String(200), nullable=False, default="")
     password_hash = Column(String(200), nullable=False)
     is_active     = Column(Boolean, nullable=False, default=True)

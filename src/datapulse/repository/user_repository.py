@@ -22,6 +22,7 @@ def _user_to_dict(u: User, roles: list[str] | None = None) -> dict[str, Any]:
     return {
         "id": u.id,
         "username": u.username,
+        "nickname": u.nickname or "",
         "email": u.email or "",
         "is_active": u.is_active,
         "roles": roles or [],
@@ -56,6 +57,23 @@ class UserRepository:
         )
         return [r[0] for r in rows]
 
+    def list_all(self) -> list[dict[str, Any]]:
+        """全量用户（不分页，轻量）——供「分配用户」下拉，避免分页截断新用户。
+
+        含 username/nickname/roles，批量加载角色消除 N+1。用户量大时慎用；分配场景需全量。
+        """
+        users = self.session.query(User).order_by(User.id).all()
+        usernames = [u.username for u in users]
+        role_rows = (
+            self.session.query(UserRole.username, UserRole.role_name)
+            .filter(UserRole.username.in_(usernames))
+            .all()
+        ) if usernames else []
+        roles_map: dict[str, list[str]] = {}
+        for row in role_rows:
+            roles_map.setdefault(row.username, []).append(row.role_name)
+        return [_user_to_dict(u, roles_map.get(u.username, [])) for u in users]
+
     def list_users(
         self,
         keyword: str | None = None,
@@ -75,7 +93,9 @@ class UserRepository:
         if end_date:
             q = q.filter(User.updated_at <= end_date + " 23:59:59")
         total = q.count()
-        users = q.order_by(User.id).offset((page - 1) * page_size).limit(page_size).all()
+        # 按最后登录时间倒序（最近登录在前）；从未登录（NULL）排最后，同序按 id 倒序稳定分页
+        users = (q.order_by(User.last_login_at.desc().nullslast(), User.id.desc())
+                  .offset((page - 1) * page_size).limit(page_size).all())
 
         # 批量加载角色（1 次 IN 查询），消除逐用户 _get_user_roles N+1
         usernames = [u.username for u in users]
@@ -112,12 +132,14 @@ class UserRepository:
         username: str,
         password: str,
         email: str = "",
+        nickname: str = "",
         role_names: list[str] | None = None,
         created_by: str = "system",
     ) -> dict[str, Any]:
         ts = _now()
         user = User(
             username=username,
+            nickname=nickname,
             email=email,
             password_hash=_hash_password(password),
             is_active=True,
@@ -148,6 +170,8 @@ class UserRepository:
         u = self.session.get(User, user_id)
         if u is None:
             return None
+        if "nickname" in data:
+            u.nickname = data["nickname"]
         if "email" in data:
             u.email = data["email"]
         if "is_active" in data:

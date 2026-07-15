@@ -112,6 +112,7 @@ export const datasetApi = {
 
 export const userApi = {
   list:           (params = {}) => api.get('/users', { params }),
+  listAll:        ()         => api.get('/users/all'),   // 全量不分页，供分配用户下拉（避免新用户被分页截断）
   create:         (data)     => api.post('/users', data),
   update:         (id, data) => api.put(`/users/${id}`, data),
   delete:         (id)       => api.delete(`/users/${id}`),
