@@ -513,8 +513,9 @@ async def delete_activity_question(act_id: int, user: EvalWrite):
 # ── 规则短路管理（命中写死结果、免 LLM 调用，计入指标）────────────────────────
 
 class RuleBody(BaseModel):
-    question: str
-    expected_answer: str = ""
+    name: str                 # 规则名（同 BU 唯一，报告按此聚合）
+    questions: list[str] = [] # 触发问题集合
+    answers: list[str] = []   # 期望答案集合
     judge_json: dict          # 完整 judge 输出（11 字段，结构同 LLM output）
     note: str = ""
 
@@ -527,13 +528,19 @@ async def list_rules(user: EvalRead, bu: str = "securities"):
 
 @router.post("/rules")
 async def upsert_rule(user: EvalWrite, body: RuleBody, bu: str = "securities"):
-    """新增/更新一条短路规则（按 (bu, question) upsert）。"""
-    if not body.question.strip():
-        raise ParamError("触发问题不能为空")
+    """新增/更新一条短路规则集（按 (bu, name) upsert）。
+
+    规则集：name + 触发问题集合 questions + 期望答案集合 answers。命中判据 =
+    客户问题 ∈ questions 且 答案 ∈ answers（独立组合）。
+    """
+    if not body.name.strip():
+        raise ParamError("规则名不能为空")
+    if not any((q or "").strip() for q in body.questions):
+        raise ParamError("至少填写一个触发问题")
     if not isinstance(body.judge_json, dict) or not body.judge_json:
         raise ParamError("judge_json 不能为空")
     return success(eval_engine.upsert_rule(
-        bu, body.question.strip(), body.expected_answer, body.judge_json,
+        bu, body.name.strip(), body.questions, body.answers, body.judge_json,
         note=body.note, operator=user.username))
 
 

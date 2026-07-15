@@ -819,7 +819,10 @@ DO $$ BEGIN RAISE NOTICE '[DDL] 25/25 t_eval_rule ...'; END $$;
 CREATE TABLE IF NOT EXISTS t_eval_rule (
     id              BIGSERIAL    NOT NULL,
     bu              VARCHAR(64)  NOT NULL,
-    question        TEXT         NOT NULL,
+    name            VARCHAR(255) NOT NULL DEFAULT '',
+    questions       JSONB        NOT NULL DEFAULT '[]'::jsonb,
+    answers         JSONB        NOT NULL DEFAULT '[]'::jsonb,
+    question        TEXT         NOT NULL DEFAULT '',
     expected_answer TEXT         NOT NULL DEFAULT '',
     judge_json      JSONB        NOT NULL,
     note            VARCHAR(255) NOT NULL DEFAULT '',
@@ -829,18 +832,25 @@ CREATE TABLE IF NOT EXISTS t_eval_rule (
     updated_by      VARCHAR(100) NOT NULL DEFAULT '',
     CONSTRAINT pk_t_eval_rule PRIMARY KEY (id)
 );
+-- 老库兼容：旧版本已建表则补 name/questions/answers（幂等，见 20260710 迁移脚本）
+ALTER TABLE t_eval_rule ADD COLUMN IF NOT EXISTS name      VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE t_eval_rule ADD COLUMN IF NOT EXISTS questions JSONB        NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE t_eval_rule ADD COLUMN IF NOT EXISTS answers   JSONB        NOT NULL DEFAULT '[]'::jsonb;
 COMMENT ON TABLE  t_eval_rule                 IS 'AI评测规则短路表（命中写死结果、免LLM调用，计入指标）';
 COMMENT ON COLUMN t_eval_rule.id              IS '主键ID';
 COMMENT ON COLUMN t_eval_rule.bu              IS '所属业务单元：securities=证券 / life=寿险';
-COMMENT ON COLUMN t_eval_rule.question        IS '触发问题（与客户问题精确相等即命中）';
-COMMENT ON COLUMN t_eval_rule.expected_answer IS '期望答案（须与样本答案一致才命中；防答案已变仍套用写死结论）';
+COMMENT ON COLUMN t_eval_rule.name            IS '规则名（同BU内唯一，报告按此聚合，如「转人工」）';
+COMMENT ON COLUMN t_eval_rule.questions       IS '触发问题集合（JSON字符串数组）；客户问题精确等于其中任一即满足问题条件';
+COMMENT ON COLUMN t_eval_rule.answers         IS '期望答案集合（JSON字符串数组）；样本答案精确等于其中任一即满足答案条件';
+COMMENT ON COLUMN t_eval_rule.question        IS '（旧列，保留兼容）单个触发问题；新结构用 questions 集合';
+COMMENT ON COLUMN t_eval_rule.expected_answer IS '（旧列，保留兼容）单个期望答案；新结构用 answers 集合';
 COMMENT ON COLUMN t_eval_rule.judge_json      IS '写死的judge输出（11字段，结构同LLM output，命中即原样产出）';
 COMMENT ON COLUMN t_eval_rule.note            IS '备注';
 COMMENT ON COLUMN t_eval_rule.created_at      IS '创建时间';
 COMMENT ON COLUMN t_eval_rule.created_by      IS '创建人';
 COMMENT ON COLUMN t_eval_rule.updated_at      IS '更新时间';
 COMMENT ON COLUMN t_eval_rule.updated_by      IS '更新人';
-CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_rule_bu_question ON t_eval_rule(bu, question);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_rule_bu_name ON t_eval_rule(bu, name);
 DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_rule'; END $$;
 
 DO $$ BEGIN RAISE NOTICE '======================================================================='; END $$;

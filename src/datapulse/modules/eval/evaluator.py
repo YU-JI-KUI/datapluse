@@ -326,18 +326,19 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
     if on_progress:
         on_progress("judging", done_count, total)
 
-    # 规则短路:命中的直接用写死 judge 结果,不进 LLM。命中判据 = 问题精确 + 答案一致。
+    # 规则短路:命中的直接用写死 judge 结果,不进 LLM。命中判据 = 问题∈触发集 且 答案∈答案集。
     from collections import Counter
-    rule_breakdown: Counter = Counter()   # 按规则问题细分命中数,供来源分布图
+    rule_breakdown: Counter = Counter()   # 按规则名细分命中数,供来源分布图
     pending = []
     rule_rows = []
     for s in todo:
         rj = bu.match_rule(s.get("question", ""), s.get("answer_text", ""))
         if rj is not None:
-            judge = dict(rj)
+            canned, rule_name = rj              # (写死 judge, 规则名)
+            judge = dict(canned)
             judge["_source"] = "rule"          # 标记来源,明细可区分「规则命中」非 AI 判
             rule_rows.append(assemble_row(s, judge, allowed, other))
-            rule_breakdown[(s.get("question") or "").strip()] += 1
+            rule_breakdown[rule_name] += 1      # 按规则名聚合(不再按单个问题)
         else:
             pending.append(s)
     if rule_rows:

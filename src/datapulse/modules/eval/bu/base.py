@@ -103,9 +103,10 @@ def bump_rules_version() -> None:
 
 
 def load_rules(code: str) -> dict:
-    """读某 BU 的短路规则,返回 {归一化question: {"expected_answer": str, "judge": dict}}。
+    """读某 BU 的短路规则(规则集模型),扁平成 {归一化question → {rule_name, answers:set, judge}}。
 
-    DB 不可用或库中无规则时返回空 dict(=不短路任何样本)。question 已 strip 作 key。
+    一个规则含多个触发问题,把每个问题都建成 key 挂上该规则的答案集合/规则名/judge,
+    匹配时仍是 O(1) dict 单点查 + 答案集合 in 判断。DB 不可用/无规则返回空 dict。
     """
     if code in _rules_cache:
         return _rules_cache[code]
@@ -113,12 +114,14 @@ def load_rules(code: str) -> dict:
     try:
         from datapulse.modules.eval import eval_db
         for r in eval_db.rule_list_for_match(code):
-            q = (r.get("question") or "").strip()
-            if q:
-                rules[q] = {
-                    "expected_answer": (r.get("expected_answer") or "").strip(),
-                    "judge": r.get("judge_json") or {},
-                }
+            name = (r.get("name") or "").strip()
+            questions = r.get("questions") or []
+            answers = {(a or "").strip() for a in (r.get("answers") or [])}
+            judge = r.get("judge_json") or {}
+            for q in questions:
+                qs = (q or "").strip()
+                if qs:
+                    rules[qs] = {"rule_name": name or qs, "answers": answers, "judge": judge}
     except Exception:
         rules = {}
     _rules_cache[code] = rules
@@ -183,17 +186,19 @@ class BUConfig:
         """命中的活动标问所属的活动名（未命中返回空）。供报告按活动聚合。"""
         return self.activity_questions.get((question or "").strip(), "")
 
-    def match_rule(self, question: str, answer: str) -> dict | None:
-        """短路规则匹配：问题精确相等 + 答案一致 → 返回写死的 judge dict（免 LLM），
-        否则 None。答案不一致（写死结论可能已不适用）也返回 None，走正常 LLM 评测。"""
+    def match_rule(self, question: str, answer: str) -> tuple[dict, str] | None:
+        """短路规则匹配（规则集）：客户问题 ∈ 某规则的触发问题集合 且 答案 ∈ 该规则的答案
+        集合（独立组合）→ 返回 (写死judge, 规则名)，供免 LLM 产出结果 + 报告按规则名聚合。
+        问题不在集合、或答案不在答案集合 → None，走正常 LLM 评测。"""
         if not self.rules:
             return None
         rule = self.rules.get((question or "").strip())
         if rule is None:
             return None
-        if (answer or "").strip() != rule.get("expected_answer", ""):
+        if (answer or "").strip() not in rule["answers"]:
             return None
-        return rule.get("judge") or None
+        judge = rule.get("judge") or None
+        return (judge, rule["rule_name"]) if judge else None
 
     def matches_dispatch(self, raw: str) -> bool:
         """日志「分发BU」列值是否代表本 BU(用于判断系统是否把这条分给了本 BU)。

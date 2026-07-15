@@ -404,10 +404,10 @@ def rule_list_for_match(bu: str) -> list[dict]:
         return _rule_repo(s).list_for_match(bu)
 
 
-def rule_upsert(bu: str, question: str, expected_answer: str, judge_json: dict,
-                note: str = "", updated_by: str = "system") -> dict:
+def rule_upsert(bu: str, name: str, questions: list[str], answers: list[str],
+                judge_json: dict, note: str = "", updated_by: str = "system") -> dict:
     with eval_session() as s:
-        return _rule_repo(s).upsert(bu, question, expected_answer, judge_json,
+        return _rule_repo(s).upsert(bu, name, questions, answers, judge_json,
                                     note=note, updated_by=updated_by)
 
 

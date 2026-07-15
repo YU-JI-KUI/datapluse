@@ -792,14 +792,18 @@ class EvalReviewRepository:
 
 def _rule_to_dict(r: EvalRule) -> dict[str, Any]:
     return {
-        "id": r.id, "bu": r.bu, "question": r.question,
-        "expected_answer": r.expected_answer, "judge_json": r.judge_json,
+        "id": r.id, "bu": r.bu, "name": r.name,
+        "questions": r.questions or [], "answers": r.answers or [],
+        "judge_json": r.judge_json,
         "note": r.note, "updated_at": _iso(r.updated_at), "updated_by": r.updated_by,
     }
 
 
 class EvalRuleRepository:
-    """规则短路持久化层。(bu, question) 唯一；命中即用写死 judge 结果免 LLM。"""
+    """规则短路持久化层（规则集）。(bu, name) 唯一；命中即用写死 judge 结果免 LLM。
+
+    一个规则 = name + 触发问题集合 questions + 期望答案集合 answers + judge。
+    """
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -811,28 +815,36 @@ class EvalRuleRepository:
         return [_rule_to_dict(r) for r in rows]
 
     def list_for_match(self, bu: str) -> list[dict]:
-        """取匹配所需字段（question/expected_answer/judge_json），供评测加载规则集合。"""
+        """取匹配所需字段（name/questions/answers/judge_json），供评测加载规则集合。"""
         rows = self.session.execute(
-            select(EvalRule.question, EvalRule.expected_answer, EvalRule.judge_json)
+            select(EvalRule.name, EvalRule.questions, EvalRule.answers, EvalRule.judge_json)
             .where(EvalRule.bu == bu)
         ).all()
-        return [{"question": q, "expected_answer": ea, "judge_json": jj} for q, ea, jj in rows]
+        return [{"name": n, "questions": qs or [], "answers": ans or [], "judge_json": jj}
+                for n, qs, ans, jj in rows]
 
-    def upsert(self, bu: str, question: str, expected_answer: str, judge_json: dict,
-               note: str = "", updated_by: str = "system") -> dict:
+    def upsert(self, bu: str, name: str, questions: list[str], answers: list[str],
+               judge_json: dict, note: str = "", updated_by: str = "system") -> dict:
         ts = _now()
-        stmt = pg_insert(EvalRule).values(
-            bu=bu, question=question, expected_answer=expected_answer,
+        # 去空去重（保序），并回写旧列首元素作历史兼容
+        qs = list(dict.fromkeys(q.strip() for q in questions if q and q.strip()))
+        ans = list(dict.fromkeys(a.strip() for a in answers if a and a.strip()))
+        first_q = qs[0] if qs else ""
+        first_a = ans[0] if ans else ""
+        vals = dict(
+            bu=bu, name=name, questions=qs, answers=ans,
+            question=first_q, expected_answer=first_a,
             judge_json=_clean_json(judge_json), note=note,
-            created_at=ts, created_by=updated_by, updated_at=ts, updated_by=updated_by,
+        )
+        stmt = pg_insert(EvalRule).values(
+            **vals, created_at=ts, created_by=updated_by, updated_at=ts, updated_by=updated_by,
         ).on_conflict_do_update(
-            index_elements=["bu", "question"],
-            set_={"expected_answer": expected_answer, "judge_json": _clean_json(judge_json),
-                  "note": note, "updated_at": ts, "updated_by": updated_by},
+            index_elements=["bu", "name"],
+            set_={**vals, "updated_at": ts, "updated_by": updated_by},
         )
         self.session.execute(stmt)
         r = self.session.execute(
-            select(EvalRule).where(EvalRule.bu == bu, EvalRule.question == question)
+            select(EvalRule).where(EvalRule.bu == bu, EvalRule.name == name)
         ).scalars().first()
         return _rule_to_dict(r)
 

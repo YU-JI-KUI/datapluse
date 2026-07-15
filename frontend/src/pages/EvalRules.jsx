@@ -1,7 +1,8 @@
 /**
- * AI 评测 · 规则短路管理：按当前 BU 维护「问题→写死评测结果」规则。
- * 评测时客户问题精确等于触发问题、且答案等于期望答案 → 直接用写死的 judge 结果，
- * 不调 LLM（省调用），结果照常计入指标、落盘。judge 字段结构与 AI 输出完全一致。
+ * AI 评测 · 规则短路管理（规则集）：按当前 BU 维护「规则集 → 写死评测结果」。
+ * 一个规则 = 名字 + 触发问题集合 + 期望答案集合 + 一份写死 judge。
+ * 评测时客户问题 ∈ 触发集合 且 答案 ∈ 答案集合（独立组合）→ 直接用写死的 judge 结果，
+ * 不调 LLM（省调用），结果照常计入指标、落盘。报告按规则名聚合。
  */
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
@@ -17,6 +18,7 @@ import { evalApi, getCurrentBu } from '@/lib/api'
 import { formatDate, scopeName } from '@/lib/utils'
 
 const RESP = (r) => r?.data?.data ?? {}
+const splitLines = (s) => (s || '').split(/\r\n|\r|\n/).map(x => x.trim()).filter(Boolean)
 
 // judge 的 11 个字段（结构同 AI 输出）；布尔用是/否切换，answer_resolved 用枚举，其余文本。
 const BOOL_FIELDS = [
@@ -45,10 +47,10 @@ export default function EvalRules() {
   const [bu, setBu]           = useState(getCurrentBu())
   const [list, setList]       = useState([])
   const [loading, setLoading] = useState(false)
-  const [editing, setEditing] = useState(null)   // { id?, question, expected_answer, note, judge }
+  const [editing, setEditing] = useState(null)   // { id?, name, questions(多行), answers(多行), note, judge }
   const [delTarget, setDelTarget] = useState(null)
   const [saving, setSaving]   = useState(false)
-  const [page, setPage]         = useState(1)    // 前端本地分页：全量加载后内存切片
+  const [page, setPage]         = useState(1)
   const [pageSize, setPageSize] = useState(10)
 
   const pageList = list.slice((page - 1) * pageSize, page * pageSize)
@@ -69,11 +71,14 @@ export default function EvalRules() {
   }, [])
 
   function openNew() {
-    setEditing({ question: '', expected_answer: '', note: '', judge: { ...EMPTY_JUDGE } })
+    setEditing({ name: '', questions: '', answers: '', note: '', judge: { ...EMPTY_JUDGE } })
   }
   function openEdit(r) {
     setEditing({
-      id: r.id, question: r.question, expected_answer: r.expected_answer, note: r.note || '',
+      id: r.id, name: r.name || '',
+      questions: (r.questions || []).join('\n'),
+      answers: (r.answers || []).join('\n'),
+      note: r.note || '',
       judge: { ...EMPTY_JUDGE, ...(r.judge_json || {}) },
     })
   }
@@ -83,12 +88,16 @@ export default function EvalRules() {
   }
 
   async function handleSave() {
-    if (!editing?.question?.trim()) { toast.error('触发问题不能为空'); return }
+    if (!editing?.name?.trim()) { toast.error('规则名不能为空'); return }
+    const questions = splitLines(editing.questions)
+    const answers = splitLines(editing.answers)
+    if (questions.length === 0) { toast.error('至少填写一个触发问题'); return }
     setSaving(true)
     try {
       await evalApi.upsertRule({
-        question: editing.question.trim(),
-        expected_answer: editing.expected_answer,
+        name: editing.name.trim(),
+        questions,
+        answers,
         judge_json: editing.judge,
         note: editing.note,
       })
@@ -119,9 +128,10 @@ export default function EvalRules() {
         <div>
           <h1 className="text-2xl font-bold">规则短路管理</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            维护当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的短路规则。
-            评测时客户问题<span className="font-medium">精确等于</span>触发问题、且答案等于期望答案 →
-            直接用写死的评测结果，<span className="font-medium">不调 LLM</span>（省调用），结果照常计入指标。改后下次评测即生效。
+            维护当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的短路规则集。
+            一个规则含多个触发问题和多个期望答案：评测时客户问题<span className="font-medium">∈ 触发问题集合</span>
+            且答案<span className="font-medium">∈ 期望答案集合</span> → 直接用写死的评测结果，
+            <span className="font-medium">不调 LLM</span>（省调用），结果照常计入指标、按规则名聚合。改后下次评测即生效。
           </p>
         </div>
         <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1.5" />新增规则</Button>
@@ -132,9 +142,10 @@ export default function EvalRules() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>触发问题（精确匹配）</TableHead>
-                <TableHead>期望答案</TableHead>
-                <TableHead className="w-32">业务分类</TableHead>
+                <TableHead className="w-40">规则名</TableHead>
+                <TableHead>触发问题（∈ 即满足问题条件）</TableHead>
+                <TableHead>期望答案（∈ 即满足答案条件）</TableHead>
+                <TableHead className="w-28">业务分类</TableHead>
                 <TableHead className="w-28">修改人</TableHead>
                 <TableHead className="w-40 whitespace-nowrap">更新时间</TableHead>
                 <TableHead className="w-24 text-center">操作</TableHead>
@@ -142,17 +153,22 @@ export default function EvalRules() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
+                <TableRow><TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
                   <Loader2 className="w-5 h-5 animate-spin inline mr-2" />加载中…
                 </TableCell></TableRow>
               ) : list.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
+                <TableRow><TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
                   当前 BU 暂无规则，点右上角「新增规则」开始维护。
                 </TableCell></TableRow>
               ) : pageList.map(r => (
                 <TableRow key={r.id}>
-                  <TableCell className="font-medium">{r.question}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground max-w-xs truncate">{r.expected_answer}</TableCell>
+                  <TableCell>
+                    <span className="inline-block px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-600 font-medium">
+                      {r.name}
+                    </span>
+                  </TableCell>
+                  <TableCell><ChipList items={r.questions} /></TableCell>
+                  <TableCell><ChipList items={r.answers} muted /></TableCell>
                   <TableCell className="text-sm">{r.judge_json?.business_type || '—'}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{r.updated_by || '—'}</TableCell>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(r.updated_at)}</TableCell>
@@ -189,18 +205,27 @@ export default function EvalRules() {
           {editing && (
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 text-sm">
               <div className="space-y-1.5">
-                <label className="font-medium">触发问题（与客户问题精确相等）</label>
-                <textarea value={editing.question} rows={2}
-                  onChange={e => setEditing({ ...editing, question: e.target.value })}
-                  placeholder="如：转人工"
+                <label className="font-medium">规则名（报告按此聚合）</label>
+                <Input value={editing.name}
+                  onChange={e => setEditing({ ...editing, name: e.target.value })}
+                  placeholder="如：转人工" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-medium">触发问题集合（一行一条，客户问题精确等于其中任一即满足）</label>
+                <textarea value={editing.questions} rows={4}
+                  onChange={e => setEditing({ ...editing, questions: e.target.value })}
+                  placeholder={'一行一条，例如：\n转人工\n转人工。\n我要转人工'}
                   className="w-full rounded-md border border-input bg-background px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring" />
               </div>
               <div className="space-y-1.5">
-                <label className="font-medium">期望答案（须与样本答案一致才命中；留空表示答案也须为空）</label>
-                <textarea value={editing.expected_answer} rows={3}
-                  onChange={e => setEditing({ ...editing, expected_answer: e.target.value })}
-                  placeholder="填入这条问题对应的写死答案原文"
+                <label className="font-medium">期望答案集合（一行一条，样本答案精确等于其中任一即满足）</label>
+                <textarea value={editing.answers} rows={4}
+                  onChange={e => setEditing({ ...editing, answers: e.target.value })}
+                  placeholder={'一行一条，例如：\n你好\n你好呀'}
                   className="w-full rounded-md border border-input bg-background px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring" />
+                <p className="text-xs text-muted-foreground">
+                  问题与答案是独立集合：任一触发问题 × 任一期望答案的组合都算命中。留空答案集合表示不限答案（仅按问题命中，慎用）。
+                </p>
               </div>
 
               <div className="rounded-md border p-3 space-y-3">
@@ -260,10 +285,27 @@ export default function EvalRules() {
         open={!!delTarget}
         onOpenChange={v => { if (!v) setDelTarget(null) }}
         title="删除规则"
-        description={`将删除规则「${delTarget?.question || ''}」，评测时该问题恢复走正常 AI 评测。`}
+        description={`将删除规则「${delTarget?.name || ''}」，评测时相关问题恢复走正常 AI 评测。`}
         confirmLabel="删除"
         onConfirm={handleDelete}
       />
+    </div>
+  )
+}
+
+/** 集合以 chips 横排展示；空则显示 —。 */
+function ChipList({ items, muted }) {
+  const arr = items || []
+  if (arr.length === 0) return <span className="text-muted-foreground">—</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {arr.map((t, i) => (
+        <span key={i}
+          className={`inline-block rounded border px-1.5 py-0.5 text-xs ${muted ? 'bg-gray-50 text-muted-foreground max-w-[16rem] truncate' : 'bg-white'}`}
+          title={t}>
+          {t}
+        </span>
+      ))}
     </div>
   )
 }
