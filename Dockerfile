@@ -23,8 +23,6 @@ COPY pyproject.toml .
 # —— 复制前端源码 ——
 COPY frontend/ /app/frontend/
 
-RUN npm cache clean --force
-
 RUN npm config set registry http://maven.paic.com.cn/repository/npm  && \
     npm config set fetch-retries 5 && \
     npm config set fetch-timeout 120000 && \
