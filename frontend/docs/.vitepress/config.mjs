@@ -64,7 +64,8 @@ export default defineConfig({
 
     search: { provider: 'local' },
 
-    lastUpdated: { text: '最后更新于' },
+    // 关闭：VitePress 靠 git log 取"最后更新于"，容器内无 git 会 spawn git ENOENT 构建失败
+    lastUpdated: false,
 
     outline: { label: '本页目录', level: [2, 3] },
 
