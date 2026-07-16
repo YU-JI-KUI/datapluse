@@ -132,6 +132,32 @@ _TRUE_TOKENS = {"true", "t", "1", "yes", "y", "是", "对", "√", "✓"}
 _FALSE_TOKENS = {"false", "f", "0", "no", "n", "否", "错", "×", "✗", ""}
 
 
+# 模型输出里语义为文本的字段。LLM 偶尔把它们返回成数字/布尔（如 business_type
+# 返回分类编号 3、或 true），下游 (x or "").strip() 会崩
+# （'int'/'bool' object has no attribute 'strip'）——统一强转字符串。
+_STR_FIELDS = ("business_type", "answer_resolved", "reason", "summary", "intent")
+
+
+def _sanitize_json(v):
+    """递归净化模型返回值，保证整个 dict 一定能安全写入 JSONB。
+
+    模型偶尔在数值字段返回 NaN / Infinity，json.dumps 会产出非法 token，
+    PostgreSQL JSONB 直接拒收（invalid input syntax for type json）。
+    这里把 NaN/Infinity 统一替换成 None，其余结构原样保留。
+    """
+    if isinstance(v, float):
+        # NaN != 自身；Infinity 用 isinf 判
+        import math
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return v
+    if isinstance(v, dict):
+        return {k: _sanitize_json(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_sanitize_json(x) for x in v]
+    return v
+
+
 def _to_bool(v) -> bool:
     """把模型返回的布尔字段（bool / "true" / "T" / "是" / 1 …）归一成真 bool。
 
@@ -170,6 +196,14 @@ def parse_judge_output(text: str) -> dict:
         # 给出可定位的错误,而非裸 JSONDecodeError;上层据此判断是「模型输出
         # 不符格式」而非「评测逻辑出错」,对应内网验收第 ④ 步。
         raise ValueError(f"模型输出不是有效 JSON(前120字): {t[:120]!r}")
+    # 净化模型返回值,保证下游 strip 与写 JSONB 都安全:
+    #   1. NaN/Infinity → None(否则写 judge_json 报 invalid input syntax for type json)
+    #   2. 文本字段强转 str(否则 business_type 等返回数字/bool 时 .strip() 崩)
+    #   3. 布尔字段归一成真 bool(bool("false")==True 会让判定全反)
+    out = _sanitize_json(out)
+    for f in _STR_FIELDS:
+        if f in out and out[f] is not None and not isinstance(out[f], str):
+            out[f] = str(out[f])
     for f in _BOOL_FIELDS:
         if f in out:
             out[f] = _to_bool(out[f])

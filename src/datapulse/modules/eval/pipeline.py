@@ -167,23 +167,43 @@ def _sample_from_group(group: list[dict], pos: int, m: dict[str, str], bu) -> di
     }
 
 
+def _cell(v) -> str:
+    """把 Excel 单元格原始值统一成字符串。
+
+    pd.read_excel(dtype=str) 对布尔列/合并单元格/特定格式并非 100% 生效，
+    仍可能漏进 bool / int / float('nan')。这些值下游一旦 .strip() 或写入
+    JSONB 就会崩（'bool'/'int' object has no attribute 'strip'、
+    invalid input syntax for type json）。此处是所有样本的唯一取数出口，
+    统一在此根治：NaN/None → ""，其余 → str(v).strip()。
+    """
+    if v is None:
+        return ""
+    # float('nan') != 自身，pandas 空单元格在部分路径会以 nan 漏出
+    if isinstance(v, float) and v != v:
+        return ""
+    return str(v).strip()
+
+
 def _extract_row(df: pd.DataFrame, i: int, m: dict[str, str]) -> dict:
-    """把第 i 行抽成轻量 dict(只取评测用到的列),供组内切片复用,避免重复 df.iloc。"""
+    """把第 i 行抽成轻量 dict(只取评测用到的列),供组内切片复用,避免重复 df.iloc。
+
+    所有字段经 _cell() 强制转字符串，杜绝非字符串单元格污染下游 strip / JSONB。
+    """
     row = df.iloc[i]
 
     def col(key: str) -> str:
-        return row.get(m[key], "") if key in m else ""
+        return _cell(row.get(m[key], "")) if key in m else ""
 
     return {
         "row_index": int(i),
-        "session": row[m["session"]],
+        "session": _cell(row[m["session"]]),
         "_turn_n": int(row["_turn_n"]),
-        "question": row[m["question"]],
-        "ask_time": str(col("question_time") or "").strip(),
-        "answer": row[m["answer"]],
+        "question": _cell(row[m["question"]]),
+        "ask_time": col("question_time"),
+        "answer": _cell(row[m["answer"]]),
         "sys_intent": col("sys_intent"),
         "dispatch_reason": col("dispatch_reason"),
-        "dispatched_bu": col("dispatch_bu").strip(),
+        "dispatched_bu": col("dispatch_bu"),
         "gold": {
             "dispatch": col("gold_dispatch"),
             "resolved": col("gold_resolved"),

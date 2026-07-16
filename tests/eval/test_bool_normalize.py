@@ -64,3 +64,45 @@ def test_answer_resolved_not_touched():
     # answer_resolved 是 yes/partial/no 枚举，不是 bool，不应被归一
     out = parse_judge_output('{"answer_resolved": "no"}')
     assert out["answer_resolved"] == "no"
+
+
+# ── 回归：模型返回值净化（修 3 个过夜 eval 任务失败）────────────────────────────
+# 根因：模型偶尔把 business_type 返回成数字/bool → 下游 (x or "").strip() 崩；
+# 返回含 NaN/Infinity → judge dict 写 judge_json(JSONB) 崩。均属"每次不同"的
+# 模型输出问题，重跑就好，正是过夜任务时好时坏的原因。
+
+def test_business_type_int_coerced_to_str():
+    """模型把 business_type 返回成数字 → 强转字符串（修 'int' has no strip）。"""
+    out = parse_judge_output(json.dumps({"business_type": 3}))
+    assert out["business_type"] == "3"
+    out["business_type"].strip()   # 下游会 strip，不崩即通过
+
+
+def test_business_type_bool_coerced_to_str():
+    """模型把 business_type 返回成 bool → 强转字符串（修 'bool' has no strip）。"""
+    out = parse_judge_output(json.dumps({"business_type": True}))
+    assert out["business_type"] == "True"
+    out["business_type"].strip()
+
+
+def test_nan_infinity_sanitized_to_none():
+    """模型返回 NaN/Infinity → 清洗成 None，保证写 JSONB 不崩。"""
+    out = parse_judge_output('{"business_type": "证券", "confidence": NaN, "score": Infinity}')
+    assert out["confidence"] is None
+    assert out["score"] is None
+    # 关键：整个 dict 能序列化成合法 JSON（allow_nan=False 模拟 PG JSONB 严格性）
+    json.dumps(out, allow_nan=False)
+
+
+def test_nested_nan_sanitized():
+    """嵌套结构里的 NaN 也要递归清洗。"""
+    out = parse_judge_output('{"detail": {"x": NaN, "y": [1, Infinity, 3]}}')
+    assert out["detail"]["x"] is None
+    assert out["detail"]["y"] == [1, None, 3]
+    json.dumps(out, allow_nan=False)
+
+
+def test_normal_string_business_type_unchanged():
+    """正常字符串 business_type 不受影响。"""
+    out = parse_judge_output(json.dumps({"business_type": "证券融资"}))
+    assert out["business_type"] == "证券融资"

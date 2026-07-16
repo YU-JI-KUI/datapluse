@@ -1,8 +1,12 @@
 """流水线测试:列解析(精确优先)、会话重组、不做样本过滤。"""
+import json
+
 import pandas as pd
 
 from datapulse.modules.eval.bu.securities import SECURITIES as SEC
-from datapulse.modules.eval.pipeline import build_all_samples, load_and_prep, resolve_columns
+from datapulse.modules.eval.pipeline import (
+    _extract_row, build_all_samples, load_and_prep, resolve_columns,
+)
 
 
 def _df():
@@ -51,3 +55,40 @@ def test_session_context_reconstruction():
     assert len(ctx) == 1
     assert ctx[0]["user"] == "融资利率"
     assert ctx[0]["ai"] == "6.5%"
+
+
+def test_dirty_cells_coerced_to_str():
+    """回归:Excel 非字符串单元格(bool/int/nan)必须被强制转字符串。
+
+    根因:pd.read_excel(dtype=str) 对布尔列/数字列并非 100% 生效,漏进的
+    bool/int/nan 会让下游 .strip() 崩(''bool'/'int' object has no attribute
+    'strip'')、写 JSONB 崩(invalid input syntax for type json)。
+    此前 3 个过夜 eval 任务即因此失败。
+    """
+    df = pd.DataFrame([{
+        "应用会话ID": 12345,          # 数字会话ID → int
+        "客户咨询轮次": "1",
+        "客户问题": "怎么开户",
+        "答案": True,                  # 布尔答案 → bool
+        "模型意图": float("nan"),      # 空单元格 → nan
+        "分发BU": 0,                   # 数字分发BU → int
+        "分发理由": "规则命中",
+    }])
+    df["_turn_n"] = 1
+    m = resolve_columns(df)
+    row = _extract_row(df, 0, m)
+
+    # 所有字段都是 str,NaN → "",bool/int → str
+    assert row["session"] == "12345"
+    assert row["answer"] == "True"
+    assert row["dispatched_bu"] == "0"
+    assert row["sys_intent"] == ""     # nan → ""
+
+    # 关键:能安全 strip(修复前 bool/int 直接 AttributeError)
+    for k in ("session", "question", "answer", "sys_intent",
+              "dispatch_reason", "dispatched_bu", "ask_time"):
+        assert isinstance(row[k], str)
+        row[k].strip()
+
+    # 关键:能安全写 JSONB(修复前 nan → 非法 JSON token)
+    json.dumps(row, ensure_ascii=False)
