@@ -1,0 +1,41 @@
+# 前端：node_modules 由容器内 npm ci 重装，构建产物容器内重新生成
+frontend/node_modules/
+frontend/.vite/
+frontend/public/docs/
+frontend/dist/
+frontend/vite.config.js.timestamp*.mjs
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 运行时数据 / 日志 / 模型（挂载或运行时生成，不进镜像）
+nas/
+logs/
+*.log
+models/
+
+# 敏感配置
+.env
+config.yaml
+
+# 版本控制 / 编辑器 / 协作工具
+.git/
+.gitignore
+.claude/
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# 文档 / 测试（镜像不需要）；只排根级，勿误伤 frontend/docs（VitePress 源，docs:build 必需）
+/docs/
+/tests/
