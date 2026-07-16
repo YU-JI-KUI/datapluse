@@ -665,6 +665,19 @@ CREATE TABLE IF NOT EXISTS t_eval_task_row (
     created_by    VARCHAR(100) NOT NULL DEFAULT '',
     CONSTRAINT pk_t_eval_task_row PRIMARY KEY (id)
 );
+-- 兜底后期新增列：老库 t_eval_task_row 已存在（拆列前建表）时 CREATE TABLE 整条跳过，
+-- 平铺列由下方 ALTER 补齐；新库幂等跳过。来源：20260706_eval_row_flatten。
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS session       VARCHAR(128);
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS turn          INTEGER;
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS question      TEXT;
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS ask_time      VARCHAR(32);
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS dispatched_bu VARCHAR(64);
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS j_intent      VARCHAR(128);
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS j_dispatch    VARCHAR(8);
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS j_resolved    VARCHAR(8);
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS judge_json    JSONB;
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS context_json  JSONB;
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS gold_json     JSONB;
 COMMENT ON TABLE  t_eval_task_row               IS 'AI对话评测逐条结果表（每行明细一条，断点续跑依据）';
 COMMENT ON COLUMN t_eval_task_row.id            IS '主键ID';
 COMMENT ON COLUMN t_eval_task_row.task_id       IS '所属评测任务ID（逻辑外键 → t_eval_task.task_id）';
@@ -683,7 +696,44 @@ COMMENT ON COLUMN t_eval_task_row.gold_json     IS '人工金标 dict';
 COMMENT ON COLUMN t_eval_task_row.row_json      IS '单行完整评测结果快照（旧行兜底 + 过渡期双写）';
 COMMENT ON COLUMN t_eval_task_row.created_at    IS '落盘时间';
 COMMENT ON COLUMN t_eval_task_row.created_by    IS '操作人';
+-- 老库回填：拆列前的旧行把洞察聚合用的窄字段（question/j_intent/ask_time）从 row_json
+-- 抽到平铺列，聚合直接走列索引；其余平铺列旧行留空、读取时 fallback row_json。
+-- question 用 COALESCE 兜空串，保证回填后不再是 NULL（否则每次部署重复扫同一批行）。
+-- 分批 UPDATE（每批 5000）避免大事务锁表；新库无旧行，循环立即退出。
+DO $$
+DECLARE
+    n_updated INTEGER;
+BEGIN
+    LOOP
+        UPDATE t_eval_task_row SET
+            question = COALESCE(row_json->>'question', ''),
+            j_intent = row_json->>'j_intent',
+            ask_time = COALESCE(row_json->>'ask_time', '')
+        WHERE id IN (
+            SELECT id FROM t_eval_task_row
+            WHERE question IS NULL AND row_json IS NOT NULL
+            LIMIT 5000
+        );
+        GET DIAGNOSTICS n_updated = ROW_COUNT;
+        EXIT WHEN n_updated = 0;
+        RAISE NOTICE '[DATA] t_eval_task_row backfill batch: % rows', n_updated;
+    END LOOP;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_task_row_task_idx ON t_eval_task_row(task_id, row_index);
+-- 老库索引升级：idx_t_eval_row_j_intent 旧版是表达式索引（row_json->>'j_intent'），与列
+-- 索引同名，直接 CREATE IF NOT EXISTS 会被跳过——先按 indexdef 判定是旧版才 DROP，
+-- 避免每次部署盲目重建。idx_t_eval_row_intent（task_id+表达式）已被列索引取代，直接清理。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE indexname = 'idx_t_eval_row_j_intent' AND indexdef LIKE '%row_json%'
+    ) THEN
+        RAISE NOTICE '[DDL] drop legacy expression index idx_t_eval_row_j_intent ...';
+        DROP INDEX idx_t_eval_row_j_intent;
+    END IF;
+END $$;
+DROP INDEX IF EXISTS idx_t_eval_row_intent;
 -- 明细页过滤（j_dispatch/j_resolved 按 task）+ 洞察聚合（j_intent/ask_time）走平铺列原生索引
 CREATE INDEX IF NOT EXISTS idx_t_eval_row_task_dispatch ON t_eval_task_row (task_id, j_dispatch);
 CREATE INDEX IF NOT EXISTS idx_t_eval_row_task_resolved ON t_eval_task_row (task_id, j_resolved);
@@ -766,6 +816,12 @@ CREATE TABLE IF NOT EXISTS t_eval_activity_question (
     updated_by  VARCHAR(100) NOT NULL DEFAULT '',
     CONSTRAINT pk_t_eval_activity_question PRIMARY KEY (id)
 );
+-- 兜底后期新增列：来源 20260706_eval_activity_name。老库已建表则补 activity_name，
+-- 并回填 activity_name = question（每个老标问自成一活动，行为与改造前一致）。
+ALTER TABLE t_eval_activity_question ADD COLUMN IF NOT EXISTS activity_name VARCHAR(255);
+UPDATE t_eval_activity_question
+   SET activity_name = question
+ WHERE activity_name IS NULL OR activity_name = '';
 COMMENT ON TABLE  t_eval_activity_question               IS 'AI评测活动标问表（写死按钮触发的写死回复，评测时整条跳过，不计入指标）';
 COMMENT ON COLUMN t_eval_activity_question.id            IS '主键ID';
 COMMENT ON COLUMN t_eval_activity_question.bu            IS '所属业务单元：securities=证券 / life=寿险';
@@ -826,8 +882,6 @@ CREATE TABLE IF NOT EXISTS t_eval_rule (
     name            VARCHAR(255) NOT NULL DEFAULT '',
     questions       JSONB        NOT NULL DEFAULT '[]'::jsonb,
     answers         JSONB        NOT NULL DEFAULT '[]'::jsonb,
-    question        TEXT         NOT NULL DEFAULT '',
-    expected_answer TEXT         NOT NULL DEFAULT '',
     judge_json      JSONB        NOT NULL,
     note            VARCHAR(255) NOT NULL DEFAULT '',
     created_at      TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -836,32 +890,18 @@ CREATE TABLE IF NOT EXISTS t_eval_rule (
     updated_by      VARCHAR(100) NOT NULL DEFAULT '',
     CONSTRAINT pk_t_eval_rule PRIMARY KEY (id)
 );
--- 老库兼容：旧版本已建表则补 name/questions/answers（幂等，见 20260710 迁移脚本）
-ALTER TABLE t_eval_rule ADD COLUMN IF NOT EXISTS name      VARCHAR(255) NOT NULL DEFAULT '';
-ALTER TABLE t_eval_rule ADD COLUMN IF NOT EXISTS questions JSONB        NOT NULL DEFAULT '[]'::jsonb;
-ALTER TABLE t_eval_rule ADD COLUMN IF NOT EXISTS answers   JSONB        NOT NULL DEFAULT '[]'::jsonb;
 COMMENT ON TABLE  t_eval_rule                 IS 'AI评测规则短路表（命中写死结果、免LLM调用，计入指标）';
 COMMENT ON COLUMN t_eval_rule.id              IS '主键ID';
 COMMENT ON COLUMN t_eval_rule.bu              IS '所属业务单元：securities=证券 / life=寿险';
 COMMENT ON COLUMN t_eval_rule.name            IS '规则名（同BU内唯一，报告按此聚合，如「转人工」）';
 COMMENT ON COLUMN t_eval_rule.questions       IS '触发问题集合（JSON字符串数组）；客户问题精确等于其中任一即满足问题条件';
 COMMENT ON COLUMN t_eval_rule.answers         IS '期望答案集合（JSON字符串数组）；样本答案精确等于其中任一即满足答案条件';
-COMMENT ON COLUMN t_eval_rule.question        IS '（旧列，保留兼容）单个触发问题；新结构用 questions 集合';
-COMMENT ON COLUMN t_eval_rule.expected_answer IS '（旧列，保留兼容）单个期望答案；新结构用 answers 集合';
 COMMENT ON COLUMN t_eval_rule.judge_json      IS '写死的judge输出（11字段，结构同LLM output，命中即原样产出）';
 COMMENT ON COLUMN t_eval_rule.note            IS '备注';
 COMMENT ON COLUMN t_eval_rule.created_at      IS '创建时间';
 COMMENT ON COLUMN t_eval_rule.created_by      IS '创建人';
 COMMENT ON COLUMN t_eval_rule.updated_at      IS '更新时间';
 COMMENT ON COLUMN t_eval_rule.updated_by      IS '更新人';
--- 老库回填：旧行经上面 ALTER 补出的 name 默认是空串，多行空 name 会撞 (bu,name) 唯一索引。
--- 必须先按 question 回填 name/questions/answers，再建唯一索引（与 20260710 迁移脚本一致）。
-UPDATE t_eval_rule
-   SET name      = question,
-       questions = to_jsonb(ARRAY[question]),
-       answers   = to_jsonb(ARRAY[expected_answer])
- WHERE (name IS NULL OR name = '')
-   AND question IS NOT NULL AND question <> '';
 CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_rule_bu_name ON t_eval_rule(bu, name);
 DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_rule'; END $$;
 

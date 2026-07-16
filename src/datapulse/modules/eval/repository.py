@@ -826,14 +826,11 @@ class EvalRuleRepository:
     def upsert(self, bu: str, name: str, questions: list[str], answers: list[str],
                judge_json: dict, note: str = "", updated_by: str = "system") -> dict:
         ts = _now()
-        # 去空去重（保序），并回写旧列首元素作历史兼容
+        # 去空去重（保序）
         qs = list(dict.fromkeys(q.strip() for q in questions if q and q.strip()))
         ans = list(dict.fromkeys(a.strip() for a in answers if a and a.strip()))
-        first_q = qs[0] if qs else ""
-        first_a = ans[0] if ans else ""
         vals = dict(
             bu=bu, name=name, questions=qs, answers=ans,
-            question=first_q, expected_answer=first_a,
             judge_json=_clean_json(judge_json), note=note,
         )
         stmt = pg_insert(EvalRule).values(

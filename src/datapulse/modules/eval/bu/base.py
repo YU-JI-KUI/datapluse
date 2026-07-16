@@ -162,8 +162,8 @@ class BUConfig:
     # 跳过）。get_bu 时注入当前库中该 BU 的快照随任务固定。空 = 不过滤任何样本。
     activity_questions: dict = field(default_factory=dict)
 
-    # 短路规则 {归一化question: {expected_answer, judge}}。命中（问题精确+答案一致）即用
-    # 写死 judge 结果免 LLM。get_bu 时注入快照。空 = 不短路。
+    # 短路规则 {归一化question: {rule_name, answers:set, judge}}。命中（问题精确+答案一致）
+    # 即用写死 judge 结果免 LLM。get_bu 时注入快照。空 = 不短路。
     rules: dict = field(default_factory=dict)
 
     def prompt(self, name: str) -> str:

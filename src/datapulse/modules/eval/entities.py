@@ -203,8 +203,6 @@ class EvalRule(EvalBase):
     一个规则 = 名字 + 触发问题集合 + 期望答案集合 + 一份写死 judge。评测时若客户问题
     ∈ questions 且答案 ∈ answers（独立组合），直接用 judge_json（结构同 LLM 输出）产出
     结果、计入指标、落盘，不调 LLM——省大量调用。报告按 name 聚合。按 BU 一套，(bu, name) 唯一。
-
-    旧列 question/expected_answer 保留作历史兼容，新逻辑只读 questions/answers 集合。
     """
 
     __tablename__ = "t_eval_rule"
@@ -214,8 +212,6 @@ class EvalRule(EvalBase):
     name            = Column(String(255), nullable=False, default="")  # 规则名（同 BU 唯一，报告按此聚合）
     questions       = Column(JSONB, nullable=False, default=list)       # 触发问题集合（字符串数组）
     answers         = Column(JSONB, nullable=False, default=list)       # 期望答案集合（字符串数组）
-    question        = Column(Text, nullable=False, default="")          # 旧列（保留兼容）
-    expected_answer = Column(Text, nullable=False, default="")          # 旧列（保留兼容）
     judge_json      = Column(JSONB, nullable=False)          # 写死的 judge 输出（11 字段，结构同 LLM）
     note            = Column(String(255), nullable=False, default="")
     created_at      = Column(_TS, nullable=False)

@@ -8,22 +8,7 @@
   ],
   "sqls": {
     "postgresql": [
-      "db/arkpg/20260428_arkpgdata_init.sql",
-      "db/arkpg/20260508_arkpgdata_add_annotation_cot_fields.sql",
-      "db/arkpg/20260627_arkpgdata_add_eval_tables.sql",
-      "db/arkpg/20260627_arkpgdata_add_eval_prompt.sql",
-      "db/arkpg/20260628_arkpgdata_add_eval_category.sql",
-      "db/arkpg/20260630_arkpgdata_eval_worker_claim.sql",
-      "db/arkpg/20260630_arkpgdata_add_eval_activity.sql",
-      "db/arkpg/20260701_arkpgdata_add_eval_review.sql",
-      "db/arkpg/20260701_arkpgdata_add_eval_rule.sql",
-      "db/arkpg/20260704_arkpgdata_add_eval_started_at.sql",
-      "db/arkpg/20260705_arkpgdata_rbac_roles.sql",
-      "db/arkpg/20260705_arkpgdata_eval_row_expr_index.sql",
-      "db/arkpg/20260706_arkpgdata_eval_row_flatten.sql",
-      "db/arkpg/20260706_arkpgdata_eval_activity_name.sql",
-      "db/arkpg/20260710_arkpgdata_eval_rule_ruleset.sql",
-      "db/arkpg/20260715_arkpgdata_add_user_nickname.sql"
+      "db/arkpg/20260428_arkpgdata_init.sql"
     ]
   }
 }
