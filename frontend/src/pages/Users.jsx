@@ -252,13 +252,14 @@ export default function Users() {
   async function handleSave(form, userId) {
     try {
       if (userId) {
-        const payload = { role_names: form.role_names, is_active: form.is_active }
+        const payload = { nickname: form.nickname, role_names: form.role_names, is_active: form.is_active }
         if (form.password) payload.password = form.password
         await userApi.update(userId, payload)
         toast.success('用户已更新')
       } else {
         await userApi.create({
           username:   form.username,
+          nickname:   form.nickname,
           password:   form.password,
           role_names: form.role_names,
         })
