@@ -1,6 +1,10 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ f1b16d24
+# 基于 origin/main @ 591b6fb0
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   f1b16d24 关闭 VitePress lastUpdated 避免容器构建依赖 git
-frontend/docs/.vitepress/config.mjs
+#   591b6fb0 容器化构建配置：npm ci + 提交依赖锁 + dockerignore
+.dockerignore
+.gitattributes
+.gitignore
+Dockerfile
+uv.lock
