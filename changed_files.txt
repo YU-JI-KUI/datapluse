@@ -1,11 +1,25 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 4531f369
+# 基于 origin/main @ ee736b3d
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   23362b0b 修复 AI 评测任务因模型返回值异常而失败
-#   4531f369 用户新建/编辑支持 nickname 字段
-src/datapulse/modules/eval/judge.py
-src/datapulse/modules/eval/pipeline.py
-tests/eval/test_bool_normalize.py
-tests/eval/test_pipeline.py
-frontend/src/pages/Users.jsx
+#   ee736b3d DDL 瘦身：增量脚本全部合并进 init，sqls 只留单脚本
+db/arkpg/20260428_arkpgdata_init.sql
+deploy_desc/SUPER-AGENT1.0.0.json
+src/datapulse/modules/eval/bu/base.py
+src/datapulse/modules/eval/entities.py
+src/datapulse/modules/eval/repository.py
+[DEL] db/arkpg/20260508_arkpgdata_add_annotation_cot_fields.sql
+[DEL] db/arkpg/20260627_arkpgdata_add_eval_prompt.sql
+[DEL] db/arkpg/20260627_arkpgdata_add_eval_tables.sql
+[DEL] db/arkpg/20260628_arkpgdata_add_eval_category.sql
+[DEL] db/arkpg/20260630_arkpgdata_add_eval_activity.sql
+[DEL] db/arkpg/20260630_arkpgdata_eval_worker_claim.sql
+[DEL] db/arkpg/20260701_arkpgdata_add_eval_review.sql
+[DEL] db/arkpg/20260701_arkpgdata_add_eval_rule.sql
+[DEL] db/arkpg/20260704_arkpgdata_add_eval_started_at.sql
+[DEL] db/arkpg/20260705_arkpgdata_eval_row_expr_index.sql
+[DEL] db/arkpg/20260705_arkpgdata_rbac_roles.sql
+[DEL] db/arkpg/20260706_arkpgdata_eval_activity_name.sql
+[DEL] db/arkpg/20260706_arkpgdata_eval_row_flatten.sql
+[DEL] db/arkpg/20260710_arkpgdata_eval_rule_ruleset.sql
+[DEL] db/arkpg/20260715_arkpgdata_add_user_nickname.sql
