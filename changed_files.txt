@@ -1,16 +1,11 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 21231b0e
+# 基于 origin/main @ 4531f369
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   21231b0e 用户：加 nickname + 修分配看不到新用户 + 列表按登录排序
-db/arkpg/20260428_arkpgdata_init.sql
-db/arkpg/20260715_arkpgdata_add_user_nickname.sql
-deploy_desc/SUPER-AGENT1.0.0.json
-frontend/src/lib/api.js
-frontend/src/pages/DatasetManagement.jsx
+#   23362b0b 修复 AI 评测任务因模型返回值异常而失败
+#   4531f369 用户新建/编辑支持 nickname 字段
+src/datapulse/modules/eval/judge.py
+src/datapulse/modules/eval/pipeline.py
+tests/eval/test_bool_normalize.py
+tests/eval/test_pipeline.py
 frontend/src/pages/Users.jsx
-src/datapulse/model/entities.py
-src/datapulse/repository/base.py
-src/datapulse/repository/user_repository.py
-src/datapulse/router/users.py
-src/datapulse/service/user_service.py
