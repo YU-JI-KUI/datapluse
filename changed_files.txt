@@ -1,6 +1,6 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ e300755f
+# 基于 origin/main @ 9980dbea
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   e300755f 移除 Dockerfile 冗余的 npm cache clean
-Dockerfile
+#   9980dbea 更新日志补充 v1.2.2 / v1.3 / v1.4
+frontend/docs/changelog.md
