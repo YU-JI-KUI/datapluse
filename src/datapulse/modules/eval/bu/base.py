@@ -102,15 +102,48 @@ def bump_rules_version() -> None:
     _rules_cache.clear()
 
 
+def _is_pattern(q: str) -> bool:
+    """触发问题是否为通配/LIKE 模式：含 * 或 %（否则精确匹配，走 dict O(1)）。"""
+    return "*" in q or "%" in q
+
+
+def match_pattern(pattern: str, question: str) -> bool:
+    """按 SQL LIKE 风格匹配触发问题（pattern 已 strip）：
+      *      → 任意问题（恒真）
+      %x%    → 包含 x
+      x%     → 以 x 开头
+      %x     → 以 x 结尾
+      其它   → 精确相等（无 % 通配）
+    * 视为 %% 的特例。空 pattern 恒不匹配。"""
+    if not pattern:
+        return False
+    if pattern == "*":
+        return True
+    q = question or ""
+    has_lead = pattern.startswith("%")
+    has_trail = pattern.endswith("%")
+    core = pattern.strip("%")
+    if has_lead and has_trail:
+        return core in q                 # %x%
+    if has_trail:
+        return q.startswith(core)        # x%
+    if has_lead:
+        return q.endswith(core)          # %x
+    return q == pattern                  # 无 %：精确
+
+
 def load_rules(code: str) -> dict:
     """读某 BU 的短路规则(规则集模型),扁平成 {归一化question → {rule_name, answers:set, judge}}。
 
-    一个规则含多个触发问题,把每个问题都建成 key 挂上该规则的答案集合/规则名/judge,
-    匹配时仍是 O(1) dict 单点查 + 答案集合 in 判断。DB 不可用/无规则返回空 dict。
+    一个规则含多个触发问题,把每个问题都建成 key 挂上该规则的答案集合/规则名/judge。
+    精确问题走 dict O(1) 单点查；含 */% 的模式问题额外收进内部 __patterns__ 列表,
+    match_rule 精确未命中时才遍历模式规则（规则数通常几十条,遍历可忽略）。
+    DB 不可用/无规则返回空 dict。
     """
     if code in _rules_cache:
         return _rules_cache[code]
     rules: dict = {}
+    patterns: list = []   # [(pattern, rule_entry)]，供 match_rule 遍历
     try:
         from datapulse.modules.eval import eval_db
         for r in eval_db.rule_list_for_match(code):
@@ -120,10 +153,18 @@ def load_rules(code: str) -> dict:
             judge = r.get("judge_json") or {}
             for q in questions:
                 qs = (q or "").strip()
-                if qs:
-                    rules[qs] = {"rule_name": name or qs, "answers": answers, "judge": judge}
+                if not qs:
+                    continue
+                entry = {"rule_name": name or qs, "answers": answers, "judge": judge}
+                if _is_pattern(qs):
+                    patterns.append((qs, entry))
+                else:
+                    rules[qs] = entry
     except Exception:
-        rules = {}
+        rules, patterns = {}, []
+    # 模式规则挂在保留 key 上（普通问题不含 * 与 %，不会与之冲突）
+    if patterns:
+        rules["__patterns__"] = patterns
     _rules_cache[code] = rules
     return rules
 
@@ -187,18 +228,29 @@ class BUConfig:
         return self.activity_questions.get((question or "").strip(), "")
 
     def match_rule(self, question: str, answer: str) -> tuple[dict, str] | None:
-        """短路规则匹配（规则集）：客户问题 ∈ 某规则的触发问题集合 且 答案 ∈ 该规则的答案
+        """短路规则匹配（规则集）：客户问题匹配某规则的触发问题 且 答案 ∈ 该规则的答案
         集合（独立组合）→ 返回 (写死judge, 规则名)，供免 LLM 产出结果 + 报告按规则名聚合。
-        问题不在集合、或答案不在答案集合 → None，走正常 LLM 评测。"""
+
+        触发问题支持：精确相等、*（任意）、%x%（包含）、x%（前缀）、%x（后缀）。
+        精确问题走 dict O(1) 快路径；未命中再遍历模式规则。答案侧始终精确 ∈ 答案集合。
+        不匹配 → None，走正常 LLM 评测。"""
         if not self.rules:
             return None
-        rule = self.rules.get((question or "").strip())
-        if rule is None:
-            return None
-        if (answer or "").strip() not in rule["answers"]:
-            return None
-        judge = rule.get("judge") or None
-        return (judge, rule["rule_name"]) if judge else None
+        q = (question or "").strip()
+        a = (answer or "").strip()
+        # 1) 精确问题：O(1) 快路径（跳过保留 key __patterns__）
+        rule = self.rules.get(q)
+        if rule is not None and a in rule["answers"]:
+            judge = rule.get("judge") or None
+            if judge:
+                return (judge, rule["rule_name"])
+        # 2) 模式问题：遍历（含 */%like%），第一个「问匹配 且 答在集合」的命中
+        for pattern, entry in self.rules.get("__patterns__", []):
+            if match_pattern(pattern, q) and a in entry["answers"]:
+                judge = entry.get("judge") or None
+                if judge:
+                    return (judge, entry["rule_name"])
+        return None
 
     def matches_dispatch(self, raw: str) -> bool:
         """日志「分发BU」列值是否代表本 BU(用于判断系统是否把这条分给了本 BU)。

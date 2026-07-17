@@ -40,6 +40,36 @@ def _header_questions(header, questions) -> str | None:
     return "\n".join(lines) or None
 
 
+# 搜索返回卡净化后的统一文案：唯一稳定，便于短路规则用精确答案集合匹配。
+SEARCH_CARD_TEXT = "搜索返回"
+
+
+@register
+class SearchCardParser(AnswerParser):
+    """证券·搜索返回卡（searchData.searchType）：系统把用户导向搜索/快捷服务入口。
+
+    结构：{searchData:{searchType, query, agentName, title, btnInfo, desc}}，真实日志
+    外层多套一层数组。用户搜索条件五花八门（科创ETF/某股票/某基金…），但都是同一种
+    「返回搜索入口」的处理，净化成统一文案「搜索返回」，配合短路规则「触发问题=* + 答案=
+    搜索返回」判为已解决、归入「通用分类」业务分类。priority 小于通用卡，先匹配。
+    """
+    name = "securities.search_card"
+    bu_codes = ("securities",)
+    priority = 8
+
+    def _search(self, parsed):
+        first = first_dict(parsed)
+        sd = first.get("searchData") if isinstance(first, dict) else None
+        # 判据：有 searchData 且其内含 searchType（区别于其它带 searchData 键的结构）
+        return sd if isinstance(sd, dict) and "searchType" in sd else None
+
+    def match(self, raw, parsed) -> bool:
+        return self._search(parsed) is not None
+
+    def parse(self, raw, parsed) -> str | None:
+        return SEARCH_CARD_TEXT if self._search(parsed) is not None else None
+
+
 @register
 class RobotMenuItemsParser(AnswerParser):
     """证券·菜单卡（msgContext.template=robotMenuItems）：机器人反问，列出候选问题让用户选。

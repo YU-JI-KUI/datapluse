@@ -29,7 +29,7 @@ const BOOL_FIELDS = [
 ]
 const RESOLVED_OPTS = ['yes', 'partial', 'no', 'unknown']
 const TEXT_FIELDS = [
-  { k: 'business_type',        label: '业务分类', ph: '如：咨询客服' },
+  { k: 'business_type',        label: '业务分类', ph: '须为该BU分类清单内的值，否则归兜底桶；通配符规则填「通用分类」' },
   { k: 'dispatch_reason',      label: '分发理由' },
   { k: 'business_type_reason', label: '业务分类理由' },
   { k: 'resolved_reason',      label: '解决度理由' },
@@ -211,11 +211,16 @@ export default function EvalRules() {
                   placeholder="如：转人工" />
               </div>
               <div className="space-y-1.5">
-                <label className="font-medium">触发问题集合（一行一条，客户问题精确等于其中任一即满足）</label>
+                <label className="font-medium">触发问题集合（一行一条，支持通配 / LIKE，匹配任一即满足）</label>
                 <textarea value={editing.questions} rows={4}
                   onChange={e => setEditing({ ...editing, questions: e.target.value })}
-                  placeholder={'一行一条，例如：\n转人工\n转人工。\n我要转人工'}
+                  placeholder={'一行一条，例如：\n转人工          （精确相等）\n*               （任意问题）\n%注销%          （包含“注销”）\n注销%            （以“注销”开头）'}
                   className="w-full rounded-md border border-input bg-background px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring" />
+                <p className="text-xs text-muted-foreground">
+                  匹配语法（类 SQL LIKE）：<code>转人工</code> 精确相等；<code>*</code> 任意问题；
+                  <code>%注销%</code> 包含；<code>注销%</code> 前缀；<code>%注销</code> 后缀。
+                  用 <code>*</code> / <code>%like%</code> 时建议把「业务分类」填为「通用分类」，避免混入具体业务分类。
+                </p>
               </div>
               <div className="space-y-1.5">
                 <label className="font-medium">期望答案集合（一行一条，样本答案精确等于其中任一即满足）</label>
