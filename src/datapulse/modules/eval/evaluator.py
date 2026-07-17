@@ -23,7 +23,7 @@ from datapulse.modules.eval.llm.judge_runner import (
     judge_batch,
 )
 from datapulse.modules.eval.metrics import binary_report
-from datapulse.modules.eval.pipeline import build_all_samples, detect_gold, load_and_prep
+from datapulse.modules.eval.pipeline import build_all_samples, detect_gold, load_and_merge
 
 
 def _resolved_to_binary(judge: dict) -> str:
@@ -31,6 +31,21 @@ def _resolved_to_binary(judge: dict) -> str:
     if not isinstance(judge, dict) or "_error" in judge:
         return ""
     return "是" if judge.get("answer_resolved") == "yes" else "否"
+
+
+import re as _re
+
+_ISO_DATE_RE = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _parse_ask_date(ask_time: str) -> str | None:
+    """从 ask_time 原文（ISO 格式）取前 10 位作提问日期，供按日聚合。
+
+    统一 ISO 口径（'2026-07-17 14:30:00'），前 10 位即 'YYYY-MM-DD'；
+    空串/非 ISO 返回 None（不落 ask_date，聚合时自然被排除）。
+    """
+    head = (ask_time or "")[:10]
+    return head if _ISO_DATE_RE.match(head) else None
 
 
 def _dispatch_correct(sample: dict, judge: dict) -> bool | None:
@@ -112,6 +127,7 @@ def assemble_row(sample: dict, judge: dict, allowed_intents: set | None = None,
         "turn": sample["turn"],
         "question": sample["question"],
         "ask_time": sample.get("ask_time", ""),  # 客户提问时间原文，供问题洞察按日聚合
+        "ask_date": _parse_ask_date(sample.get("ask_time", "")),  # 解析后的提问日期，按日聚合
         "context": sample["context"],  # [{turn, user, ai}, ...] 含前文 AI 回答
         "next_user_turn": sample["next_user_turn"],
         "dispatched_intent": sample["dispatched_intent"],
@@ -343,7 +359,7 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
             pending.append(s)
     if rule_rows:
         if persist and task_id:
-            store.save_rows(task_id, rule_rows)
+            store.save_rows(task_id, rule_rows, bu=bu.code)
         agg.update(rule_rows)
         done_count += len(rule_rows)
         if on_progress:
@@ -372,11 +388,11 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
             # 重建),再上抛让引擎暂停退避。续跑时这些行已在库,不重做。
             if persist and task_id and e.partial:
                 done_rows = [assemble_row(batch[i], j, allowed, other) for i, j in e.partial]
-                store.save_rows(task_id, done_rows)
+                store.save_rows(task_id, done_rows, bu=bu.code)
             raise
         batch_rows = [assemble_row(s, j, allowed, other) for s, j in zip(batch, judges)]
         if persist and task_id:
-            store.save_rows(task_id, batch_rows)
+            store.save_rows(task_id, batch_rows, bu=bu.code)
         agg.update(batch_rows)          # 喂累加器后该批即可释放
         done_count += len(batch_rows)
         if on_progress:
@@ -385,15 +401,17 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
     return dict(rule_breakdown)
 
 
-async def run_evaluation(path: str, bu: BUConfig, on_progress=None, task_id=None, persist=False) -> dict:
+async def run_evaluation(paths, bu: BUConfig, on_progress=None, task_id=None, persist=False) -> dict:
     """跑一次完整评测。bu 注入该 BU 的领域知识(意图体系/分组/专家身份)。
 
+    paths：单个路径字符串或路径列表（多文件合并成一个 task，跨文件按会话拼多轮）。
     persist=True 时逐批落盘,并在重入时跳过已完成行(断点续跑);task_id 为落盘/续跑的键。
     聚合走流式累加器,不在内存保留全量 rows;逐条结果在 t_eval_task_row,前端分页查。
     """
     if on_progress:
         on_progress("loading", 0, 1)
-    df, m, filter_stats = load_and_prep(path)
+    file_paths = [paths] if isinstance(paths, str) else list(paths)
+    df, m, filter_stats = load_and_merge(file_paths)
     gold_info = detect_gold(df, m)
     mode = gold_info["mode"]
     samples, activity_breakdown = build_all_samples(df, m, bu)

@@ -25,6 +25,7 @@ from datapulse.modules.eval.entities import (
     EvalReview,
     EvalRule,
     EvalTask,
+    EvalTaskFile,
     EvalTaskRow,
 )
 
@@ -78,8 +79,12 @@ class EvalRepository:
     # ── 任务元数据 ────────────────────────────────────────────────────────────
 
     def create_task(self, task_id: str, filename: str, file_path: str, bu: str,
-                    created_by: str = "system") -> None:
-        """INSERT ... ON CONFLICT DO UPDATE（重新触发同一 task_id 时重置为 pending）。"""
+                    created_by: str = "system", files: list[dict] | None = None) -> None:
+        """INSERT ... ON CONFLICT DO UPDATE（重新触发同一 task_id 时重置为 pending）。
+
+        filename/file_path 是主表展示值（多文件时 filename 为拼接名、file_path 为首个）；
+        files 为多文件清单 [{filename, file_path}]，逐个登记到 t_eval_task_file。
+        """
         ts = _now()
         stmt = pg_insert(EvalTask).values(
             task_id=task_id, filename=filename, file_path=file_path, bu=bu,
@@ -91,6 +96,24 @@ class EvalRepository:
                   "status": "pending", "stage": "", "updated_at": ts, "updated_by": created_by},
         )
         self.session.execute(stmt)
+        # 子表：重建该 task 的文件清单（重传同 task_id 时先清后插，保持与主表一致）
+        self.session.query(EvalTaskFile).filter(EvalTaskFile.task_id == task_id).delete()
+        if files:
+            self.session.bulk_insert_mappings(EvalTaskFile, [
+                {"task_id": task_id, "file_index": i,
+                 "filename": f["filename"], "file_path": f["file_path"], "rows": 0,
+                 "created_at": ts, "created_by": created_by}
+                for i, f in enumerate(files)
+            ])
+
+    def list_task_files(self, task_id: str) -> list[dict]:
+        """按 file_index 升序取任务的文件清单。空则回退空列表（调用方兜底用主表）。"""
+        rows = self.session.execute(
+            select(EvalTaskFile).where(EvalTaskFile.task_id == task_id)
+            .order_by(EvalTaskFile.file_index)
+        ).scalars().all()
+        return [{"file_index": f.file_index, "filename": f.filename,
+                 "file_path": f.file_path, "rows": f.rows} for f in rows]
 
     def update_task(self, task_id: str, updated_by: str = "system", **fields: Any) -> None:
         if not fields:
@@ -223,11 +246,15 @@ class EvalRepository:
 
     # ── 逐条结果 ──────────────────────────────────────────────────────────────
 
-    def save_rows(self, task_id: str, rows: list[dict], created_by: str = "system") -> None:
+    def save_rows(self, task_id: str, rows: list[dict], created_by: str = "system",
+                  bu: str = "") -> None:
         """批量 upsert 逐条结果（断点续跑的依据）。
 
         双写：拆出平铺列（明细过滤/洞察聚合用）+ judge/context/gold 三个 JSON 列，
         同时保留 row_json 整体快照（旧行兜底 + 过渡期回退安全）。
+
+        bu：任务所属业务单元，冗余到每行免聚合 JOIN（取自 t_eval_task.bu）。
+        ask_date：由 assemble_row 从 ask_time 解析好透传；dispatched_to_bu 供解决率漏斗分母。
         """
         if not rows:
             return
@@ -237,6 +264,8 @@ class EvalRepository:
                 "task_id": task_id, "row_index": r["row_index"],
                 "session": r.get("session"), "turn": r.get("turn"),
                 "question": r.get("question"), "ask_time": r.get("ask_time", ""),
+                "ask_date": r.get("ask_date"), "bu": bu,
+                "dispatched_to_bu": bool(r.get("dispatched_to_bu")),
                 "dispatched_bu": r.get("dispatched_bu", ""),
                 "j_intent": r.get("j_intent"), "j_dispatch": r.get("j_dispatch"),
                 "j_resolved": r.get("j_resolved"),
@@ -255,7 +284,8 @@ class EvalRepository:
             index_elements=["task_id", "row_index"],
             set_={
                 "session": ex.session, "turn": ex.turn, "question": ex.question,
-                "ask_time": ex.ask_time, "dispatched_bu": ex.dispatched_bu,
+                "ask_time": ex.ask_time, "ask_date": ex.ask_date, "bu": ex.bu,
+                "dispatched_to_bu": ex.dispatched_to_bu, "dispatched_bu": ex.dispatched_bu,
                 "j_intent": ex.j_intent, "j_dispatch": ex.j_dispatch, "j_resolved": ex.j_resolved,
                 "judge_json": ex.judge_json, "context_json": ex.context_json,
                 "gold_json": ex.gold_json, "row_json": ex.row_json,
@@ -421,59 +451,110 @@ class EvalRepository:
         return dict(t["result_json"])
 
     # ── 问题洞察聚合（跨任务，按 BU；全部走 PG 层 GROUP BY，避免 N+1）──────────────
+    # 直接查 row 表冗余列 bu / ask_date（不再 JOIN t_eval_task、不再 substr(ask_time)），
+    # 命中复合索引 (bu, ask_date) / (bu, j_intent, ask_date)。旧行由迁移脚本已回填。
 
-    def _bu_row_query(self, bu: str, intent: str = "", start: str = "", end: str = ""):
-        """构造 t_eval_task_row JOIN t_eval_task 按 bu 过滤的基础查询条件（供聚合复用）。
+    def _bu_row_conds(self, bu: str, intent: str = "", start: str = "", end: str = ""):
+        """构造按 bu + 业务分类 + 提问日期范围过滤的条件（供各聚合复用，无 JOIN）。
 
-        查平铺列（question/j_intent/ask_time）走原生索引；旧行这三列已由迁移脚本回填。
-        intent 非空按业务分类过滤；start/end 非空按提问日期（ask_time 前 10 位）过滤。
+        start/end 为 'YYYY-MM-DD' 字符串，PG 自动比较 DATE 列；空则不加该界。
         """
-        from sqlalchemy import func
-        q_ask_date = func.substr(EvalTaskRow.ask_time, 1, 10)
-        conds = [EvalTask.bu == bu]
+        conds = [EvalTaskRow.bu == bu]
         if intent:
             conds.append(EvalTaskRow.j_intent == intent)
         if start:
-            conds.append(q_ask_date >= start)
+            conds.append(EvalTaskRow.ask_date >= start)
         if end:
-            conds.append(q_ask_date <= end)
-        return conds, q_ask_date
+            conds.append(EvalTaskRow.ask_date <= end)
+        return conds
 
     def agg_top_questions(self, bu: str, intent: str = "", start: str = "",
                           end: str = "", limit: int = 100) -> tuple[list[dict], int]:
-        """按问题原文聚合高频问榜单（不做相似归一）。返回 (榜单, 该 BU 匹配总条数)。"""
+        """按问题原文聚合高频问榜单（不做相似归一）。返回 (榜单, 该 BU 匹配总条数)。
+
+        用窗口函数一趟出结果：分组计数 + sum(cnt) over() 拿全量总数，省掉独立 COUNT 查询。
+        """
         from sqlalchemy import func
-        conds, _ = self._bu_row_query(bu, intent, start, end)
+        conds = self._bu_row_conds(bu, intent, start, end)
         q_text = EvalTaskRow.question
         q_intent = EvalTaskRow.j_intent
-        base = select(q_text.label("question"), q_intent.label("intent"),
-                      func.count().label("cnt")).select_from(EvalTaskRow).join(
-            EvalTask, EvalTaskRow.task_id == EvalTask.task_id).where(*conds)
-        total = int(self.session.execute(
-            select(func.count()).select_from(EvalTaskRow).join(
-                EvalTask, EvalTaskRow.task_id == EvalTask.task_id).where(*conds)
-        ).scalar() or 0)
+        cnt = func.count().label("cnt")
+        total_over = func.sum(func.count()).over().label("total")
         rows = self.session.execute(
-            base.group_by(q_text, q_intent).order_by(func.count().desc()).limit(limit)
+            select(q_text.label("question"), q_intent.label("intent"), cnt, total_over)
+            .where(*conds).group_by(q_text, q_intent)
+            .order_by(func.count().desc()).limit(limit)
         ).all()
+        total = int(rows[0].total) if rows else 0
         items = [{"question": r.question or "", "intent": r.intent or "",
                   "count": int(r.cnt)} for r in rows]
         return items, total
 
     def agg_daily_counts(self, bu: str, intent: str = "", start: str = "",
                          end: str = "") -> list[dict]:
-        """按提问日期（ask_time 前 10 位）聚合每日问题量。忽略 ask_time 为空的行。"""
+        """按提问日期聚合每日问题量。忽略 ask_date 为空的行。"""
         from sqlalchemy import func
-        conds, q_ask_date = self._bu_row_query(bu, intent, start, end)
-        conds.append(EvalTaskRow.ask_time != "")
-        conds.append(EvalTaskRow.ask_time.isnot(None))
+        conds = self._bu_row_conds(bu, intent, start, end)
+        conds.append(EvalTaskRow.ask_date.isnot(None))
         rows = self.session.execute(
-            select(q_ask_date.label("d"), func.count().label("cnt"))
-            .select_from(EvalTaskRow).join(
-                EvalTask, EvalTaskRow.task_id == EvalTask.task_id).where(*conds)
-            .group_by(q_ask_date).order_by(q_ask_date)
+            select(EvalTaskRow.ask_date.label("d"), func.count().label("cnt"))
+            .where(*conds).group_by(EvalTaskRow.ask_date).order_by(EvalTaskRow.ask_date)
         ).all()
-        return [{"date": r.d, "count": int(r.cnt)} for r in rows if r.d]
+        return [{"date": r.d.isoformat(), "count": int(r.cnt)} for r in rows if r.d]
+
+    def agg_metrics_timeline(self, bu: str, intent: str = "", start: str = "",
+                             end: str = "") -> list[dict]:
+        """按提问日期分桶，一趟查出各日的评测指标原料（供 engine 算解决率/分发准确率）。
+
+        口径对齐首页 summary 漏斗：
+          解决率 = 分给本BU且已解决 / 分给本BU（分母 dispatched_to_bu=true）
+          分发准确率 = j_dispatch='是' / j_dispatch∈('是','否')（judge 成功评分的）
+        返回每日 {date, total, in_bu, resolved_yes, disp_scored, disp_correct}，环比由 engine 算。
+        """
+        from sqlalchemy import Integer, and_, case, func
+        conds = self._bu_row_conds(bu, intent, start, end)
+        conds.append(EvalTaskRow.ask_date.isnot(None))
+        one = case((EvalTaskRow.dispatched_to_bu.is_(True), 1), else_=0)
+        resolved = case(
+            (and_(EvalTaskRow.dispatched_to_bu.is_(True), EvalTaskRow.j_resolved == "是"), 1),
+            else_=0)
+        scored = case((EvalTaskRow.j_dispatch.in_(("是", "否")), 1), else_=0)
+        correct = case((EvalTaskRow.j_dispatch == "是", 1), else_=0)
+        rows = self.session.execute(
+            select(
+                EvalTaskRow.ask_date.label("d"),
+                func.count().label("total"),
+                func.sum(func.cast(one, Integer)).label("in_bu"),
+                func.sum(func.cast(resolved, Integer)).label("resolved_yes"),
+                func.sum(func.cast(scored, Integer)).label("disp_scored"),
+                func.sum(func.cast(correct, Integer)).label("disp_correct"),
+            ).where(*conds).group_by(EvalTaskRow.ask_date).order_by(EvalTaskRow.ask_date)
+        ).all()
+        return [{
+            "date": r.d.isoformat(), "total": int(r.total),
+            "in_bu": int(r.in_bu or 0), "resolved_yes": int(r.resolved_yes or 0),
+            "disp_scored": int(r.disp_scored or 0), "disp_correct": int(r.disp_correct or 0),
+        } for r in rows if r.d]
+
+    def distinct_intents(self, bu: str) -> list[str]:
+        """该 BU 下出现过的业务分类去重列表（供前端分类下拉，独立于榜单结果）。"""
+        rows = self.session.execute(
+            select(EvalTaskRow.j_intent).where(
+                EvalTaskRow.bu == bu, EvalTaskRow.j_intent.isnot(None),
+                EvalTaskRow.j_intent != "",
+            ).distinct().order_by(EvalTaskRow.j_intent)
+        ).all()
+        return [r[0] for r in rows]
+
+    def ask_date_bounds(self, bu: str) -> tuple[str | None, str | None]:
+        """该 BU 提问日期的 [最小, 最大]（供前端日期选择器默认区间/边界）。空则 (None, None)。"""
+        from sqlalchemy import func
+        row = self.session.execute(
+            select(func.min(EvalTaskRow.ask_date), func.max(EvalTaskRow.ask_date))
+            .where(EvalTaskRow.bu == bu, EvalTaskRow.ask_date.isnot(None))
+        ).first()
+        lo, hi = (row[0], row[1]) if row else (None, None)
+        return (lo.isoformat() if lo else None, hi.isoformat() if hi else None)
 
     def agg_keyword_source(self, bu: str, intent: str = "",
                            limit_rows: int = 20000) -> tuple[list[tuple[str, str]], bool]:
@@ -481,13 +562,11 @@ class EvalRepository:
 
         limit_rows 控内存：大 BU 只取前 N 行做关键词提炼，够代表性且不 OOM。
         """
-        conds, _ = self._bu_row_query(bu, intent)
+        conds = self._bu_row_conds(bu, intent)
         q_text = EvalTaskRow.question
         q_intent = EvalTaskRow.j_intent
         rows = self.session.execute(
-            select(q_text, q_intent).select_from(EvalTaskRow).join(
-                EvalTask, EvalTaskRow.task_id == EvalTask.task_id).where(*conds)
-            .limit(limit_rows + 1)
+            select(q_text, q_intent).where(*conds).limit(limit_rows + 1)
         ).all()
         truncated = len(rows) > limit_rows
         data = [(r[0] or "", r[1] or "") for r in rows[:limit_rows]]

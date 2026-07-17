@@ -73,13 +73,13 @@ export default function Eval() {
     }, _POLL_INTERVAL_MS)
   }
 
-  async function handleUpload(file) {
+  async function handleUpload(files) {
     setError(null); setResumable(null); setBusy(true); setUploadPct(0)
     try {
       const onProgress = (e) => {
         if (e.total) setUploadPct(Math.round(e.loaded * 100 / e.total))
       }
-      const t = RESP(await evalApi.upload(file, undefined, onProgress))   // bu 走全局当前 BU
+      const t = RESP(await evalApi.upload(files, undefined, onProgress))   // 单/多文件；bu 走全局当前 BU
       setTask(t)
       startPolling(t.task_id)
     } catch (e) {

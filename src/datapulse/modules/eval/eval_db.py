@@ -76,9 +76,15 @@ def _repo(s: Session):
 
 
 def create_task(task_id: str, filename: str, file_path: str, bu: str,
-                created_by: str = "system") -> None:
+                created_by: str = "system", files: list[dict] | None = None) -> None:
     with eval_session() as s:
-        _repo(s).create_task(task_id, filename, file_path, bu, created_by=created_by)
+        _repo(s).create_task(task_id, filename, file_path, bu,
+                             created_by=created_by, files=files)
+
+
+def list_task_files(task_id: str) -> list[dict]:
+    with eval_session() as s:
+        return _repo(s).list_task_files(task_id)
 
 
 def update_task(task_id: str, updated_by: str = "system", **fields: Any) -> None:
@@ -181,8 +187,11 @@ _SAVE_SUB_BATCH = 50
 _SAVE_RETRIES = 3
 
 
-def save_rows(task_id: str, rows: list[dict], created_by: str = "system") -> None:
-    """逐条结果落盘。切成小子批、每批独立事务并自动重试，抗内网连接被切断。"""
+def save_rows(task_id: str, rows: list[dict], created_by: str = "system", bu: str = "") -> None:
+    """逐条结果落盘。切成小子批、每批独立事务并自动重试，抗内网连接被切断。
+
+    bu：任务业务单元，透传到 row 表冗余列（免洞察聚合 JOIN）。
+    """
     import time as _time
 
     for start in range(0, len(rows), _SAVE_SUB_BATCH):
@@ -190,7 +199,7 @@ def save_rows(task_id: str, rows: list[dict], created_by: str = "system") -> Non
         for attempt in range(_SAVE_RETRIES):
             try:
                 with eval_session() as s:          # 每批独立连接（pre_ping 探活）+ 独立事务
-                    _repo(s).save_rows(task_id, sub, created_by=created_by)
+                    _repo(s).save_rows(task_id, sub, created_by=created_by, bu=bu)
                 break
             except Exception:
                 if attempt < _SAVE_RETRIES - 1:
@@ -433,3 +442,18 @@ def agg_keyword_source(bu: str, intent: str = "",
                        limit_rows: int = 20000) -> tuple[list[tuple[str, str]], bool]:
     with eval_session() as s:
         return _repo(s).agg_keyword_source(bu, intent=intent, limit_rows=limit_rows)
+
+
+def agg_metrics_timeline(bu: str, intent: str = "", start: str = "", end: str = "") -> list[dict]:
+    with eval_session() as s:
+        return _repo(s).agg_metrics_timeline(bu, intent=intent, start=start, end=end)
+
+
+def distinct_intents(bu: str) -> list[str]:
+    with eval_session() as s:
+        return _repo(s).distinct_intents(bu)
+
+
+def ask_date_bounds(bu: str) -> tuple[str | None, str | None]:
+    with eval_session() as s:
+        return _repo(s).ask_date_bounds(bu)

@@ -6,7 +6,9 @@ eval 三张表无外键到标注表，自成体系。挂独立 EvalBase（而非
 """
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Column, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger, Boolean, Column, Date, Index, Integer, String, Text, UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.orm import declarative_base
 
@@ -75,6 +77,10 @@ class EvalTaskRow(EvalBase):
     judge_json    = Column(JSONB)          # LLM 完整判定输出（11 字段）
     context_json  = Column(JSONB)          # 多轮对话上下文 [{turn,user,ai}]
     gold_json     = Column(JSONB)          # 人工金标 dict
+    # ── 洞察/时序聚合专用（冗余，免 JOIN t_eval_task；ask_time 解析成真日期）─────────
+    ask_date         = Column(Date)        # 提问日期（ask_time 前10位），按日聚合
+    bu               = Column(String(64))  # 冗余业务单元，免聚合 JOIN
+    dispatched_to_bu = Column(Boolean)     # 是否分发本BU，解决率漏斗分母
     # ── 兜底 / 审计 ───────────────────────────────────────────────────────────────
     row_json   = Column(JSONB, nullable=False)   # 完整快照，旧行读它兜底 + 过渡期双写
     created_at = Column(_TS, nullable=False)
@@ -88,7 +94,33 @@ class EvalTaskRow(EvalBase):
         # 问题洞察跨任务 GROUP BY j_intent / 按 ask_time 日聚合
         Index("idx_t_eval_row_j_intent", "j_intent"),
         Index("idx_t_eval_row_ask_time", "ask_time"),
+        # 洞察/时序：BU + 提问日期范围（+业务分类）一击命中，免 JOIN t_eval_task
+        Index("idx_t_eval_row_bu_askdate", "bu", "ask_date"),
+        Index("idx_t_eval_row_bu_intent_date", "bu", "j_intent", "ask_date"),
         # question 不建索引：可能超长（>2704 B-tree 上限），聚合走 HashAggregate
+    )
+
+
+class EvalTaskFile(EvalBase):
+    """t_eval_task_file — 任务的多文件清单（一任务可含多个上传文件，合并评测）
+
+    运营平台单文件上限 5 万行超出会拆多个 Excel，此表让多文件归属同一 task。
+    file_index 也是 row_index 分段依据（row_index = file_index * 段宽 + 文件内行号）。
+    """
+
+    __tablename__ = "t_eval_task_file"
+
+    id         = Column(BigInteger, primary_key=True, autoincrement=True)
+    task_id    = Column(String(64), nullable=False, index=True)
+    file_index = Column(Integer, nullable=False, default=0)   # 任务内序号（0起）
+    filename   = Column(Text, nullable=False, default="")
+    file_path  = Column(Text, nullable=False, default="")
+    rows       = Column(Integer, nullable=False, default=0)   # 读取后回填，仅展示
+    created_at = Column(_TS, nullable=False)
+    created_by = Column(String(100), nullable=False, default="")
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "file_index", name="uk_t_eval_task_file_task_idx"),
     )
 
 

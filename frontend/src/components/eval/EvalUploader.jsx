@@ -1,6 +1,6 @@
 /** 评测上传区：拖拽 Excel + 两个样例按钮（零配置体验）。BU 由左侧全局选择器决定。 */
 import { useRef, useState } from 'react'
-import { Upload, ShieldCheck, TrendingUp, ChevronRight, ChevronDown } from 'lucide-react'
+import { Upload, ShieldCheck, TrendingUp, ChevronRight, ChevronDown, FileSpreadsheet, X } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
@@ -25,18 +25,35 @@ const OPTIONAL_COLS = [
   { name: '问题类型 / 常规意图识别模块', use: '透传展示，不参与指标计算' },
 ]
 
+const _isXlsx = (f) => /\.xlsx?$/i.test(f.name)
+
 export default function EvalUploader({ onUpload, onSample, busy, uploadPct = 0 }) {
   const inputRef = useRef(null)
   const [drag, setDrag] = useState(false)
   const [showCols, setShowCols] = useState(false)
+  const [staged, setStaged] = useState([])   // 已选待上传文件（多文件合并成一个 task）
 
-  function pickFile(file) {
-    if (file) onUpload(file)
+  // 追加选中的文件，按 (name,size) 去重，只留 Excel
+  function addFiles(fileList) {
+    const incoming = Array.from(fileList || []).filter(_isXlsx)
+    if (!incoming.length) return
+    setStaged(prev => {
+      const seen = new Set(prev.map(f => `${f.name}_${f.size}`))
+      return [...prev, ...incoming.filter(f => !seen.has(`${f.name}_${f.size}`))]
+    })
+  }
+
+  function removeAt(i) {
+    setStaged(prev => prev.filter((_, idx) => idx !== i))
+  }
+
+  function submit() {
+    if (staged.length && !busy) onUpload(staged)   // 传数组，多文件合并
   }
 
   return (
     <div className="space-y-6">
-      {/* 拖拽上传 */}
+      {/* 拖拽上传（支持多文件，合并成一个评测任务） */}
       <Card>
         <CardContent className="p-6">
           <div
@@ -45,7 +62,7 @@ export default function EvalUploader({ onUpload, onSample, busy, uploadPct = 0 }
             onDragLeave={() => setDrag(false)}
             onDrop={e => {
               e.preventDefault(); setDrag(false)
-              if (!busy) pickFile(e.dataTransfer.files?.[0])
+              if (!busy) addFiles(e.dataTransfer.files)
             }}
             className={cn(
               'flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed py-12 cursor-pointer transition-colors',
@@ -66,8 +83,11 @@ export default function EvalUploader({ onUpload, onSample, busy, uploadPct = 0 }
               </div>
             ) : (
               <>
-                <div className="font-medium">拖入或点击上传对话日志 Excel</div>
-                <div className="text-xs text-muted-foreground">支持 .xlsx / .xls，需含日志导出列（可含运营人工标注列）</div>
+                <div className="font-medium">拖入或点击上传对话日志 Excel（可多选）</div>
+                <div className="text-xs text-muted-foreground">
+                  支持 .xlsx / .xls，需含日志导出列。日志被运营平台按 5 万行拆成多个文件时，
+                  可一次全选，合并成一个任务评测（按会话拼多轮、按提问时间分日）
+                </div>
               </>
             )}
           </div>
@@ -75,9 +95,45 @@ export default function EvalUploader({ onUpload, onSample, busy, uploadPct = 0 }
             ref={inputRef}
             type="file"
             accept=".xlsx,.xls"
+            multiple
             className="hidden"
-            onChange={e => { pickFile(e.target.files?.[0]); e.target.value = '' }}
+            onChange={e => { addFiles(e.target.files); e.target.value = '' }}
           />
+
+          {/* 已选文件清单 + 开始评测 */}
+          {staged.length > 0 && !busy && (
+            <div className="mt-4 space-y-2">
+              <div className="text-xs text-muted-foreground">
+                已选 {staged.length} 个文件，将合并成一个评测任务
+              </div>
+              <div className="space-y-1.5">
+                {staged.map((f, i) => (
+                  <div key={`${f.name}_${f.size}_${i}`}
+                       className="flex items-center gap-2 rounded-md bg-muted/40 px-3 py-2 text-sm">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {(f.size / 1024 / 1024).toFixed(1)} MB
+                    </span>
+                    <button type="button" onClick={() => removeAt(i)}
+                            className="text-muted-foreground hover:text-red-600 shrink-0">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={() => setStaged([])}
+                        className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent">
+                  清空
+                </button>
+                <button type="button" onClick={submit}
+                        className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+                  开始评测（{staged.length} 个文件）
+                </button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

@@ -17,6 +17,7 @@ GET  /api/eval/meta/config         当前后端配置（mock / pingan）
 from __future__ import annotations
 
 import shutil
+import uuid
 from pathlib import Path
 from typing import Annotated
 
@@ -41,26 +42,49 @@ _ALLOWED = (".xlsx", ".xls")
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-def _start_task(filename: str, file_path: str, bu: str, operator: str) -> dict:
-    task = eval_engine.create_task(filename, file_path, bu, created_by=operator)
+def _start_task(filename: str, file_path: str, bu: str, operator: str,
+                files: list[dict] | None = None) -> dict:
+    task = eval_engine.create_task(filename, file_path, bu, created_by=operator, files=files)
     # 入队到独立后台 worker 串行执行，立即返回；不占 web 请求线程池（避免拖垮整站）
     eval_worker.submit(task["task_id"], resume=False, operator=operator)
     return task
 
 
+def _display_name(names: list[str]) -> str:
+    """多文件任务的展示名：单文件用原名，多文件用「首个 等N个文件」。"""
+    if len(names) == 1:
+        return names[0]
+    return f"{names[0]} 等{len(names)}个文件"
+
+
 @router.post("/upload")
 async def upload(
     user: EvalWrite,
-    file: UploadFile = File(...),
+    files: list[UploadFile] = File(...),
     bu: str = "securities",
 ):
-    """上传日志 Excel 起评测。bu 指定业务单元（securities/life），决定意图体系。"""
-    if not file.filename or not file.filename.lower().endswith(_ALLOWED):
-        raise ParamError("只接受 .xlsx / .xls 文件")
-    dest = Path(get_settings().eval_uploads_dir) / file.filename
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
-    task = _start_task(file.filename, str(dest), get_bu(bu).code, user.username)
+    """上传日志 Excel 起评测，支持多文件合并成一个任务（跨文件按会话拼多轮、按提问日期分日）。
+
+    bu 指定业务单元（securities/life），决定意图体系。运营平台单文件上限 5 万行，
+    超出拆多个文件时可一次全选上传，合并成一个 task 评测。
+    """
+    if not files:
+        raise ParamError("请至少上传一个文件")
+    for f in files:
+        if not f.filename or not f.filename.lower().endswith(_ALLOWED):
+            raise ParamError("只接受 .xlsx / .xls 文件")
+    uploads_dir = Path(get_settings().eval_uploads_dir)
+    # 落盘文件名加时间无关的短前缀（用户名+序号），避免不同任务同名文件互相覆盖
+    saved: list[dict] = []
+    stamp = uuid.uuid4().hex[:8]
+    for i, f in enumerate(files):
+        dest = uploads_dir / f"{stamp}_{i}_{f.filename}"
+        with dest.open("wb") as out:
+            shutil.copyfileobj(f.file, out)
+        saved.append({"filename": f.filename, "file_path": str(dest)})
+    display = _display_name([s["filename"] for s in saved])
+    task = _start_task(display, saved[0]["file_path"], get_bu(bu).code, user.username,
+                       files=saved)
     return success(task)
 
 
@@ -417,6 +441,24 @@ async def insights_questions(
 async def insights_keywords(user: EvalRead, bu: str = "securities", intent: str = ""):
     """问题洞察：按业务分类提炼的高区分关键词（jieba + TF-IDF，纯展示）。"""
     return success(eval_engine.keyword_insights(bu, intent=intent))
+
+
+@router.get("/insights/timeline")
+async def insights_timeline(
+    user: EvalRead,
+    bu: str = "securities",
+    intent: str = "",
+    start: str = "",
+    end: str = "",
+):
+    """问题洞察：评测结论（解决率/分发准确率）随提问日期的变化 + 相邻日环比。"""
+    return success(eval_engine.metrics_timeline(bu, intent=intent, start=start, end=end))
+
+
+@router.get("/insights/options")
+async def insights_options(user: EvalRead, bu: str = "securities"):
+    """问题洞察筛选器元数据：业务分类去重列表 + 提问日期边界（默认区间/边界用）。"""
+    return success(eval_engine.insight_options(bu))
 
 
 @router.get("/categories")

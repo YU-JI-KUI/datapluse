@@ -642,6 +642,40 @@ DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_task'; END $$;
 
 
 -- ---------------------------------------------------------------------------
+-- 19b. t_eval_task_file -- 任务的多文件清单（一任务可含多个上传文件，合并评测）
+-- ---------------------------------------------------------------------------
+DO $$ BEGIN RAISE NOTICE '[DDL] t_eval_task_file ...'; END $$;
+CREATE TABLE IF NOT EXISTS t_eval_task_file (
+    id         BIGSERIAL    NOT NULL,
+    task_id    VARCHAR(64)  NOT NULL,
+    file_index INTEGER      NOT NULL DEFAULT 0,
+    filename   TEXT         NOT NULL DEFAULT '',
+    file_path  TEXT         NOT NULL DEFAULT '',
+    rows       INTEGER      NOT NULL DEFAULT 0,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    created_by VARCHAR(100) NOT NULL DEFAULT '',
+    CONSTRAINT pk_t_eval_task_file PRIMARY KEY (id)
+);
+COMMENT ON TABLE  t_eval_task_file            IS 'AI评测任务的文件清单（一个任务可含多个上传文件，合并评测）';
+COMMENT ON COLUMN t_eval_task_file.id         IS '主键ID';
+COMMENT ON COLUMN t_eval_task_file.task_id    IS '所属评测任务ID（逻辑外键 → t_eval_task.task_id）';
+COMMENT ON COLUMN t_eval_task_file.file_index IS '文件在任务内的序号（0起），row_index 分段依据';
+COMMENT ON COLUMN t_eval_task_file.filename   IS '上传文件名';
+COMMENT ON COLUMN t_eval_task_file.file_path  IS '文件存储路径';
+COMMENT ON COLUMN t_eval_task_file.rows       IS '该文件行数（读取后回填，仅供展示）';
+COMMENT ON COLUMN t_eval_task_file.created_at IS '创建时间';
+COMMENT ON COLUMN t_eval_task_file.created_by IS '操作人';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_task_file_task_idx ON t_eval_task_file(task_id, file_index);
+-- 老库回填：已有单文件 task 补进子表 file_index=0，让新读取逻辑对旧任务也生效
+INSERT INTO t_eval_task_file (task_id, file_index, filename, file_path, rows, created_at, created_by)
+SELECT t.task_id, 0, t.filename, t.file_path, 0, t.created_at, t.created_by
+FROM t_eval_task t
+WHERE t.file_path <> ''
+  AND NOT EXISTS (SELECT 1 FROM t_eval_task_file f WHERE f.task_id = t.task_id);
+DO $$ BEGIN RAISE NOTICE '[OK ]  t_eval_task_file'; END $$;
+
+
+-- ---------------------------------------------------------------------------
 -- 20. t_eval_task_row -- per-row eval result (resume basis)
 -- ---------------------------------------------------------------------------
 DO $$ BEGIN RAISE NOTICE '[DDL] 20/20 t_eval_task_row ...'; END $$;
@@ -660,6 +694,9 @@ CREATE TABLE IF NOT EXISTS t_eval_task_row (
     judge_json    JSONB,
     context_json  JSONB,
     gold_json     JSONB,
+    ask_date         DATE,
+    bu               VARCHAR(64),
+    dispatched_to_bu BOOLEAN,
     row_json      JSONB        NOT NULL,
     created_at    TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     created_by    VARCHAR(100) NOT NULL DEFAULT '',
@@ -678,6 +715,10 @@ ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS j_resolved    VARCHAR(8);
 ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS judge_json    JSONB;
 ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS context_json  JSONB;
 ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS gold_json     JSONB;
+-- 兜底后期新增列：来源 20260717_eval_row_ask_date（提问日期/冗余bu/漏斗分母）
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS ask_date         DATE;
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS bu               VARCHAR(64);
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS dispatched_to_bu BOOLEAN;
 COMMENT ON TABLE  t_eval_task_row               IS 'AI对话评测逐条结果表（每行明细一条，断点续跑依据）';
 COMMENT ON COLUMN t_eval_task_row.id            IS '主键ID';
 COMMENT ON COLUMN t_eval_task_row.task_id       IS '所属评测任务ID（逻辑外键 → t_eval_task.task_id）';
@@ -693,6 +734,9 @@ COMMENT ON COLUMN t_eval_task_row.j_resolved    IS '答案解决判定结果：�
 COMMENT ON COLUMN t_eval_task_row.judge_json    IS 'LLM 完整判定输出（11 字段）';
 COMMENT ON COLUMN t_eval_task_row.context_json  IS '多轮对话上下文 [{turn,user,ai}]';
 COMMENT ON COLUMN t_eval_task_row.gold_json     IS '人工金标 dict';
+COMMENT ON COLUMN t_eval_task_row.ask_date         IS '客户提问日期（由 ask_time 前10位解析），问题洞察/时序按日聚合';
+COMMENT ON COLUMN t_eval_task_row.bu               IS '所属业务单元（冗余自 t_eval_task.bu，免聚合 JOIN）';
+COMMENT ON COLUMN t_eval_task_row.dispatched_to_bu IS '是否实际分发给本BU（解决率漏斗分母口径，冗余自 row_json）';
 COMMENT ON COLUMN t_eval_task_row.row_json      IS '单行完整评测结果快照（旧行兜底 + 过渡期双写）';
 COMMENT ON COLUMN t_eval_task_row.created_at    IS '落盘时间';
 COMMENT ON COLUMN t_eval_task_row.created_by    IS '操作人';
@@ -719,6 +763,46 @@ BEGIN
         RAISE NOTICE '[DATA] t_eval_task_row backfill batch: % rows', n_updated;
     END LOOP;
 END $$;
+-- 老库回填 ask_date / bu / dispatched_to_bu（来源 20260717_eval_row_ask_date）。
+-- ask_date：ISO ask_time 前10位 ::date，正则挡空串/脏值；bu：JOIN t_eval_task 冗余；
+-- dispatched_to_bu：row_json 布尔，COALESCE false 防重复扫。三段独立分批（每批 5000）。
+DO $$
+DECLARE
+    n_updated INTEGER;
+BEGIN
+    LOOP
+        UPDATE t_eval_task_row SET ask_date = substr(ask_time, 1, 10)::date
+        WHERE id IN (
+            SELECT id FROM t_eval_task_row
+            WHERE ask_date IS NULL AND ask_time IS NOT NULL AND ask_time <> ''
+              AND substr(ask_time, 1, 10) ~ '^\d{4}-\d{2}-\d{2}$'
+            LIMIT 5000
+        );
+        GET DIAGNOSTICS n_updated = ROW_COUNT;
+        EXIT WHEN n_updated = 0;
+        RAISE NOTICE '[DATA] ask_date backfill batch: % rows', n_updated;
+    END LOOP;
+    LOOP
+        UPDATE t_eval_task_row r SET bu = t.bu
+        FROM t_eval_task t
+        WHERE r.task_id = t.task_id AND r.bu IS NULL
+          AND r.id IN (SELECT id FROM t_eval_task_row WHERE bu IS NULL LIMIT 5000);
+        GET DIAGNOSTICS n_updated = ROW_COUNT;
+        EXIT WHEN n_updated = 0;
+        RAISE NOTICE '[DATA] bu backfill batch: % rows', n_updated;
+    END LOOP;
+    LOOP
+        UPDATE t_eval_task_row
+        SET dispatched_to_bu = COALESCE((row_json->>'dispatched_to_bu')::boolean, false)
+        WHERE id IN (
+            SELECT id FROM t_eval_task_row
+            WHERE dispatched_to_bu IS NULL AND row_json IS NOT NULL LIMIT 5000
+        );
+        GET DIAGNOSTICS n_updated = ROW_COUNT;
+        EXIT WHEN n_updated = 0;
+        RAISE NOTICE '[DATA] dispatched_to_bu backfill batch: % rows', n_updated;
+    END LOOP;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_task_row_task_idx ON t_eval_task_row(task_id, row_index);
 -- 老库索引升级：idx_t_eval_row_j_intent 旧版是表达式索引（row_json->>'j_intent'），与列
 -- 索引同名，直接 CREATE IF NOT EXISTS 会被跳过——先按 indexdef 判定是旧版才 DROP，
@@ -739,6 +823,9 @@ CREATE INDEX IF NOT EXISTS idx_t_eval_row_task_dispatch ON t_eval_task_row (task
 CREATE INDEX IF NOT EXISTS idx_t_eval_row_task_resolved ON t_eval_task_row (task_id, j_resolved);
 CREATE INDEX IF NOT EXISTS idx_t_eval_row_j_intent       ON t_eval_task_row (j_intent);
 CREATE INDEX IF NOT EXISTS idx_t_eval_row_ask_time       ON t_eval_task_row (ask_time);
+-- 问题洞察/时序：按 BU + 提问日期范围（+业务分类）一击命中，免 JOIN t_eval_task
+CREATE INDEX IF NOT EXISTS idx_t_eval_row_bu_askdate     ON t_eval_task_row (bu, ask_date);
+CREATE INDEX IF NOT EXISTS idx_t_eval_row_bu_intent_date ON t_eval_task_row (bu, j_intent, ask_date);
 -- 需复核筛选走 row_json（查询侧读 row_json['judge']，新旧行 row_json 均完整，双写保证）
 CREATE INDEX IF NOT EXISTS idx_t_eval_row_review ON t_eval_task_row (task_id)
     WHERE (row_json->'judge'->>'needs_human_review') = 'true';

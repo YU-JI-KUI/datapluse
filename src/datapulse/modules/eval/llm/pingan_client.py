@@ -98,7 +98,6 @@ async def call_bigmodel_api(
         "chat_template_kwargs": {"enable_thinking": False},
         **kwargs,
     }
-    logger.info("调用大模型 request_id=%s scene_id=%s", request_id, scene_id)
     # 调用前打完整 request payload（仅 DEBUG）。isEnabledFor 守卫避免非 DEBUG 时白做 json 序列化
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("大模型请求 payload request_id=%s: %s",

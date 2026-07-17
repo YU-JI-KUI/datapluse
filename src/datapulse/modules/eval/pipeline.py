@@ -73,20 +73,49 @@ def resolve_columns(df: pd.DataFrame) -> dict[str, str]:
     return m
 
 
-def load_and_prep(path: str) -> tuple[pd.DataFrame, dict[str, str], dict]:
-    """读 Excel → 解析列 → 按会话+轮次排序。
+# row_index 分段宽度：单文件按 file_index 占一段，段内是文件内 0-based 行号。
+# 运营平台单文件上限 5 万行，1000 万段宽绰绰有余、永不溢出；分段让 row_index 天然
+# 稳定——续跑/重跑/复核/导出全靠 (task_id, row_index) 对齐，分段后新增/重传某文件
+# 不影响其他文件已落盘行的 row_index，无需依赖"全局排序完全可复现"这个脆弱前提。
+_ROW_SEGMENT = 10_000_000
 
-    不做样本过滤:上传什么评什么。按行删测试环境/账号/无效问题会破坏多轮上下文
-    (删掉一通对话中间某轮,后续轮的前文就接不上了),且生产日志本就没有这些列。
+
+def load_and_prep(path: str) -> tuple[pd.DataFrame, dict[str, str], dict]:
+    """读单个 Excel → 解析列 → 排序 → 打 row_index。多文件走 load_and_merge。"""
+    return load_and_merge([path])
+
+
+def load_and_merge(paths: list[str]) -> tuple[pd.DataFrame, dict[str, str], dict]:
+    """读 1..N 个 Excel，逐文件解析+排序打段内 row_index，再合并成一个 DataFrame。
+
+    - 每个文件独立 resolve_columns 校验表头（不同导出批次表头微差各自报错，定位清晰）。
+    - row_index = file_index * _ROW_SEGMENT + 文件内按(会话,轮次)排序后的 0-based 行号。
+    - 会话重组（多轮上下文）在 build_all_samples 里按全局 session 分组，跨文件自然拼接
+      （同一「应用会话ID」= 同一通对话，被运营平台按 5 万行拆到多个文件时接回来）。
+
+    不做样本过滤：上传什么评什么（按行删会破坏多轮上下文）。
     """
-    df = pd.read_excel(path, dtype=str).fillna("")
-    m = resolve_columns(df)
-    df = df.copy()
-    # 轮次转数字用于排序;非法值补 0
-    df["_turn_n"] = pd.to_numeric(df[m["turn"]], errors="coerce").fillna(0).astype(int)
-    df = df.sort_values([m["session"], "_turn_n"]).reset_index(drop=True)
-    stats = {"total": len(df)}
-    return df, m, stats
+    if not paths:
+        raise ValueError("至少需要一个文件")
+    parts: list[pd.DataFrame] = []
+    m: dict[str, str] = {}
+    per_file_rows: list[int] = []
+    for fi, path in enumerate(paths):
+        df = pd.read_excel(path, dtype=str).fillna("")
+        fm = resolve_columns(df)
+        if fi == 0:
+            m = fm
+        df = df.copy()
+        df["_turn_n"] = pd.to_numeric(df[fm["turn"]], errors="coerce").fillna(0).astype(int)
+        # 文件内按会话+轮次排序（决定段内行号，须稳定），列名统一到首文件的映射键
+        df = df.rename(columns={fm[k]: m[k] for k in fm if k in m and fm[k] != m[k]})
+        df = df.sort_values([m["session"], "_turn_n"]).reset_index(drop=True)
+        df["_row_index"] = fi * _ROW_SEGMENT + df.index.to_numpy()
+        per_file_rows.append(len(df))
+        parts.append(df)
+    merged = pd.concat(parts, ignore_index=True) if len(parts) > 1 else parts[0]
+    stats = {"total": len(merged), "files": len(paths), "per_file_rows": per_file_rows}
+    return merged, m, stats
 
 
 # 用于判定模式的二值金标列(任一列含「是/否」即算有金标)
@@ -194,8 +223,11 @@ def _extract_row(df: pd.DataFrame, i: int, m: dict[str, str]) -> dict:
     def col(key: str) -> str:
         return _cell(row.get(m[key], "")) if key in m else ""
 
+    # row_index 优先取 load_and_merge 打好的分段值；未预处理（如直接喂 df 的调用/测试）
+    # 回退到位置索引 i，等价旧行为。
+    ri = int(row["_row_index"]) if "_row_index" in row else int(i)
     return {
-        "row_index": int(i),
+        "row_index": ri,
         "session": _cell(row[m["session"]]),
         "_turn_n": int(row["_turn_n"]),
         "question": _cell(row[m["question"]]),

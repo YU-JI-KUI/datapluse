@@ -29,5 +29,5 @@ def iter_rows(task_id: str, batch_size: int = 1000):
             break
 
 
-def save_rows(task_id: str, rows: list[dict]) -> None:
-    eval_db.save_rows(task_id, rows)
+def save_rows(task_id: str, rows: list[dict], bu: str = "") -> None:
+    eval_db.save_rows(task_id, rows, bu=bu)

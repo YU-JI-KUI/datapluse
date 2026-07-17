@@ -436,9 +436,11 @@ export const evalApi = {
   // 上传 Excel 起评测（仅存文件 + 建任务，立即返回 task_id）。bu 默认当前全局 BU。
   // 大文件（如 90M+）传输耗时远超全局 30s 超时，这里单独放开 timeout=0（不超时），
   // 否则会「后端已存成功、前端却因超时误报失败」。onProgress 上报上传进度。
-  upload: (file, bu = getCurrentBu(), onProgress) => {
+  // files 支持单个 File 或 File[]（多文件合并成一个 task）。后端参数名为 files（list）。
+  upload: (files, bu = getCurrentBu(), onProgress) => {
     const form = new FormData()
-    form.append('file', file)
+    const list = Array.isArray(files) ? files : [files]
+    list.forEach(f => form.append('files', f))
     return api.post('/eval/upload', form, {
       params: { bu }, onUploadProgress: onProgress, timeout: 0,
     })
@@ -530,6 +532,12 @@ export const evalApi = {
     api.get('/eval/insights/questions', { params: { bu, intent, start, end } }),
   insightsKeywords: (bu = getCurrentBu(), intent = '') =>
     api.get('/eval/insights/keywords', { params: { bu, intent } }),
+  // 评测结论随提问日期的变化（解决率/分发准确率 + 环比）
+  insightsTimeline: (bu = getCurrentBu(), { intent = '', start = '', end = '' } = {}) =>
+    api.get('/eval/insights/timeline', { params: { bu, intent, start, end } }),
+  // 筛选器元数据：业务分类去重 + 提问日期边界（默认区间/日期选择器边界）
+  insightsOptions: (bu = getCurrentBu()) =>
+    api.get('/eval/insights/options', { params: { bu } }),
 }
 
 export default api

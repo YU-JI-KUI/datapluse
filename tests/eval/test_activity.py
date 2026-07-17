@@ -17,7 +17,7 @@ def _prep(rows):
 
 def test_is_activity_exact_match():
     """精确相等才命中,子串不误伤。"""
-    bu = replace(SEC, activity_questions=frozenset({"帮我解锁消费权益"}))
+    bu = replace(SEC, activity_questions={"帮我解锁消费权益": "消费权益活动"})
     assert bu.is_activity("帮我解锁消费权益")
     assert bu.is_activity("  帮我解锁消费权益  ")        # 去首尾空格
     assert not bu.is_activity("帮我解锁消费权益的条件")   # 子串不命中
@@ -26,7 +26,7 @@ def test_is_activity_exact_match():
 
 def test_activity_empty_set_skips_nothing():
     """空集合(未配置活动标问)不过滤任何样本。"""
-    bu = replace(SEC, activity_questions=frozenset())
+    bu = replace(SEC, activity_questions={})
     df, m = _prep([
         {"客户问题": "帮我解锁消费权益", "客户咨询轮次": "1", "应用会话ID": "S", "答案": "已解锁", "分发BU": "证券"},
     ])
@@ -36,7 +36,7 @@ def test_activity_empty_set_skips_nothing():
 
 def test_activity_skipped_and_counted():
     """命中活动标问的样本不进 samples,排除数 +1。"""
-    bu = replace(SEC, activity_questions=frozenset({"帮我解锁消费权益"}))
+    bu = replace(SEC, activity_questions={"帮我解锁消费权益": "消费权益活动"})
     df, m = _prep([
         {"客户问题": "帮我解锁消费权益", "客户咨询轮次": "1", "应用会话ID": "S", "答案": "已解锁", "分发BU": "证券"},
         {"客户问题": "我的总资产", "客户咨询轮次": "2", "应用会话ID": "S", "答案": "52万", "分发BU": "证券"},
@@ -49,7 +49,7 @@ def test_activity_skipped_and_counted():
 
 def test_activity_kept_as_context():
     """活动标问自己不评,但仍作为后续轮的前文保留(它确实发生过)。"""
-    bu = replace(SEC, activity_questions=frozenset({"帮我解锁消费权益"}))
+    bu = replace(SEC, activity_questions={"帮我解锁消费权益": "消费权益活动"})
     df, m = _prep([
         {"客户问题": "帮我解锁消费权益", "客户咨询轮次": "1", "应用会话ID": "S", "答案": "已为你解锁", "分发BU": "证券"},
         {"客户问题": "还有别的权益吗", "客户咨询轮次": "2", "应用会话ID": "S", "答案": "有积分", "分发BU": "证券"},

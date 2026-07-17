@@ -55,11 +55,17 @@ def assemble_row_sample_from_row(row: dict) -> dict:
     """
     return {
         "row_index": row.get("row_index"),
+        "session": row.get("session"),
+        "turn": row.get("turn"),
         "question": row.get("question", ""),
+        "ask_time": row.get("ask_time", ""),   # 续跑保留提问时间，否则 ask_date 被抹掉
         "context": row.get("context", []),
-        "answer_text": row.get("answer_text", ""),
         "next_user_turn": row.get("next_user_turn"),
+        "dispatched_intent": row.get("dispatched_intent"),
+        "dispatched_bu": row.get("dispatched_bu", ""),
         "dispatched_to_bu": row.get("dispatched_to_bu", False),
+        "answer_text": row.get("answer_text", ""),
+        "gold": row.get("gold", {}),
     }
 
 

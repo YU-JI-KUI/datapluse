@@ -66,9 +66,15 @@ def _public(t: dict) -> dict:
 
 # ── 任务编排 ──────────────────────────────────────────────────────────────────
 
-def create_task(filename: str, file_path: str, bu: str, created_by: str = "system") -> dict:
+def create_task(filename: str, file_path: str, bu: str, created_by: str = "system",
+                files: list[dict] | None = None) -> dict:
+    """建任务。files 为多文件清单 [{filename, file_path}]；单文件时可不传，
+    由 filename/file_path 兜底成单元素清单（保证子表始终有记录，读取逻辑统一）。"""
     task_id = uuid.uuid4().hex[:12]
-    eval_db.create_task(task_id, filename, file_path, bu, created_by=created_by)
+    if not files:
+        files = [{"filename": filename, "file_path": file_path}]
+    eval_db.create_task(task_id, filename, file_path, bu,
+                        created_by=created_by, files=files)
     return get_task(task_id)
 
 
@@ -205,7 +211,7 @@ async def _rerun_indices_core(task_id: str, indices: list[int], operator: str,
             continue
         judges = await judge_batch(samples, bu)
         new_rows = [assemble_row(s, j, allowed, other) for s, j in zip(samples, judges)]
-        eval_db.save_rows(task_id, new_rows, created_by=operator)
+        eval_db.save_rows(task_id, new_rows, created_by=operator, bu=bu.code)
         done += len(new_rows)
         if on_progress:
             on_progress(done, total)
@@ -467,9 +473,12 @@ async def run_eval(task_id: str, resume: bool = False, operator: str = "eval") -
         eval_db.update_task(task_id, updated_by=operator,
                             stage=stage, progress_done=done, progress_total=total)
 
+    # 多文件：从子表取文件清单按 file_index 顺序合并；空则兜底主表单 file_path（旧任务）
+    files = eval_db.list_task_files(task_id)
+    paths = [f["file_path"] for f in files] or [t["file_path"]]
     try:
         result = await run_evaluation(
-            t["file_path"], bu, on_progress=on_progress, task_id=task_id, persist=True,
+            paths, bu, on_progress=on_progress, task_id=task_id, persist=True,
         )
         eval_db.save_result(task_id, result, updated_by=operator)
         # 进度在 advising 阶段最后上报的是 (1,1)，会把 progress_total 覆盖成 1；
@@ -1067,3 +1076,45 @@ def keyword_insights(bu: str, intent: str = "", top_n: int = 15) -> dict:
         _log.info("keyword_insights sampled (truncated)", bu=bu, intent=intent, limit=20000)
     groups = keyword_extract.extract_by_intent(rows, top_n=top_n)
     return {"bu": bu, "sampled": truncated, "sample_size": len(rows), "groups": groups}
+
+
+def _rate(num: int, den: int) -> float | None:
+    """漏斗比率：分母 0 返回 None（前端画点时跳过，不画成 0）。"""
+    return round(num / den, 4) if den else None
+
+
+def metrics_timeline(bu: str, intent: str = "", start: str = "", end: str = "") -> dict:
+    """评测结论随提问日期的变化：每日解决率 / 分发准确率 + 相邻日环比 delta。
+
+    口径对齐首页 summary 漏斗（见 repository.agg_metrics_timeline）。环比 = 当日率 - 上一
+    有效日率（两日率都非空才算 delta），pp 单位由前端换算。
+    """
+    buckets = eval_db.agg_metrics_timeline(bu, intent=intent, start=start, end=end)
+    series = []
+    prev_resolved = prev_dispatch = None
+    for b in buckets:
+        rr = _rate(b["resolved_yes"], b["in_bu"])
+        da = _rate(b["disp_correct"], b["disp_scored"])
+        series.append({
+            "date": b["date"],
+            "total": b["total"],
+            "in_bu": b["in_bu"],
+            "resolved_rate": rr,
+            "dispatch_accuracy": da,
+            "resolved_delta": None if rr is None or prev_resolved is None
+                              else round(rr - prev_resolved, 4),
+            "dispatch_delta": None if da is None or prev_dispatch is None
+                              else round(da - prev_dispatch, 4),
+        })
+        if rr is not None:
+            prev_resolved = rr
+        if da is not None:
+            prev_dispatch = da
+    return {"bu": bu, "series": series}
+
+
+def insight_options(bu: str) -> dict:
+    """洞察页筛选器元数据：业务分类去重列表 + 提问日期边界（供下拉/日期选择器）。"""
+    lo, hi = eval_db.ask_date_bounds(bu)
+    return {"bu": bu, "intents": eval_db.distinct_intents(bu),
+            "date_min": lo, "date_max": hi}
