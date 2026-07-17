@@ -170,7 +170,8 @@ def advisory_lock():
         conn.close()
 
 
-def delete_task(task_id: str) -> bool:
+def delete_task(task_id: str) -> list[str] | None:
+    """删任务及其关联行/复核/文件清单，返回物理文件路径列表（供上层删文件）；没删到返回 None。"""
     with eval_session() as s:
         return _repo(s).delete_task(task_id)
 

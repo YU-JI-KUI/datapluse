@@ -229,12 +229,26 @@ class EvalRepository:
         }, synchronize_session=False)
         return n
 
-    def delete_task(self, task_id: str) -> bool:
-        """硬删任务主记录 + 逐条结果 + 人工复核。返回是否删到了主记录。"""
+    def delete_task(self, task_id: str) -> list[str] | None:
+        """硬删任务主记录 + 逐条结果 + 人工复核 + 文件清单。
+
+        返回该任务的物理文件路径列表（供上层 unlink 物理文件）；没删到主记录返回 None。
+        文件路径先查出再删 file 表，避免删完拿不到。
+        """
+        n = self.session.query(EvalTask).filter(EvalTask.task_id == task_id).delete()
+        if not n:
+            return None
+        # 主记录确实存在才连带清理（先收集文件路径供上层删物理文件）
+        paths = [
+            r.file_path for r in
+            self.session.query(EvalTaskFile.file_path).filter(
+                EvalTaskFile.task_id == task_id).all()
+            if r.file_path
+        ]
         self.session.query(EvalTaskRow).filter(EvalTaskRow.task_id == task_id).delete()
         self.session.query(EvalReview).filter(EvalReview.task_id == task_id).delete()
-        n = self.session.query(EvalTask).filter(EvalTask.task_id == task_id).delete()
-        return bool(n)
+        self.session.query(EvalTaskFile).filter(EvalTaskFile.task_id == task_id).delete()
+        return paths
 
     def clear_rows(self, task_id: str) -> None:
         """清空某任务的逐条结果 + 人工复核（重测前调，让评测从头跑）。

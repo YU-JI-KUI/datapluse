@@ -539,12 +539,22 @@ def recover_tasks() -> int:
 
 
 def delete_task(task_id: str) -> bool:
-    """删除评测任务（连逐条结果一起硬删）。返回是否删到了记录。
+    """删除评测任务（连逐条结果、复核、文件清单、上传的物理文件一起硬删）。
+    返回是否删到了记录。
 
     若任务正在跑，worker 的中断检查点下一批回查 get_task_status 得 None 即中止、
-    释放串行锁，新任务立即可抢——不再卡在已删任务上。
+    释放串行锁，新任务立即可抢——不再卡在已删任务上。物理文件删除容错（missing_ok
+    + try），即使 worker 正读到一半、或文件已不在，也只记日志不阻断删除。
     """
-    return eval_db.delete_task(task_id)
+    paths = eval_db.delete_task(task_id)
+    if paths is None:
+        return False   # 没删到主记录（任务不存在）
+    for p in set(paths):   # 去重：主表 file_path 与子表首个是同一物理文件
+        try:
+            Path(p).unlink(missing_ok=True)
+        except OSError as e:
+            _log.warning("eval.delete.unlink_failed", task_id=task_id, path=p, err=str(e))
+    return True
 
 
 def pause_task(task_id: str) -> bool:
