@@ -1,6 +1,8 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ dc895696
+# 基于 origin/main @ 920eee28
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   dc895696 更新日志补充 v1.5
-frontend/docs/changelog.md
+#   920eee28 删评测任务时级联清理文件清单与上传文件
+src/datapulse/modules/eval/eval_db.py
+src/datapulse/modules/eval/repository.py
+src/datapulse/pipeline/eval_engine.py
