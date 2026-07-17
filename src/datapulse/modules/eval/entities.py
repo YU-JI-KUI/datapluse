@@ -81,6 +81,9 @@ class EvalTaskRow(EvalBase):
     ask_date         = Column(Date)        # 提问日期（ask_time 前10位），按日聚合
     bu               = Column(String(64))  # 冗余业务单元，免聚合 JOIN
     dispatched_to_bu = Column(Boolean)     # 是否分发本BU，解决率漏斗分母
+    # 处理来源：activity=活动标问(跳过评测) / rule=短路规则命中 / llm=AI评测。
+    # 每日频率按来源分维、且所有评测/洞察聚合排除 activity（活动标问不是评测样本）。
+    source           = Column(String(16))
     # ── 兜底 / 审计 ───────────────────────────────────────────────────────────────
     row_json   = Column(JSONB, nullable=False)   # 完整快照，旧行读它兜底 + 过渡期双写
     created_at = Column(_TS, nullable=False)
@@ -97,6 +100,8 @@ class EvalTaskRow(EvalBase):
         # 洞察/时序：BU + 提问日期范围（+业务分类）一击命中，免 JOIN t_eval_task
         Index("idx_t_eval_row_bu_askdate", "bu", "ask_date"),
         Index("idx_t_eval_row_bu_intent_date", "bu", "j_intent", "ask_date"),
+        # 每日频率按来源分维：BU + 提问日期 + 来源
+        Index("idx_t_eval_row_bu_askdate_source", "bu", "ask_date", "source"),
         # question 不建索引：可能超长（>2704 B-tree 上限），聚合走 HashAggregate
     )
 
@@ -230,7 +235,7 @@ class EvalReview(EvalBase):
 
 
 class EvalRule(EvalBase):
-    """t_eval_rule — 规则短路（写死评测结果，命中即免 LLM）·规则集模型
+    """t_eval_rule — 短路规则（写死评测结果，命中即免 LLM）·规则集模型
 
     一个规则 = 名字 + 触发问题集合 + 期望答案集合 + 一份写死 judge。评测时若客户问题
     ∈ questions 且答案 ∈ answers（独立组合），直接用 judge_json（结构同 LLM 输出）产出

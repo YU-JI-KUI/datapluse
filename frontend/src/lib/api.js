@@ -461,7 +461,7 @@ export const evalApi = {
   updateActivityQuestion: (id, data) => api.put(`/eval/activity-questions/${id}`, data),
   deleteActivityQuestion: (id) => api.delete(`/eval/activity-questions/${id}`),
 
-  // 规则短路管理（命中写死结果、免 LLM 调用，计入指标）。按 BU 增删查
+  // 短路规则管理（命中写死结果、免 LLM 调用，计入指标）。按 BU 增删查
   listRules:  (bu = getCurrentBu()) => api.get('/eval/rules', { params: { bu } }),
   upsertRule: (data, bu = getCurrentBu()) => api.post('/eval/rules', data, { params: { bu } }),
   deleteRule: (id) => api.delete(`/eval/rules/${id}`),

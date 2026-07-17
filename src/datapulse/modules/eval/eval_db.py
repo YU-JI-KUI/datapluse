@@ -396,7 +396,7 @@ def review_delete(task_id: str, row_index: int) -> bool:
         return _review_repo(s).delete(task_id, row_index)
 
 
-# ── 规则短路 ──────────────────────────────────────────────────────────────────
+# ── 短路规则 ──────────────────────────────────────────────────────────────────
 
 def _rule_repo(s: Session):
     from datapulse.modules.eval.repository import EvalRuleRepository
@@ -436,6 +436,11 @@ def agg_top_questions(bu: str, intent: str = "", start: str = "",
 def agg_daily_counts(bu: str, intent: str = "", start: str = "", end: str = "") -> list[dict]:
     with eval_session() as s:
         return _repo(s).agg_daily_counts(bu, intent=intent, start=start, end=end)
+
+
+def agg_daily_source(bu: str, intent: str = "", start: str = "", end: str = "") -> list[dict]:
+    with eval_session() as s:
+        return _repo(s).agg_daily_source(bu, intent=intent, start=start, end=end)
 
 
 def agg_keyword_source(bu: str, intent: str = "",

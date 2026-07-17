@@ -552,7 +552,7 @@ async def delete_activity_question(act_id: int, user: EvalWrite):
     return success({"deleted": True})
 
 
-# ── 规则短路管理（命中写死结果、免 LLM 调用，计入指标）────────────────────────
+# ── 短路规则管理（命中写死结果、免 LLM 调用，计入指标）────────────────────────
 
 class RuleBody(BaseModel):
     name: str                 # 规则名（同 BU 唯一，报告按此聚合）

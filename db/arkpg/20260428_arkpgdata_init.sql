@@ -697,6 +697,7 @@ CREATE TABLE IF NOT EXISTS t_eval_task_row (
     ask_date         DATE,
     bu               VARCHAR(64),
     dispatched_to_bu BOOLEAN,
+    source           VARCHAR(16),
     row_json      JSONB        NOT NULL,
     created_at    TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     created_by    VARCHAR(100) NOT NULL DEFAULT '',
@@ -719,6 +720,7 @@ ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS gold_json     JSONB;
 ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS ask_date         DATE;
 ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS bu               VARCHAR(64);
 ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS dispatched_to_bu BOOLEAN;
+ALTER TABLE t_eval_task_row ADD COLUMN IF NOT EXISTS source           VARCHAR(16);
 COMMENT ON TABLE  t_eval_task_row               IS 'AI对话评测逐条结果表（每行明细一条，断点续跑依据）';
 COMMENT ON COLUMN t_eval_task_row.id            IS '主键ID';
 COMMENT ON COLUMN t_eval_task_row.task_id       IS '所属评测任务ID（逻辑外键 → t_eval_task.task_id）';
@@ -737,6 +739,7 @@ COMMENT ON COLUMN t_eval_task_row.gold_json     IS '人工金标 dict';
 COMMENT ON COLUMN t_eval_task_row.ask_date         IS '客户提问日期（由 ask_time 前10位解析），问题洞察/时序按日聚合';
 COMMENT ON COLUMN t_eval_task_row.bu               IS '所属业务单元（冗余自 t_eval_task.bu，免聚合 JOIN）';
 COMMENT ON COLUMN t_eval_task_row.dispatched_to_bu IS '是否实际分发给本BU（解决率漏斗分母口径，冗余自 row_json）';
+COMMENT ON COLUMN t_eval_task_row.source           IS '处理来源：activity=活动标问 / rule=短路规则 / llm=AI评测。每日频率分维、评测/洞察聚合排除 activity';
 COMMENT ON COLUMN t_eval_task_row.row_json      IS '单行完整评测结果快照（旧行兜底 + 过渡期双写）';
 COMMENT ON COLUMN t_eval_task_row.created_at    IS '落盘时间';
 COMMENT ON COLUMN t_eval_task_row.created_by    IS '操作人';
@@ -803,6 +806,21 @@ BEGIN
         RAISE NOTICE '[DATA] dispatched_to_bu backfill batch: % rows', n_updated;
     END LOOP;
 END $$;
+-- 老库回填 source（来源 20260717_eval_row_source）：judge_json._source='rule'→rule，其余→llm。
+-- 老数据无活动标问行（此前活动标问不落库），只 rule/llm 两类。分批防锁表。
+DO $$
+DECLARE
+    n_updated INTEGER;
+BEGIN
+    LOOP
+        UPDATE t_eval_task_row
+        SET source = CASE WHEN judge_json->>'_source' = 'rule' THEN 'rule' ELSE 'llm' END
+        WHERE id IN (SELECT id FROM t_eval_task_row WHERE source IS NULL LIMIT 5000);
+        GET DIAGNOSTICS n_updated = ROW_COUNT;
+        EXIT WHEN n_updated = 0;
+        RAISE NOTICE '[DATA] source backfill batch: % rows', n_updated;
+    END LOOP;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_t_eval_task_row_task_idx ON t_eval_task_row(task_id, row_index);
 -- 老库索引升级：idx_t_eval_row_j_intent 旧版是表达式索引（row_json->>'j_intent'），与列
 -- 索引同名，直接 CREATE IF NOT EXISTS 会被跳过——先按 indexdef 判定是旧版才 DROP，
@@ -826,6 +844,8 @@ CREATE INDEX IF NOT EXISTS idx_t_eval_row_ask_time       ON t_eval_task_row (ask
 -- 问题洞察/时序：按 BU + 提问日期范围（+业务分类）一击命中，免 JOIN t_eval_task
 CREATE INDEX IF NOT EXISTS idx_t_eval_row_bu_askdate     ON t_eval_task_row (bu, ask_date);
 CREATE INDEX IF NOT EXISTS idx_t_eval_row_bu_intent_date ON t_eval_task_row (bu, j_intent, ask_date);
+-- 每日频率按来源分维：BU + 提问日期 + 来源
+CREATE INDEX IF NOT EXISTS idx_t_eval_row_bu_askdate_source ON t_eval_task_row (bu, ask_date, source);
 -- 需复核筛选走 row_json（查询侧读 row_json['judge']，新旧行 row_json 均完整，双写保证）
 CREATE INDEX IF NOT EXISTS idx_t_eval_row_review ON t_eval_task_row (task_id)
     WHERE (row_json->'judge'->>'needs_human_review') = 'true';
@@ -977,7 +997,7 @@ CREATE TABLE IF NOT EXISTS t_eval_rule (
     updated_by      VARCHAR(100) NOT NULL DEFAULT '',
     CONSTRAINT pk_t_eval_rule PRIMARY KEY (id)
 );
-COMMENT ON TABLE  t_eval_rule                 IS 'AI评测规则短路表（命中写死结果、免LLM调用，计入指标）';
+COMMENT ON TABLE  t_eval_rule                 IS 'AI评测短路规则表（命中写死结果、免LLM调用，计入指标）';
 COMMENT ON COLUMN t_eval_rule.id              IS '主键ID';
 COMMENT ON COLUMN t_eval_rule.bu              IS '所属业务单元：securities=证券 / life=寿险';
 COMMENT ON COLUMN t_eval_rule.name            IS '规则名（同BU内唯一，报告按此聚合，如「转人工」）';

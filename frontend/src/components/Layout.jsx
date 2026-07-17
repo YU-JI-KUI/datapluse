@@ -43,11 +43,11 @@ const subsystems = [
     items: [
       { to: '/eval',            label: '评测',       icon: Gauge, end: true },
       { to: '/eval/history',    label: '历史评测',   icon: History },
-      { to: '/eval/insights',   label: '问题洞察',   icon: Lightbulb },
       { to: '/eval/categories', label: '业务分类',   icon: Tags },
       { to: '/eval/activity',   label: '活动标问',   icon: Filter },
-      { to: '/eval/rules',      label: '规则短路',   icon: Zap },
+      { to: '/eval/rules',      label: '短路规则',   icon: Zap },
       { to: '/eval/prompts',    label: '提示词管理', icon: FileText },
+      { to: '/eval/insights',   label: '问题洞察',   icon: Lightbulb },
     ],
   },
   {

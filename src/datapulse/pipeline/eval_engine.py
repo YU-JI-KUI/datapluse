@@ -1024,7 +1024,7 @@ def delete_activity_question(act_id: int) -> bool:
     return deleted
 
 
-# ── 规则短路管理 ──────────────────────────────────────────────────────────────
+# ── 短路规则管理 ──────────────────────────────────────────────────────────────
 
 def _bump_rules():
     from datapulse.modules.eval.bu.base import bump_rules_version
@@ -1057,7 +1057,8 @@ def question_insights(bu: str, intent: str = "", start: str = "", end: str = "")
     top, total = eval_db.agg_top_questions(bu, intent=intent, start=start, end=end, limit=100)
     for it in top:
         it["ratio"] = round(it["count"] / total, 4) if total else 0.0
-    daily = eval_db.agg_daily_counts(bu, intent=intent, start=start, end=end)
+    # 每日频率四维：日志数量(total) = 活动标问(activity) + 短路规则(rule) + AI评测(llm)
+    daily = eval_db.agg_daily_source(bu, intent=intent, start=start, end=end)
     return {
         "bu": bu,
         "total": total,

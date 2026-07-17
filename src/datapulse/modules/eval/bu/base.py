@@ -92,13 +92,13 @@ def load_activity_questions(code: str) -> dict[str, str]:
     return mapping
 
 
-# 规则短路缓存：以库为准，增删改时 bump_rules_version 失效。评测时 get_bu 把当前规则
+# 短路规则缓存：以库为准，增删改时 bump_rules_version 失效。评测时 get_bu 把当前规则
 # 快照进 BUConfig，命中即用写死结果免 LLM。
 _rules_cache: dict[str, dict] = {}
 
 
 def bump_rules_version() -> None:
-    """规则短路增删后调用，使缓存失效（下次评测/读取即拿到最新）。"""
+    """短路规则增删后调用，使缓存失效（下次评测/读取即拿到最新）。"""
     _rules_cache.clear()
 
 

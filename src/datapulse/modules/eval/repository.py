@@ -265,6 +265,7 @@ class EvalRepository:
                 "session": r.get("session"), "turn": r.get("turn"),
                 "question": r.get("question"), "ask_time": r.get("ask_time", ""),
                 "ask_date": r.get("ask_date"), "bu": bu,
+                "source": r.get("source") or "llm",
                 "dispatched_to_bu": bool(r.get("dispatched_to_bu")),
                 "dispatched_bu": r.get("dispatched_bu", ""),
                 "j_intent": r.get("j_intent"), "j_dispatch": r.get("j_dispatch"),
@@ -285,6 +286,7 @@ class EvalRepository:
             set_={
                 "session": ex.session, "turn": ex.turn, "question": ex.question,
                 "ask_time": ex.ask_time, "ask_date": ex.ask_date, "bu": ex.bu,
+                "source": ex.source,
                 "dispatched_to_bu": ex.dispatched_to_bu, "dispatched_bu": ex.dispatched_bu,
                 "j_intent": ex.j_intent, "j_dispatch": ex.j_dispatch, "j_resolved": ex.j_resolved,
                 "judge_json": ex.judge_json, "context_json": ex.context_json,
@@ -454,12 +456,17 @@ class EvalRepository:
     # 直接查 row 表冗余列 bu / ask_date（不再 JOIN t_eval_task、不再 substr(ask_time)），
     # 命中复合索引 (bu, ask_date) / (bu, j_intent, ask_date)。旧行由迁移脚本已回填。
 
-    def _bu_row_conds(self, bu: str, intent: str = "", start: str = "", end: str = ""):
+    def _bu_row_conds(self, bu: str, intent: str = "", start: str = "", end: str = "",
+                      exclude_activity: bool = True):
         """构造按 bu + 业务分类 + 提问日期范围过滤的条件（供各聚合复用，无 JOIN）。
 
         start/end 为 'YYYY-MM-DD' 字符串，PG 自动比较 DATE 列；空则不加该界。
+        默认排除 source='activity'（活动标问不是评测样本，不进解决率/高频问/分类等口径）。
         """
         conds = [EvalTaskRow.bu == bu]
+        if exclude_activity:
+            # IS DISTINCT FROM 把 NULL 也算"非活动标问"，兼容未回填 source 的老行
+            conds.append(EvalTaskRow.source.is_distinct_from("activity"))
         if intent:
             conds.append(EvalTaskRow.j_intent == intent)
         if start:
@@ -492,7 +499,7 @@ class EvalRepository:
 
     def agg_daily_counts(self, bu: str, intent: str = "", start: str = "",
                          end: str = "") -> list[dict]:
-        """按提问日期聚合每日问题量。忽略 ask_date 为空的行。"""
+        """按提问日期聚合每日问题量（不含活动标问）。忽略 ask_date 为空的行。"""
         from sqlalchemy import func
         conds = self._bu_row_conds(bu, intent, start, end)
         conds.append(EvalTaskRow.ask_date.isnot(None))
@@ -501,6 +508,34 @@ class EvalRepository:
             .where(*conds).group_by(EvalTaskRow.ask_date).order_by(EvalTaskRow.ask_date)
         ).all()
         return [{"date": r.d.isoformat(), "count": int(r.cnt)} for r in rows if r.d]
+
+    def agg_daily_source(self, bu: str, intent: str = "", start: str = "",
+                         end: str = "") -> list[dict]:
+        """按提问日期分桶，各来源计数：活动标问 / 短路规则 / AI评测。含活动标问（本聚合
+        专为"每日频率四维"，不排除 activity）。日志数 = 三者之和。一趟 CASE-SUM 出全部。
+        """
+        from sqlalchemy import Integer, case, func
+        # 不排除活动标问：本视图要统计它
+        conds = self._bu_row_conds(bu, intent, start, end, exclude_activity=False)
+        conds.append(EvalTaskRow.ask_date.isnot(None))
+        activity = case((EvalTaskRow.source == "activity", 1), else_=0)
+        rule = case((EvalTaskRow.source == "rule", 1), else_=0)
+        # AI评测 = 非 activity 非 rule（含老行 source 为 NULL 的按 AI 评测计）
+        llm = case((EvalTaskRow.source.in_(("activity", "rule")), 0), else_=1)
+        rows = self.session.execute(
+            select(
+                EvalTaskRow.ask_date.label("d"),
+                func.count().label("total"),
+                func.sum(func.cast(activity, Integer)).label("activity"),
+                func.sum(func.cast(rule, Integer)).label("rule"),
+                func.sum(func.cast(llm, Integer)).label("llm"),
+            ).where(*conds).group_by(EvalTaskRow.ask_date).order_by(EvalTaskRow.ask_date)
+        ).all()
+        return [{
+            "date": r.d.isoformat(), "total": int(r.total),
+            "activity": int(r.activity or 0), "rule": int(r.rule or 0),
+            "llm": int(r.llm or 0),
+        } for r in rows if r.d]
 
     def agg_metrics_timeline(self, bu: str, intent: str = "", start: str = "",
                              end: str = "") -> list[dict]:
@@ -537,11 +572,14 @@ class EvalRepository:
         } for r in rows if r.d]
 
     def distinct_intents(self, bu: str) -> list[str]:
-        """该 BU 下出现过的业务分类去重列表（供前端分类下拉，独立于榜单结果）。"""
+        """该 BU 下出现过的业务分类去重列表（供前端分类下拉，独立于榜单结果）。
+
+        排除活动标问（它不是评测样本，无有效业务分类）。"""
         rows = self.session.execute(
             select(EvalTaskRow.j_intent).where(
                 EvalTaskRow.bu == bu, EvalTaskRow.j_intent.isnot(None),
                 EvalTaskRow.j_intent != "",
+                EvalTaskRow.source.is_distinct_from("activity"),
             ).distinct().order_by(EvalTaskRow.j_intent)
         ).all()
         return [r[0] for r in rows]
@@ -879,7 +917,7 @@ def _rule_to_dict(r: EvalRule) -> dict[str, Any]:
 
 
 class EvalRuleRepository:
-    """规则短路持久化层（规则集）。(bu, name) 唯一；命中即用写死 judge 结果免 LLM。
+    """短路规则持久化层（规则集）。(bu, name) 唯一；命中即用写死 judge 结果免 LLM。
 
     一个规则 = name + 触发问题集合 questions + 期望答案集合 answers + judge。
     """

@@ -220,6 +220,14 @@ function TopQuestions({ data, maxCnt }) {
   )
 }
 
+// 每日频率四维趋势：日志数量 = 活动标问 + 短路规则 + AI评测数量。
+const DAILY_SERIES = [
+  { key: 'total',    name: '日志数量',   color: '#6366f1' },
+  { key: 'activity', name: '活动标问',   color: '#f59e0b' },
+  { key: 'rule',     name: '短路规则',   color: '#10b981' },
+  { key: 'llm',      name: 'AI评测数量', color: '#3b82f6' },
+]
+
 function DailyChart({ daily }) {
   if (!daily.length) {
     return <Empty text="暂无带时间的问题数据（仅含「时间」列的评测有每日频率）" />
@@ -227,15 +235,21 @@ function DailyChart({ daily }) {
   return (
     <Card>
       <CardContent className="pt-6">
-        <div style={{ width: '100%', height: 320 }}>
+        <p className="text-xs text-muted-foreground mb-2">
+          日志数量 = 活动标问 + 短路规则 + AI评测数量
+        </p>
+        <div style={{ width: '100%', height: 340 }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={daily} margin={{ top: 8, right: 24, bottom: 8, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
               <XAxis dataKey="date" tick={{ fontSize: 12 }} />
               <YAxis tick={{ fontSize: 12 }} allowDecimals={false} domain={[0, 'dataMax + 1']} />
               <Tooltip />
-              <Line type="monotone" dataKey="count" name="提问量"
-                    stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+              <Legend />
+              {DAILY_SERIES.map(s => (
+                <Line key={s.key} type="monotone" dataKey={s.key} name={s.name}
+                      stroke={s.color} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 5 }} />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         </div>

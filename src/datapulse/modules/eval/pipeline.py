@@ -246,13 +246,16 @@ def _extract_row(df: pd.DataFrame, i: int, m: dict[str, str]) -> dict:
     }
 
 
-def build_all_samples(df: pd.DataFrame, m: dict[str, str], bu) -> tuple[list[dict], int]:
+def build_all_samples(df: pd.DataFrame, m: dict[str, str], bu
+                      ) -> tuple[list[dict], dict, list[dict]]:
     """构造全部评测样本。先按会话分组(一次),组内切片取前后文,整体 O(N)。
 
     bu(BUConfig)用于判断分发BU是否代表本BU、以及该行是否为活动标问。
-    活动标问(前端写死按钮触发的写死回复)不生成评测样本——不喂模型、不计指标;
-    但其行仍留在 group 里,作为后续轮的上下文保留(它确实发生过,是对话的一部分)。
-    返回 (samples 按 row_index 升序, 活动标问细分计数 {活动名: 条数})。
+    活动标问(前端写死按钮触发的写死回复)不喂模型、不计评测指标; 但其行仍留在 group 里
+    作为后续轮的上下文,且单独产出 activity_samples 落库(source=activity)——供"每日频率"
+    按来源分维、且"日志数=活动+规则+AI"等式成立。落库的活动标问行由聚合层显式排除,
+    不污染解决率/分发准确率/高频问/分类分布。
+    返回 (评测 samples 按 row_index 升序, 活动标问细分计数 {活动名: 条数}, activity_samples)。
     续跑依赖 row_index 对齐。细分计数供来源分布柱状图,总数 = 各值之和。
     """
     from collections import Counter
@@ -262,6 +265,7 @@ def build_all_samples(df: pd.DataFrame, m: dict[str, str], bu) -> tuple[list[dic
         groups.setdefault(r["session"], []).append(r)
 
     samples = []
+    activity_samples = []
     activity_breakdown: Counter = Counter()
     for group in groups.values():
         for pos in range(len(group)):
@@ -269,8 +273,12 @@ def build_all_samples(df: pd.DataFrame, m: dict[str, str], bu) -> tuple[list[dic
             if bu.is_activity(q):
                 # 按活动名聚合（同活动多个问题累加成一条）；活动名空时兜底用 question
                 act = bu.activity_of(q) or (q or "").strip()
-                activity_breakdown[act] += 1  # 跳过评测但留组内当前文
+                activity_breakdown[act] += 1  # 不评测，但留组内当前文 + 落库计数
+                s = _sample_from_group(group, pos, m, bu)
+                s["is_activity"] = True
+                activity_samples.append(s)
                 continue
             samples.append(_sample_from_group(group, pos, m, bu))
     samples.sort(key=lambda s: s["row_index"])
-    return samples, dict(activity_breakdown)
+    activity_samples.sort(key=lambda s: s["row_index"])
+    return samples, dict(activity_breakdown), activity_samples

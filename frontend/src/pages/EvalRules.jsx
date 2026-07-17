@@ -1,5 +1,5 @@
 /**
- * AI 评测 · 规则短路管理（规则集）：按当前 BU 维护「规则集 → 写死评测结果」。
+ * AI 评测 · 短路规则管理（规则集）：按当前 BU 维护「规则集 → 写死评测结果」。
  * 一个规则 = 名字 + 触发问题集合 + 期望答案集合 + 一份写死 judge。
  * 评测时客户问题 ∈ 触发集合 且 答案 ∈ 答案集合（独立组合）→ 直接用写死的 judge 结果，
  * 不调 LLM（省调用），结果照常计入指标、落盘。报告按规则名聚合。
@@ -126,7 +126,7 @@ export default function EvalRules() {
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">规则短路管理</h1>
+          <h1 className="text-2xl font-bold">短路规则管理</h1>
           <p className="text-muted-foreground text-sm mt-1">
             维护当前业务单元（<span className="font-medium">{scopeName(bu)}</span>）的短路规则集。
             一个规则含多个触发问题和多个期望答案：评测时客户问题<span className="font-medium">∈ 触发问题集合</span>

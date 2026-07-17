@@ -92,7 +92,7 @@ export default function EvalResult({ taskId, result, onRefetch }) {
             (f.excluded_activity
               ? `活动标问（写死按钮触发的写死回复）已整条跳过 ${f.excluded_activity} 条：不喂模型、不计入指标。\n` : '')
             + (f.rule_hit
-              ? `规则短路命中 ${f.rule_hit} 条：问题+答案匹配预设规则，直接用写死结果、免 LLM 调用，但照常计入指标。\n` : '')
+              ? `短路规则命中 ${f.rule_hit} 条：问题+答案匹配预设规则，直接用写死结果、免 LLM 调用，但照常计入指标。\n` : '')
             + '评测样本 = 实际参与评测的条数（已排除活动标问）。'
           }
           tone="brand" icon={Database} />

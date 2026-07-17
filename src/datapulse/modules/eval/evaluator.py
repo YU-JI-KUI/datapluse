@@ -135,6 +135,9 @@ def assemble_row(sample: dict, judge: dict, allowed_intents: set | None = None,
         "dispatched_to_bu": sample.get("dispatched_to_bu", False),
         "answer_text": sample["answer_text"],
         "judge": judge,
+        # 处理来源：judge._source 有值用之（rule/activity），否则 AI 评测 = llm。
+        # 供每日频率按来源分维；activity 由聚合层排除，不进评测指标。
+        "source": (judge.get("_source") if isinstance(judge, dict) else None) or "llm",
         "j_intent": _business_type(judge, allowed_intents, other),
         "dispatch_correct": dispatch_correct,
         "dispatch_scene": _dispatch_scene(sample, judge),  # 正常/该拒未拒/该分未分
@@ -205,6 +208,10 @@ class _StreamAggregator:
 
     def update(self, rows: list[dict]) -> None:
         for r in rows:
+            # 活动标问行只落库供每日频率分维，不是评测样本——跳过，不进任何指标。
+            # 续跑时 iter_rows 读回的缓存行也走这里，同样被排除，口径一致。
+            if r.get("source") == "activity" or r.get("is_activity"):
+                continue
             self.total += 1
             judge = r["judge"]
             is_judge_dict = isinstance(judge, dict)
@@ -319,11 +326,24 @@ class _StreamAggregator:
         return out
 
 
+def _persist_activity(task_id: str, activity_samples: list[dict], bu) -> None:
+    """把活动标问命中行落库（source=activity）。judge 置空并标 _source=activity，
+    assemble_row 由此把 source 落成 activity；这些行不喂累加器、聚合层显式排除，
+    只服务"每日频率按来源分维"和"日志数=活动+规则+AI"的等式。续跑幂等（UPSERT）。"""
+    allowed = set(bu.intents.keys())
+    other = other_label(bu)
+    rows = []
+    for s in activity_samples:
+        judge = {"_source": "activity"}   # 空 judge，仅打来源标记
+        rows.append(assemble_row(s, judge, allowed, other))
+    store.save_rows(task_id, rows, bu=bu.code)
+
+
 async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _StreamAggregator) -> int:
     """跑 judge,逐批喂累加器并落盘,不全量收集 rows(百万级避免 OOM)。返回规则命中条数。
 
     续跑:已落盘的行分批读回喂累加器(喂完即弃),再只对未完成样本跑 judge。
-    规则短路:未落盘样本先过 bu.match_rule(问题精确+答案一致),命中即用写死 judge 结果
+    短路规则:未落盘样本先过 bu.match_rule(问题精确+答案一致),命中即用写死 judge 结果
     组装,不调 LLM;只有未命中的才进 LLM 批次。省大量 LLM 调用。
     落盘:分批写入,避免大批量跑一半中断后全部重来。
     """
@@ -342,7 +362,7 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
     if on_progress:
         on_progress("judging", done_count, total)
 
-    # 规则短路:命中的直接用写死 judge 结果,不进 LLM。命中判据 = 问题∈触发集 且 答案∈答案集。
+    # 短路规则:命中的直接用写死 judge 结果,不进 LLM。命中判据 = 问题∈触发集 且 答案∈答案集。
     from collections import Counter
     rule_breakdown: Counter = Counter()   # 按规则名细分命中数,供来源分布图
     pending = []
@@ -414,9 +434,12 @@ async def run_evaluation(paths, bu: BUConfig, on_progress=None, task_id=None, pe
     df, m, filter_stats = load_and_merge(file_paths)
     gold_info = detect_gold(df, m)
     mode = gold_info["mode"]
-    samples, activity_breakdown = build_all_samples(df, m, bu)
+    samples, activity_breakdown, activity_samples = build_all_samples(df, m, bu)
     activity_total = sum(activity_breakdown.values())
     filter_stats["excluded_activity"] = activity_total   # 跳过的活动标问总数,结果页展示
+    # 活动标问也落库（source=activity），供每日频率按来源分维；不喂累加器、不计评测指标。
+    if persist and task_id and activity_samples:
+        _persist_activity(task_id, activity_samples, bu)
     total = len(samples)
     # 会话级指标基于 samples(judge 前即确定),无需进累加器
     sessions = len(set(s["session"] for s in samples))
@@ -428,7 +451,7 @@ async def run_evaluation(paths, bu: BUConfig, on_progress=None, task_id=None, pe
     agg = _StreamAggregator()
     rule_breakdown = await _judge_streaming(samples, bu, on_progress, task_id, persist, agg)
     rule_total = sum(rule_breakdown.values())
-    filter_stats["rule_hit"] = rule_total   # 规则短路命中总数(免 LLM),结果页展示
+    filter_stats["rule_hit"] = rule_total   # 短路规则命中总数(免 LLM),结果页展示
     # 来源分布(供柱状图):每个活动标问、每条规则各命中多少 + 其余走 LLM 的数量。
     # 全集 = 整个日志文件 = 活动标问 + 规则命中 + LLM 评测。
     filter_stats["source_breakdown"] = {

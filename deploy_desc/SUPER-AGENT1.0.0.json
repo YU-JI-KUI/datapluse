@@ -10,7 +10,8 @@
     "postgresql": [
       "db/arkpg/20260428_arkpgdata_init.sql",
       "db/arkpg/20260717_arkpgdata_eval_row_ask_date.sql",
-      "db/arkpg/20260717_arkpgdata_eval_task_file.sql"
+      "db/arkpg/20260717_arkpgdata_eval_task_file.sql",
+      "db/arkpg/20260717_arkpgdata_eval_row_source.sql"
     ]
   }
 }

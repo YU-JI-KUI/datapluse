@@ -48,7 +48,7 @@ def test_session_context_reconstruction():
     m = resolve_columns(df)
     df["_turn_n"] = pd.to_numeric(df[m["turn"]]).astype(int)
     df = df.sort_values(["应用会话ID", "_turn_n"]).reset_index(drop=True)
-    samples, _excluded = build_all_samples(df, m, SEC)
+    samples, _excluded, _acts = build_all_samples(df, m, SEC)
     assert samples[0]["next_user_turn"] == "融资成本"
     # 第2轮的上下文应含第1轮的「用户问 + AI 答原文」
     ctx = samples[1]["context"]
