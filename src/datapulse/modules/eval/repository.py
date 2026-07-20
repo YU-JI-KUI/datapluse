@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from datapulse.modules.eval.text_sanitize import sanitize_jsonb_text
 from datapulse.modules.eval.entities import (
     EvalActivityQuestion,
     EvalCategory,
@@ -33,10 +34,18 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def _clean_json(obj):
-    """递归把 inf/-inf/nan 替换成 None。PostgreSQL JSONB 不接受这些（不是合法 JSON
-    数值），落盘前必须清掉，否则整条 insert 报 invalid input syntax for type json。"""
+    """递归净化成可安全写入 JSONB 的形态。PostgreSQL JSONB 拒收多种「Python 能
+    json.dumps、但不是合法 JSON/UTF-8」的内容，落盘前必须清掉，否则整条 insert 报
+    invalid input syntax for type json：
+      - float 的 inf/-inf/nan → None（非法 JSON 数值）
+      - 字符串里的孤立代理项 / NUL / C0 控制字符 → 剥掉（见 sanitize_jsonb_text）
+
+    这是所有 JSONB 写入的唯一必经出口（judge/context/gold/row/result/规则 judge），
+    在此一处兜底，比逐个非法形态打补丁可靠——换一种脏数据也不会再复发。"""
     if isinstance(obj, float):
         return None if (math.isinf(obj) or math.isnan(obj)) else obj
+    if isinstance(obj, str):
+        return sanitize_jsonb_text(obj)
     if isinstance(obj, dict):
         return {k: _clean_json(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -273,17 +282,21 @@ class EvalRepository:
         if not rows:
             return
         ts = _now()
+        # 平铺 text 列也要净化：question/ask_time 来自 _cell（已净化），但 j_intent 等
+        # 来自模型输出（judge.business_type 未经 _cell），孤立代理/NUL 会让平铺列落库崩
+        # （不止 JSONB，text 列同样拒非法 UTF-8）。sanitize_jsonb_text 对非字符串原样返回。
+        st = sanitize_jsonb_text
         payload = [
             {
                 "task_id": task_id, "row_index": r["row_index"],
-                "session": r.get("session"), "turn": r.get("turn"),
-                "question": r.get("question"), "ask_time": r.get("ask_time", ""),
+                "session": st(r.get("session")), "turn": r.get("turn"),
+                "question": st(r.get("question")), "ask_time": st(r.get("ask_time", "")),
                 "ask_date": r.get("ask_date"), "bu": bu,
                 "source": r.get("source") or "llm",
                 "dispatched_to_bu": bool(r.get("dispatched_to_bu")),
-                "dispatched_bu": r.get("dispatched_bu", ""),
-                "j_intent": r.get("j_intent"), "j_dispatch": r.get("j_dispatch"),
-                "j_resolved": r.get("j_resolved"),
+                "dispatched_bu": st(r.get("dispatched_bu", "")),
+                "j_intent": st(r.get("j_intent")), "j_dispatch": st(r.get("j_dispatch")),
+                "j_resolved": st(r.get("j_resolved")),
                 "judge_json": _clean_json(r.get("judge")),
                 "context_json": _clean_json(r.get("context")),
                 "gold_json": _clean_json(r.get("gold")),

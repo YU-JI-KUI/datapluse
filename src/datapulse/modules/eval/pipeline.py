@@ -9,6 +9,7 @@ from __future__ import annotations
 import pandas as pd
 
 from datapulse.modules.eval.answer_sanitizer import sanitize_answer
+from datapulse.modules.eval.text_sanitize import sanitize_jsonb_text
 
 # 构造样本时上下文只保留最近 N 轮:judge 也只喂最近 N 轮,更早的留着纯属浪费内存。
 # 长会话(几百轮)若把每轮的全部前文都塞进 context,单会话内存是 O(轮数²),5万条
@@ -197,20 +198,21 @@ def _sample_from_group(group: list[dict], pos: int, m: dict[str, str], bu) -> di
 
 
 def _cell(v) -> str:
-    """把 Excel 单元格原始值统一成字符串。
+    """把 Excel 单元格原始值统一成字符串，并净化掉写 JSONB 会崩的非法字符。
 
     pd.read_excel(dtype=str) 对布尔列/合并单元格/特定格式并非 100% 生效，
-    仍可能漏进 bool / int / float('nan')。这些值下游一旦 .strip() 或写入
-    JSONB 就会崩（'bool'/'int' object has no attribute 'strip'、
-    invalid input syntax for type json）。此处是所有样本的唯一取数出口，
-    统一在此根治：NaN/None → ""，其余 → str(v).strip()。
+    仍可能漏进 bool / int / float('nan')；原始文本还可能带孤立代理项 / NUL /
+    C0 控制字符（客户输入截断的半个 emoji 等）。这些下游一旦 .strip() 或写入
+    JSONB 就会崩（'bool' object has no attribute 'strip'、invalid input
+    syntax for type json）。此处是所有样本的唯一取数入口，统一净化：
+    NaN/None → ""，其余强转字符串后剥掉孤立代理/NUL/C0 控制符（保留 \t\n\r）。
     """
     if v is None:
         return ""
     # float('nan') != 自身，pandas 空单元格在部分路径会以 nan 漏出
     if isinstance(v, float) and v != v:
         return ""
-    return str(v).strip()
+    return sanitize_jsonb_text(str(v)).strip()
 
 
 def _extract_row(df: pd.DataFrame, i: int, m: dict[str, str]) -> dict:
