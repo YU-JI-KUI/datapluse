@@ -31,13 +31,13 @@ def _msg_info(parsed):
 
 
 def _header_questions(header, questions) -> str | None:
-    """把「header + 候选问题列表」格式化为：header 一行 + 每个问题一行。空则 None。"""
+    """把「header + 候选问题列表」以空格拼接成一行（header + 各问题）。空则 None。"""
     lines = []
     h = strip_html(header or "")
     if h:
         lines.append(h)
     lines += [strip_html(q) for q in (questions or []) if q]
-    return "\n".join(lines) or None
+    return " ".join(lines) or None
 
 
 # 搜索返回卡净化后的统一文案：唯一稳定，便于短路规则用精确答案集合匹配。
@@ -75,7 +75,7 @@ class RobotMenuItemsParser(AnswerParser):
     """证券·菜单卡（msgContext.template=robotMenuItems）：机器人反问，列出候选问题让用户选。
 
     结构：msgContext.template=="robotMenuItems"，header 与 questions 都在
-    msgInfo.menuItems 内（msgContent 常是空串）。提取 = header + 各候选问题逐行。
+    msgInfo.menuItems 内（msgContent 常是空串）。提取 = header + 各候选问题，以空格拼接为一行。
     priority 小于小安卡，先匹配。
     """
     name = "securities.robot_menu"
@@ -105,7 +105,7 @@ class RobotTextAnswerParser(AnswerParser):
 
     结构：msgContext.template=="robotTextAnswer"，问题在 msgInfo.relatedQuestions
     ={header:"...", questions:[...]}（注意 relatedQuestions 直接挂 msgInfo 下，无 msgContent 层）。
-    提取 = header + 各相关问题逐行。priority 小于小安卡，先匹配。
+    提取 = header + 各相关问题，以空格拼接为一行。priority 小于小安卡，先匹配。
     """
     name = "securities.robot_text_answer"
     bu_codes = ("securities",)

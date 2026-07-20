@@ -64,7 +64,7 @@ def test_securities_robot_menu_items():
     }
     raw = json.dumps([{"msgContext": json.dumps(ctx, ensure_ascii=False)}], ensure_ascii=False)
     assert sanitize_answer(raw, "securities") == (
-        "请问您是想咨询以下哪个问题：\n交易股票有什么费用\n交易基金有什么费用\n交易债券有什么费用"
+        "请问您是想咨询以下哪个问题： 交易股票有什么费用 交易基金有什么费用 交易债券有什么费用"
     )
 
 
@@ -80,7 +80,7 @@ def test_securities_robot_text_answer():
     }
     raw = json.dumps([{"msgContext": json.dumps(ctx, ensure_ascii=False)}], ensure_ascii=False)
     assert sanitize_answer(raw, "securities") == (
-        "您咨询的是否为以下问题：\n什么是当日委托\n撤单的介绍\n受理成功的订单介绍"
+        "您咨询的是否为以下问题： 什么是当日委托 撤单的介绍 受理成功的订单介绍"
     )
 
 
@@ -132,7 +132,7 @@ def test_generic_benefit_card():
             "benefits": [{"benefitName": "超级Level-2"}, {"benefitName": "科学投顾体验券"}],
         },
     }], ensure_ascii=False)
-    assert sanitize_answer(raw, "life") == "恭喜领取以下权益\n超级Level-2\n科学投顾体验券"
+    assert sanitize_answer(raw, "life") == "恭喜领取以下权益 超级Level-2 科学投顾体验券"
 
 
 def test_generic_text_reply():

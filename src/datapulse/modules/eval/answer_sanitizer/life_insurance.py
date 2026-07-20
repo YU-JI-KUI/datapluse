@@ -32,15 +32,15 @@ from datapulse.modules.eval.answer_sanitizer.base import (  # noqa: F401
     strip_html,
 )
 
-# 块级标签作分行点：多段 <p>/<br>/<div> 拼在一行会把句子糊在一起，按块拆行更可读
+# 块级标签作分段点：多段 <p>/<br>/<div> 直接拼会把句子糊在一起，按块拆开后用空格分隔
 _BLOCK_RE = re.compile(r"</p>|<br\s*/?>|</div>|</li>", re.I)
 
 
 def _html_to_lines(html) -> str | None:
-    """把多段块级 HTML 拆成逐行纯文本（</p>/<br>/</div>/</li> 作分隔），空则 None。"""
+    """把多段块级 HTML 拆成多段纯文本（</p>/<br>/</div>/</li> 作分隔）并以空格拼接，空则 None。"""
     parts = [strip_html(seg) for seg in _BLOCK_RE.split(str(html or ""))]
     lines = [p for p in parts if p]
-    return "\n".join(lines) or None
+    return " ".join(lines) or None
 
 # ── 在此下方按模板新增寿险专属解析器 ──────────────────────────────────────────
 
@@ -53,7 +53,7 @@ def _card_data(parsed):
 
 
 def _lead_and_options(lead, options) -> str | None:
-    """把「正文 + data.options[].name 推荐问题」格式化为：正文一行 + 每个推荐问题一行。空则 None。"""
+    """把「正文 + data.options[].name 推荐问题」以空格拼接成一行（正文 + 各推荐问题）。空则 None。"""
     lines = []
     text = strip_html(lead or "")
     if text:
@@ -62,7 +62,7 @@ def _lead_and_options(lead, options) -> str | None:
         name = strip_html(opt.get("name") or "") if isinstance(opt, dict) else ""
         if name:
             lines.append(name)
-    return "\n".join(lines) or None
+    return " ".join(lines) or None
 
 
 @register
@@ -71,7 +71,7 @@ class LifeFaqCardParser(AnswerParser):
 
     结构：顶层 [[{...}]]，主体在 card_content.data（带 faqID/answerFrom/kbId 等
     知识库字段）。正文取 gbdData.content，兜底 card_content.data.detail[0].content；
-    关联问题在 card_content.data.options[].name。提取 = 正文 + 各关联问题逐行。
+    关联问题在 card_content.data.options[].name。提取 = 正文 + 各关联问题，以空格拼接为一行。
     """
     name = "life.faq_card"
     bu_codes = ("life",)
@@ -130,7 +130,7 @@ class LifePolicyListCardParser(AnswerParser):
             row = " ".join(x for x in (plan, date) if x)
             if row:
                 lines.append(row)
-        return "\n".join(lines) or None
+        return " ".join(lines) or None
 
 
 @register
@@ -165,7 +165,7 @@ class LifeMultiRoundCardParser(AnswerParser):
 
     结构：card_content.data.answer 为正文，追问选项在 data.capsule[].label
     （区别于澄清卡的 msg + options[].name、FAQ 卡的 faqID）。
-    提取 = 正文一行 + 各胶囊 label 逐行。
+    提取 = 正文 + 各胶囊 label，以空格拼接为一行。
     """
     name = "life.multi_round_card"
     bu_codes = ("life",)
@@ -190,7 +190,7 @@ class LifeMultiRoundCardParser(AnswerParser):
             label = strip_html(cap.get("label") or "") if isinstance(cap, dict) else ""
             if label:
                 lines.append(label)
-        return "\n".join(lines) or None
+        return " ".join(lines) or None
 
 
 @register
@@ -229,7 +229,7 @@ class LifeClarifyCardParser(AnswerParser):
     """寿险·意图不明澄清卡（金管家 LLM 兜底反问）：让用户从推荐问题里选。
 
     结构：card_content.data.msg 为澄清话术（labelId=llm_recommend），推荐问题在
-    data.options[].name（无 faqID，区别于 FAQ 卡）。提取 = 澄清话术 + 各推荐问题逐行。
+    data.options[].name（无 faqID，区别于 FAQ 卡）。提取 = 澄清话术 + 各推荐问题，以空格拼接为一行。
     """
     name = "life.clarify_card"
     bu_codes = ("life",)

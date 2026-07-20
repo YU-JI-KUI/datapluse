@@ -103,7 +103,7 @@ class BenefitCardParser(AnswerParser):
     """权益领取结果卡（catalogId + data.benefits）：领权益后返回的结果卡。
 
     结构：first.catalogId 存在，data.benefits=[{benefitName:"..."}]，
-    data.cardHead.mainTitle 为标题。提取 = 标题 + 各权益名逐行。
+    data.cardHead.mainTitle 为标题。提取 = 标题 + 各权益名，以空格拼接为一行。
     """
     name = "generic.benefit_card"
     bu_codes = ("*",)
@@ -132,7 +132,7 @@ class BenefitCardParser(AnswerParser):
             name = strip_html(b.get("benefitName") or "") if isinstance(b, dict) else ""
             if name:
                 lines.append(name)
-        return "\n".join(lines) or None
+        return " ".join(lines) or None
 
 
 @register
@@ -227,7 +227,7 @@ class ServiceNavCardParser(AnswerParser):
             v = strip_html(first.get(key) or "")
             if v:
                 lines.append(v)
-        return "\n".join(lines) or None
+        return " ".join(lines) or None
 
 
 @register
