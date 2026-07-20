@@ -1,8 +1,22 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ 920eee28
+# 基于 origin/main @ 9b7af023
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   920eee28 删评测任务时级联清理文件清单与上传文件
-src/datapulse/modules/eval/eval_db.py
+#   77eefc9b 根治评测落库 JSONB 非法文本报错
+#   9b7af023 答案解析器改用空格拼接卡片内容
+src/datapulse/modules/eval/pipeline.py
 src/datapulse/modules/eval/repository.py
-src/datapulse/pipeline/eval_engine.py
+src/datapulse/modules/eval/text_sanitize.py
+src/datapulse/modules/eval/answer_sanitizer/generic.py
+src/datapulse/modules/eval/answer_sanitizer/life_insurance.py
+src/datapulse/modules/eval/answer_sanitizer/samples/generic.benefit_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/generic.service_nav.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.clarify_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.faq_answer_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.faq_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.multi_round_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/life.policy_list_card.md
+src/datapulse/modules/eval/answer_sanitizer/samples/securities.robot_menu.md
+src/datapulse/modules/eval/answer_sanitizer/samples/securities.robot_text_answer.md
+src/datapulse/modules/eval/answer_sanitizer/securities.py
+tests/eval/test_answer_sanitizer.py
