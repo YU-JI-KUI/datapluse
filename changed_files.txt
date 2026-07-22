@@ -1,16 +1,7 @@
 # 本次改动清单，由 sync_single.py 自动生成
 # 普通行 = 复制到内网；[DEL] 开头 = 在内网删除该文件
-# 基于 origin/main @ ddbf792b
+# 基于 origin/main @ d6c74a07
 # 涉及 commit（动作以 origin/main 为准：存在=复制、不存在=删除）:
-#   ddbf792b 评测：修多文件合并 bug + 短路规则不占业务分类
-frontend/src/pages/EvalRules.jsx
-src/datapulse/modules/eval/advice_facts.py
-src/datapulse/modules/eval/bu/securities.py
-src/datapulse/modules/eval/entities.py
-src/datapulse/modules/eval/eval_db.py
-src/datapulse/modules/eval/evaluator.py
-src/datapulse/modules/eval/pipeline.py
-src/datapulse/modules/eval/repository.py
-src/datapulse/router/eval.py
-tests/eval/test_pipeline.py
-tests/eval/test_rule_bypass.py
+#   d6c74a07 前端统一识别业务错误码，修上传失败误显示准备中
+frontend/src/lib/api.js
+frontend/src/pages/Eval.jsx
