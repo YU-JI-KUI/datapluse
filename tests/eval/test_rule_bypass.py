@@ -8,10 +8,11 @@ from datapulse.modules.eval import evaluator
 from datapulse.modules.eval.evaluator import _StreamAggregator, _judge_streaming
 
 
-# 一条「转人工」规则集：3 个触发问题 × 2 个期望答案 → 判非本BU、业务分类咨询客服。
+# 一条「转人工」规则集：3 个触发问题 × 2 个期望答案。规则命中行不计入业务分类维度，
+# 故 judge 无需配 business_type（配了也会因 source=rule 被排除出分类统计）。
 # load_rules 扁平化后的结构：每个触发问题 → {rule_name, answers(set), judge}。
 _RULE_JUDGE = {
-    "should_dispatch_to_bu": False, "business_type": "非本BU",
+    "should_dispatch_to_bu": False,
     "answer_resolved": "unknown", "needs_human_review": False,
 }
 _ANSWERS = {"你好", "你好呀"}
@@ -80,12 +81,21 @@ def test_streaming_rule_hit_skips_llm(monkeypatch):
     assert agg.total == 4                # 4 条都进了统计（命中的也计入指标）
 
 
-def test_rule_hit_counts_into_metrics():
-    """规则命中的结果计入业务分类分布（说明它像 AI 一样被统计）。"""
+def test_rule_hit_excluded_from_intent_but_counted_overall():
+    """规则命中行不进业务分类维度（无从归类），但仍计入整体指标（total）。
+
+    这是「短路规则不该有业务分类」的核心口径：命中行不出现在分类分布/分类切片/
+    按分类的优化建议里，避免「通用分类」这类占位分类污染报告；但它是真实已处理的
+    问答，total、解决率、分发等整体指标照常计入。
+    """
     bu = _bu()
     samples = [_sample(0, "转人工", "你好")]
     agg = _StreamAggregator()
-    # 规则判 business_type=非本BU（占位）→ 归兜底桶「非证券业务」
     asyncio.run(_judge_streaming(samples, bu, None, None, False, agg))
+
+    # 不进分类分布，也不产生「(未分类)」切片
     dist = {x["name"] for x in agg.intent_distribution()["by_intent"]}
-    assert dist == {"非证券业务"}        # 命中样本计入了分类分布
+    assert dist == set()
+    assert "(未分类)" not in agg.slices
+    # 但整体仍计入
+    assert agg.total == 1

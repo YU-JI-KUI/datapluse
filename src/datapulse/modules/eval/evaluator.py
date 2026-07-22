@@ -121,6 +121,8 @@ def assemble_row(sample: dict, judge: dict, allowed_intents: set | None = None,
     dispatch_correct = _dispatch_correct(sample, judge)
     j_dispatch = "" if dispatch_correct is None else ("是" if dispatch_correct else "否")
     j_resolved = _resolved_to_binary(judge)
+    # 处理来源：rule（短路规则命中）/ activity（活动标问）/ llm（真正 AI 评测）
+    _source = (judge.get("_source") if isinstance(judge, dict) else None) or "llm"
     row = {
         "row_index": sample["row_index"],
         "session": sample["session"],
@@ -137,8 +139,11 @@ def assemble_row(sample: dict, judge: dict, allowed_intents: set | None = None,
         "judge": judge,
         # 处理来源：judge._source 有值用之（rule/activity），否则 AI 评测 = llm。
         # 供每日频率按来源分维；activity 由聚合层排除，不进评测指标。
-        "source": (judge.get("_source") if isinstance(judge, dict) else None) or "llm",
-        "j_intent": _business_type(judge, allowed_intents, other),
+        "source": _source,
+        # 业务分类只对真正 AI 评测（llm）的行有意义。短路规则命中的行（如「转人工」、
+        # 通配固定答）本就无从归类——不再要求规则配 business_type，此处对 rule/activity
+        # 直接置空 j_intent，聚合层与优化建议据此排除，避免「通用分类」这类占位分类污染报告。
+        "j_intent": _business_type(judge, allowed_intents, other) if _source == "llm" else "",
         "dispatch_correct": dispatch_correct,
         "dispatch_scene": _dispatch_scene(sample, judge),  # 正常/该拒未拒/该分未分
         "j_dispatch": j_dispatch,
@@ -219,25 +224,32 @@ class _StreamAggregator:
             if _dbu:
                 self.dispatched_bus.add(_dbu)
 
+            # 短路规则命中行（source=rule）计入整体解决率/分发等指标，但不进「业务分类」
+            # 维度——它本无从归类（如「转人工」通配问答）。规则的价值是命中即免 LLM +
+            # 报告按规则名聚合，不该出现在分类分布/按分类的优化建议里。
+            is_rule = r.get("source") == "rule"
             intent = r["j_intent"]
-            if intent:
+            if intent and not is_rule:
                 self.intent_dist[intent] += 1
 
-            # 切片(未分类归入 "(未分类)"，与 compute_insights 一致)
-            sl = self.slices[intent or "(未分类)"]
-            sl.count += 1
+            # 分类切片（规则行不进任何切片，避免污染「(未分类)」桶）
             in_bu = bool(r.get("dispatched_to_bu"))
             need_review = is_judge_dict and judge.get("needs_human_review")
-            if need_review:
-                sl.need_review += 1
+            sl = None if is_rule else self.slices[intent or "(未分类)"]
+            if sl is not None:
+                sl.count += 1
+                if need_review:
+                    sl.need_review += 1
             if in_bu:
-                sl.in_bu += 1
                 self.in_bu_total += 1
                 raw = r["j_resolved_raw"]
+                if sl is not None:
+                    sl.in_bu += 1
                 if raw == "yes":
-                    sl.resolved_yes += 1
                     self.resolved_yes_total += 1
-                elif raw in ("no", "partial") and len(sl.examples) < _MAX_UNRESOLVED_EXAMPLES:
+                    if sl is not None:
+                        sl.resolved_yes += 1
+                elif raw in ("no", "partial") and sl is not None and len(sl.examples) < _MAX_UNRESOLVED_EXAMPLES:
                     sl.examples.append(r["question"])
 
             # BU 分发漏斗
@@ -358,7 +370,11 @@ async def _judge_streaming(samples, bu, on_progress, task_id, persist, agg: _Str
             agg.update(cached_batch)
 
     todo = [s for s in samples if s["row_index"] not in done_idx]
-    done_count = len(done_idx)
+    # 进度分子只数属于本次 samples（评测样本）的已完成行——done_idx 还含活动标问行
+    # （_persist_activity 提前落盘），它们不在 samples/total 内，若直接 len(done_idx)
+    # 会让分子 > 分母，进度一开跑就爆表（多文件活动标问多时尤其明显，冲到 150%~200%）。
+    sample_idx = {s["row_index"] for s in samples}
+    done_count = len(done_idx & sample_idx)
     if on_progress:
         on_progress("judging", done_count, total)
 
@@ -437,6 +453,12 @@ async def run_evaluation(paths, bu: BUConfig, on_progress=None, task_id=None, pe
     samples, activity_breakdown, activity_samples = build_all_samples(df, m, bu)
     activity_total = sum(activity_breakdown.values())
     filter_stats["excluded_activity"] = activity_total   # 跳过的活动标问总数,结果页展示
+    # 续跑前清理孤儿行：若底层文件被换成行数更少的版本，旧段尾部行会残留并被全量聚合
+    # 当幽灵行计入。按本次 samples + 活动样本的 row_index 全集做差集删除。
+    if persist and task_id:
+        from datapulse.modules.eval import eval_db
+        valid_idx = {s["row_index"] for s in samples} | {s["row_index"] for s in activity_samples}
+        eval_db.delete_orphan_rows(task_id, valid_idx)
     # 活动标问也落库（source=activity），供每日频率按来源分维；不喂累加器、不计评测指标。
     if persist and task_id and activity_samples:
         _persist_activity(task_id, activity_samples, bu)

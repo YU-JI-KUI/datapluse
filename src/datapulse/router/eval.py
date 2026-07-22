@@ -82,6 +82,19 @@ async def upload(
         with dest.open("wb") as out:
             shutil.copyfileobj(f.file, out)
         saved.append({"filename": f.filename, "file_path": str(dest)})
+    # 按文件名稳定排序再定 file_index：浏览器多选文件的顺序不保证稳定，稳定排序让
+    # file_index → row_index 分段与文件名一一对应，可复现（防未来任何重跑/重传错位）
+    saved.sort(key=lambda s: s["filename"])
+
+    # 快速校验文件是否属于目标 BU（防误传到错误工作区）；失败则清理已存盘文件并报错
+    from datapulse.modules.eval.pipeline import validate_bu_match
+    try:
+        validate_bu_match([s["file_path"] for s in saved], get_bu(bu))
+    except ValueError as e:
+        for s in saved:
+            Path(s["file_path"]).unlink(missing_ok=True)
+        raise ParamError(str(e))
+
     display = _display_name([s["filename"] for s in saved])
     task = _start_task(display, saved[0]["file_path"], get_bu(bu).code, user.username,
                        files=saved)

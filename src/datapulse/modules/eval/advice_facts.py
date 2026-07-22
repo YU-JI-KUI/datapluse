@@ -96,6 +96,9 @@ def build_facts(task_id: str | None, bu: BUConfig, bu_dispatch: dict | None = No
 
     for batch in _store.iter_rows(task_id, batch_size=1000):
         for r in batch:
+            # 规则命中 / 活动标问行不进「按分类」的优化建议归因——它们无业务分类。
+            if r.get("source") in ("rule", "activity"):
+                continue
             judge = r.get("judge") if isinstance(r.get("judge"), dict) else {}
             question = r.get("question", "")
             intent = r.get("j_intent") or "(未分类)"

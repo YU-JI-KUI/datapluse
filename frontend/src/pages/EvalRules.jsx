@@ -29,7 +29,7 @@ const BOOL_FIELDS = [
 ]
 const RESOLVED_OPTS = ['yes', 'partial', 'no', 'unknown']
 const TEXT_FIELDS = [
-  { k: 'business_type',        label: '业务分类', ph: '须为该BU分类清单内的值，否则归兜底桶；通配符规则填「通用分类」' },
+  { k: 'business_type',        label: '业务分类（可选）', ph: '选填；规则命中行不计入业务分类维度，留空即可' },
   { k: 'dispatch_reason',      label: '分发理由' },
   { k: 'business_type_reason', label: '业务分类理由' },
   { k: 'resolved_reason',      label: '解决度理由' },
@@ -219,7 +219,7 @@ export default function EvalRules() {
                 <p className="text-xs text-muted-foreground">
                   匹配语法（类 SQL LIKE）：<code>转人工</code> 精确相等；<code>*</code> 任意问题；
                   <code>%注销%</code> 包含；<code>注销%</code> 前缀；<code>%注销</code> 后缀。
-                  用 <code>*</code> / <code>%like%</code> 时建议把「业务分类」填为「通用分类」，避免混入具体业务分类。
+                  规则命中行不计入业务分类维度（不进分类分布、不进按分类的优化建议），「业务分类」留空即可。
                 </p>
               </div>
               <div className="space-y-1.5">

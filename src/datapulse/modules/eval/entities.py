@@ -120,7 +120,7 @@ class EvalTaskFile(EvalBase):
     file_index = Column(Integer, nullable=False, default=0)   # 任务内序号（0起）
     filename   = Column(Text, nullable=False, default="")
     file_path  = Column(Text, nullable=False, default="")
-    rows       = Column(Integer, nullable=False, default=0)   # 读取后回填，仅展示
+    rows       = Column(Integer, nullable=False, default=0)   # 每文件行数；当前恒为 0（无前端消费，暂不回填），需展示时从 load_and_merge 的 per_file_rows 回写
     created_at = Column(_TS, nullable=False)
     created_by = Column(String(100), nullable=False, default="")
 

@@ -181,6 +181,12 @@ def clear_rows(task_id: str) -> None:
         _repo(s).clear_rows(task_id)
 
 
+def delete_orphan_rows(task_id: str, valid_row_indices: set[int]) -> int:
+    """删除落盘行里 row_index 不在有效集合内的孤儿行（续跑前清理换过的文件残留）。"""
+    with eval_session() as s:
+        return _repo(s).delete_orphan_rows(task_id, valid_row_indices)
+
+
 # 单次 insert 的子批大小：row_json 含答案原文/多轮上下文，单条可能数 KB~数十 KB。
 # 内网 PG 中间层对单次大数据传输有连接超时，过大的 insert 会被切断
 # （server closed the connection unexpectedly）。切小子批，每批独立短事务。

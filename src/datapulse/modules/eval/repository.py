@@ -242,18 +242,25 @@ class EvalRepository:
         """硬删任务主记录 + 逐条结果 + 人工复核 + 文件清单。
 
         返回该任务的物理文件路径列表（供上层 unlink 物理文件）；没删到主记录返回 None。
-        文件路径先查出再删 file 表，避免删完拿不到。
+        文件路径先查出再删，避免删完拿不到。
         """
-        n = self.session.query(EvalTask).filter(EvalTask.task_id == task_id).delete()
-        if not n:
+        # 先取主表 file_path（删除前）——空子表的老任务只有主表有路径，漏收会导致
+        # 物理文件删不掉、磁盘泄漏。上层用 set() 去重，与子表首个同一物理文件天然幂等。
+        task_row = (
+            self.session.query(EvalTask.file_path)
+            .filter(EvalTask.task_id == task_id)
+            .first()
+        )
+        if task_row is None:
             return None
-        # 主记录确实存在才连带清理（先收集文件路径供上层删物理文件）
-        paths = [
-            r.file_path for r in
-            self.session.query(EvalTaskFile.file_path).filter(
-                EvalTaskFile.task_id == task_id).all()
-            if r.file_path
-        ]
+        paths = [r.file_path for r in
+                 self.session.query(EvalTaskFile.file_path).filter(
+                     EvalTaskFile.task_id == task_id).all()
+                 if r.file_path]
+        if task_row.file_path:
+            paths.append(task_row.file_path)
+
+        self.session.query(EvalTask).filter(EvalTask.task_id == task_id).delete()
         self.session.query(EvalTaskRow).filter(EvalTaskRow.task_id == task_id).delete()
         self.session.query(EvalReview).filter(EvalReview.task_id == task_id).delete()
         self.session.query(EvalTaskFile).filter(EvalTaskFile.task_id == task_id).delete()
@@ -266,6 +273,23 @@ class EvalRepository:
         """
         self.session.query(EvalTaskRow).filter(EvalTaskRow.task_id == task_id).delete()
         self.session.query(EvalReview).filter(EvalReview.task_id == task_id).delete()
+
+    def delete_orphan_rows(self, task_id: str, valid_row_indices: set[int]) -> int:
+        """删除该任务落盘行里 row_index 不在 valid_row_indices 内的孤儿行，返回删除数。
+
+        用于续跑前清理：若底层文件被换成行数更少的版本，旧段尾部行会残留（新 df 不再
+        产生这些 row_index，UPSERT 覆盖不到），被全量聚合当幽灵行计入，污染指标/导出。
+        """
+        if not valid_row_indices:
+            return 0
+        return (
+            self.session.query(EvalTaskRow)
+            .filter(
+                EvalTaskRow.task_id == task_id,
+                EvalTaskRow.row_index.notin_(valid_row_indices),
+            )
+            .delete(synchronize_session=False)
+        )
 
     # ── 逐条结果 ──────────────────────────────────────────────────────────────
 

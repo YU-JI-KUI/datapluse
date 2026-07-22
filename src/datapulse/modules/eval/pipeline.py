@@ -81,6 +81,28 @@ def resolve_columns(df: pd.DataFrame) -> dict[str, str]:
 _ROW_SEGMENT = 10_000_000
 
 
+# 上传时抽查多少行判断文件是否属于本 BU（前 N 行全不匹配才判定传错工作区）
+_BU_CHECK_ROWS = 10
+
+
+def validate_bu_match(paths: list[str], bu) -> None:
+    """上传后快速校验日志文件是否属于目标 BU，防误传（如寿险日志传进证券工作区）。
+
+    判据：读每个文件前 _BU_CHECK_ROWS 行的「分发BU」列，只要有一行的值命中该 BU 的
+    dispatch_aliases 就算通过；前 N 行全部不命中，判定该文件不属于本 BU 并报错。
+    只查前几行是够用的启发式：真实日志绝大多数行都分给本 BU，传错时前几行必然全不命中。
+    """
+    for path in paths:
+        df = pd.read_excel(path, nrows=_BU_CHECK_ROWS, dtype=str).fillna("")
+        m = resolve_columns(df)   # 缺必需列会在此抛错，定位清晰
+        col = m["dispatch_bu"]
+        if not any(bu.matches_dispatch(v) for v in df[col].tolist()):
+            raise ValueError(
+                f"该文件的「分发BU」列前 {_BU_CHECK_ROWS} 行均不属于「{bu.name}」，"
+                f"疑似上传到了错误的业务单元工作区，请确认后重新上传"
+            )
+
+
 def load_and_prep(path: str) -> tuple[pd.DataFrame, dict[str, str], dict]:
     """读单个 Excel → 解析列 → 排序 → 打 row_index。多文件走 load_and_merge。"""
     return load_and_merge([path])
@@ -99,22 +121,33 @@ def load_and_merge(paths: list[str]) -> tuple[pd.DataFrame, dict[str, str], dict
     if not paths:
         raise ValueError("至少需要一个文件")
     parts: list[pd.DataFrame] = []
-    m: dict[str, str] = {}
+    seen_keys: set[str] = set()   # 所有文件识别到的逻辑键并集
     per_file_rows: list[int] = []
     for fi, path in enumerate(paths):
         df = pd.read_excel(path, dtype=str).fillna("")
-        fm = resolve_columns(df)
-        if fi == 0:
-            m = fm
+        fm = resolve_columns(df)   # 每个文件独立解析自己的列名
         df = df.copy()
         df["_turn_n"] = pd.to_numeric(df[fm["turn"]], errors="coerce").fillna(0).astype(int)
-        # 文件内按会话+轮次排序（决定段内行号，须稳定），列名统一到首文件的映射键
-        df = df.rename(columns={fm[k]: m[k] for k in fm if k in m and fm[k] != m[k]})
-        df = df.sort_values([m["session"], "_turn_n"]).reset_index(drop=True)
+        # 每个文件用自身映射 fm 把实际列名统一成「逻辑键」列名（如 分发BU→dispatch_bu）。
+        # 关键：不能只认首文件的映射——首文件缺、次文件独有的列（如首文件没打金标、
+        # 次文件打了）必须各自按 fm 重命名并纳入，否则这些列下游取空 → 金标静默丢失、
+        # 校准模式误判成生产模式。逻辑键作统一列名，各文件天然对齐。
+        df = df.rename(columns={fm[k]: k for k in fm})
+        seen_keys.update(fm.keys())
+        df = df.sort_values(["session", "_turn_n"]).reset_index(drop=True)
+        # 段内行号必须 < 段宽，否则会溢出到下一文件的 row_index 段，(task_id,row_index)
+        # 唯一约束下 UPSERT 互相覆盖丢数据。运营上限 5 万远小于段宽，此处兜底防未来放宽。
+        if len(df) >= _ROW_SEGMENT:
+            raise ValueError(
+                f"单个文件行数 {len(df)} 超过分段上限 {_ROW_SEGMENT}，"
+                f"请拆分后再上传（避免 row_index 段溢出导致数据覆盖）"
+            )
         df["_row_index"] = fi * _ROW_SEGMENT + df.index.to_numpy()
         per_file_rows.append(len(df))
         parts.append(df)
     merged = pd.concat(parts, ignore_index=True) if len(parts) > 1 else parts[0]
+    # 统一列名 = 逻辑键本身；m 是逻辑键 → 列名的恒等映射，供下游 _extract_row 取数
+    m = {k: k for k in seen_keys}
     stats = {"total": len(merged), "files": len(paths), "per_file_rows": per_file_rows}
     return merged, m, stats
 
@@ -265,6 +298,12 @@ def build_all_samples(df: pd.DataFrame, m: dict[str, str], bu
     for i in range(len(df)):
         r = _extract_row(df, i, m)
         groups.setdefault(r["session"], []).append(r)
+
+    # 组内按轮次排序：多文件时同一会话可能跨文件（运营按 5 万行硬拆），merged 是各文件
+    # 各自排序后 concat 的，同一 session 的行呈「文件0段+文件1段」两段拼接，整体不保证
+    # 按 turn 有序。若拆分点不在会话边界，prior/next 上下文会取错轮次——此处统一重排根治。
+    for g in groups.values():
+        g.sort(key=lambda r: r["_turn_n"])
 
     samples = []
     activity_samples = []

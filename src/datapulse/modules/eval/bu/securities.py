@@ -45,7 +45,7 @@ SECURITIES = BUConfig(
     name="证券",
     description="平安证券 AI 对话/智能问答系统:用户提问→意图分发→路由到不同 Agent 承接。",
     # 日志「分发BU」列里代表证券的取值。拿到真实日志后按实际值补充(如英文代码)。
-    dispatch_aliases=("证券", "证券业务"),
+    dispatch_aliases=("证券", "证券业务", "证券(跨BU)"),
     intents=_INTENTS,
     mock_intent_rules=_MOCK_RULES,
     mock_module_map=_MODULE_MAP,
