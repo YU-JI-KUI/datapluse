@@ -80,10 +80,16 @@ export default function Eval() {
         if (e.total) setUploadPct(Math.round(e.loaded * 100 / e.total))
       }
       const t = RESP(await evalApi.upload(files, undefined, onProgress))   // 单/多文件；bu 走全局当前 BU
+      // code≠0（如 BU 校验失败）已由 axios 拦截器统一 reject，走下方 catch，不会到这里
       setTask(t)
       startPolling(t.task_id)
     } catch (e) {
-      setError(e.response?.data?.message || '上传失败')
+      // 上传失败必须回到 upload 视图并清掉可能残留的进度轮询与旧任务，
+      // 否则上一次的 EvalProgress 会继续渲染、显示误导性的「准备中」。
+      if (pollRef.current) clearInterval(pollRef.current)
+      setTask(null)
+      setView('upload')
+      setError(e.response?.data?.message || e.message || '上传失败')
     } finally {
       setBusy(false); setUploadPct(0)
     }

@@ -14,7 +14,19 @@ api.interceptors.request.use((config) => {
 
 // 响应拦截：401 跳转登录（登录页本身不跳转，否则 401 错误 toast 会因页面刷新而消失）
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    // 项目约定：HTTP 200 但 body.code≠0 是业务错误（如参数/校验失败）。后端全局异常
+    // 处理器对业务异常返回 200+非零 code，若这里不统一拦截，业务代码会把它当成功、
+    // 拿到 data=null 继续跑（如上传校验失败却进入「准备中」空壳）。此处统一 reject，
+    // 且构造 err.response.data 结构，让现有 .catch(e => e.response?.data?.message) 无缝兼容。
+    const body = res?.data
+    if (body && typeof body === 'object' && 'code' in body && body.code !== 0) {
+      const err = new Error(body.message || '请求失败')
+      err.response = res
+      return Promise.reject(err)
+    }
+    return res
+  },
   (err) => {
     if (err.response?.status === 401 && !window.location.pathname.includes('/login')) {
       localStorage.removeItem('token')
